@@ -1,0 +1,24 @@
+{
+  "name": "@blockurna/audit-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "blockurna-audit": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch --enable-source-maps dist/cli.js",
+    "lint": "echo 'lint: configure eslint in packages/config'",
+    "test": "echo 'test: add later'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@blockurna/sdk": "workspace:*",
+    "ethers": "^6.16.0",
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17"
+  }
+}

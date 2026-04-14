@@ -1,0 +1,28 @@
+{
+  "name": "@blockurna/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo 'lint: configure eslint in packages/config'",
+    "test": "node --test dist/test/snapshot.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@blockurna/shared": "workspace:*",
+    "@noble/ed25519": "^3.0.0",
+    "@noble/hashes": "^1.8.0",
+    "json-canonicalize": "^1.0.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,101 @@
+import { ethers, type Provider } from "ethers";
+
+export type ElectionRegistryElection = {
+  manifestHash: string;
+  authority: string;
+  registryAuthority: string;
+  coordinatorPubKey: string;
+  phase: bigint;
+  createdAtBlock: bigint;
+};
+
+// Minimal ABI fragments required by BU-PVP-1 observer/audit scaffolds.
+// TODO: replace with generated ABI exported from packages/contracts artifacts.
+export const BU_PVP_1_ELECTION_REGISTRY_ABI = [
+  "function electionCount() view returns (uint256)",
+  "function getElection(uint256 electionId) view returns (tuple(bytes32 manifestHash,address authority,address registryAuthority,bytes coordinatorPubKey,uint8 phase,uint64 createdAtBlock))",
+  "function signupCount(uint256 electionId) view returns (uint256)",
+  "function ballotCount(uint256 electionId) view returns (uint256)",
+  "event ElectionCreated(uint256 indexed electionId, bytes32 indexed manifestHash, address indexed authority, address registryAuthority, bytes coordinatorPubKey)",
+  "event PhaseChanged(uint256 indexed electionId, uint8 previousPhase, uint8 newPhase)",
+  "event SignupRecorded(uint256 indexed electionId, bytes32 indexed registryNullifier, bytes votingPubKey)",
+  "event BallotPublished(uint256 indexed electionId, uint256 indexed ballotIndex, bytes32 indexed ballotHash, bytes ciphertext)",
+  "event ActaPublished(uint256 indexed electionId, uint8 kind, bytes32 indexed snapshotHash)",
+] as const;
+
+type ElectionRegistryContract = ethers.Contract & {
+  electionCount: () => Promise<bigint>;
+  getElection: (electionId: number) => Promise<ElectionRegistryElection>;
+  signupCount: (electionId: number) => Promise<bigint>;
+  ballotCount: (electionId: number) => Promise<bigint>;
+  filters: {
+    ActaPublished: (electionId?: number) => ethers.EventFilter;
+  };
+  queryFilter: (
+    event: ethers.EventFilter,
+    fromBlock?: number | string,
+    toBlock?: number | string,
+  ) => Promise<Array<ethers.Log | ethers.EventLog>>;
+};
+
+export function getElectionRegistry(
+  address: string,
+  provider: Provider,
+): ethers.Contract {
+  return new ethers.Contract(address, BU_PVP_1_ELECTION_REGISTRY_ABI, provider);
+}
+
+export async function fetchElectionCount(
+  address: string,
+  provider: Provider,
+): Promise<number> {
+  const c = getElectionRegistry(address, provider) as unknown as ElectionRegistryContract;
+  const count = await c.electionCount();
+  return Number(count);
+}
+
+export async function fetchElection(
+  address: string,
+  provider: Provider,
+  electionId: number,
+): Promise<ElectionRegistryElection> {
+  const c = getElectionRegistry(address, provider) as unknown as ElectionRegistryContract;
+  const e = await c.getElection(electionId);
+  return e;
+}
+
+export async function fetchElectionCounters(
+  address: string,
+  provider: Provider,
+  electionId: number,
+): Promise<{ signups: bigint; ballots: bigint }> {
+  const c = getElectionRegistry(address, provider) as unknown as ElectionRegistryContract;
+  const [signups, ballots] = await Promise.all([
+    c.signupCount(electionId),
+    c.ballotCount(electionId),
+  ]);
+  return { signups, ballots };
+}
+
+export async function fetchActaAnchors(
+  address: string,
+  provider: Provider,
+  electionId: number,
+): Promise<Array<{ kind: number; snapshotHash: string; blockNumber: number; txHash: string }>> {
+  const c = getElectionRegistry(address, provider) as unknown as ElectionRegistryContract;
+  const filter = c.filters.ActaPublished(electionId);
+  const logs = await c.queryFilter(filter, 0, "latest");
+
+  return logs
+    .filter((l): l is ethers.EventLog => "args" in l)
+    .map((l) => {
+      const kind = Number((l.args as any)?.kind ?? 0);
+      const snapshotHash = String((l.args as any)?.snapshotHash ?? "0x");
+      return {
+        kind,
+        snapshotHash,
+        blockNumber: l.blockNumber,
+        txHash: l.transactionHash,
+      };
+    });
+}

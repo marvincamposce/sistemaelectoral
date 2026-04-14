@@ -1,0 +1,36 @@
+{
+  "name": "@blockurna/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "hardhat compile",
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'lint: configure eslint in packages/config'",
+    "node": "hardhat node",
+    "node:lan": "hardhat node --hostname 0.0.0.0",
+    "deploy:localhost": "hardhat run --network localhost scripts/deploy.ts",
+    "demo:localhost": "hardhat run --network localhost scripts/demo.ts"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1"
+  },
+  "devDependencies": {
+    "@blockurna/crypto": "workspace:*",
+    "@nomicfoundation/hardhat-chai-matchers": "^3.0.0",
+    "@nomicfoundation/hardhat-ethers": "^4.0.7",
+    "@nomicfoundation/hardhat-network-helpers": "^3.0.4",
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.3",
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.19.17",
+    "chai": "^5.3.3",
+    "dotenv": "^16.6.1",
+    "hardhat": "^3.3.0",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

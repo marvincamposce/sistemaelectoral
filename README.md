@@ -1,129 +1,133 @@
-# BlockUrna — Sistema de Votación en Blockchain
+# BlockUrna — Sistema Electoral de Referencia (BU‑PVP‑1)
 
-Este repositorio contiene el **Proyecto 2: Sistema de Votación en Blockchain**.
+BlockUrna es un **prototipo de referencia** y una **investigación aplicada** sobre voto electrónico verificable.
 
-## Estructura
+- Protocolo electoral: **BU‑PVP‑1** (voto secreto + escrutinio verificable públicamente).
+- Fuente de verdad: **Tablero Público de Evidencias (TPE)** on-chain.
+- Evidencia formal: **actas digitales (snapshots) firmadas y ancladas**.
+- Observación electoral: **observer portal** con verificación determinista y alertas.
 
-- `landing/` — Landing page del proyecto (Next.js)
-- `BlockUrna/contracts/` — Smart contracts + tests + deploy (Hardhat + Solidity)
-- `BlockUrna/web/` — dApp del sistema de votación (Next.js + ethers)
+No es apto para elecciones públicas vinculantes ni despliegues gubernamentales reales.
 
-## Requisitos cubiertos
+## Repo
 
-- Landing page del proyecto ✅ (`landing/`)
-- Sistema funcional de votación ✅ (`BlockUrna/web/`)
-- Implementación en blockchain (smart contracts) ✅ (`BlockUrna/contracts/`)
-- Mínimo 3 partidos ✅ (se despliega con 3 partidos por defecto)
-- Registro y conteo transparente ✅ (estado y eventos on-chain)
+Este repositorio es un monorepo (pnpm + turborepo):
 
-## Demo local (recomendado para clase)
-
-### 1) Levantar blockchain local
-
-En una terminal:
-
-```bash
-cd BlockUrna/contracts
-npm install
-npm run node
+```text
+apps/        # portales y servicios
+packages/    # contratos, crypto, SDK, tipos compartidos
+docs/        # documento académico + ADRs + protocolo
+infra/       # docker compose local
+legacy/      # implementación anterior preservada
 ```
 
-Esto inicia JSON-RPC en `http://127.0.0.1:8545` con **cuentas de prueba**.
+## Requisitos
 
-### 2) Desplegar el contrato y exportar ABI/dirección a la dApp
-
-En otra terminal:
-
-```bash
-cd BlockUrna/contracts
-npm run deploy:localhost
-```
-
-Esto genera/actualiza el archivo:
-
-- `BlockUrna/web/src/contracts/BlockUrnaElection.json`
-
-### 3) Ejecutar la dApp
-
-En otra terminal:
+- Node.js >= 20
+- pnpm (vía Corepack recomendado)
 
 ```bash
-cd BlockUrna/web
-npm install
-npm run dev -- -p 3001
+corepack enable
+corepack prepare pnpm@9.15.4 --activate
+pnpm -v
 ```
 
-Abrir: `http://localhost:3001`
-
-### 4) Ejecutar la landing
-
-En otra terminal:
+## Comandos
 
 ```bash
-cd landing
-npm install
-npm run dev
+pnpm install
+pnpm build
+pnpm lint
+pnpm test
+pnpm typecheck
 ```
 
-Abrir: `http://localhost:3000`
+## Demo local (contrato + acta)
 
-La landing tiene un botón para ir a la dApp (por defecto apunta a `http://localhost:3001`).
-
-## MetaMask (para demo local)
-
-1. Agrega una red en MetaMask:
-   - **RPC URL**: `http://127.0.0.1:8545`
-   - **Chain ID**: `31337`
-2. Importa 2–3 cuentas usando las private keys que imprime `npm run node`.
-   - La cuenta #0 (primer private key) es el **admin/owner** (la que desplegó el contrato).
-
-> Estas llaves son públicas y solo sirven para demo local.
-
-## Flujo del sistema
-
-- **Admin**
-  - Abre registro → aprueba/rechaza solicitudes → abre votación → cierra votación.
-- **Votante**
-  - Solicita registro (auto-registro) → espera aprobación → vota (1 vez).
-- **Transparencia**
-  - Conteo por partido se consulta on-chain.
-  - Eventos on-chain: solicitudes, aprobaciones/rechazos, votos y cambios de fase.
-
-## Tests (smart contract)
+1) Levanta un nodo local (Hardhat):
 
 ```bash
-cd BlockUrna/contracts
-npm test
+pnpm --filter @blockurna/contracts node
 ```
 
-## Deploy opcional a Sepolia
+Nota: el endpoint `http://127.0.0.1:8545` es **JSON-RPC (POST)**. Si lo abres en el navegador (GET) puede responder con “Parse error”; es normal.
 
-1. Crea un archivo `BlockUrna/contracts/.env` basado en `.env.example`:
+2) En otra terminal, despliega + crea una elección + ancla un acta de apertura:
 
 ```bash
-cd BlockUrna/contracts
-cp .env.example .env
+pnpm --filter @blockurna/contracts demo:localhost
 ```
 
-2. Completa:
+El comando imprime la dirección del contrato y la ruta del acta firmada (JSON).
 
-- `SEPOLIA_RPC_URL`
-- `SEPOLIA_PRIVATE_KEY`
-
-3. Despliega:
+3) Verifica el acta localmente y contra el anclaje on-chain:
 
 ```bash
-cd BlockUrna/contracts
-npm run deploy:sepolia
+pnpm --filter @blockurna/audit-cli build
+node apps/audit-cli/dist/cli.js verify-acta --file packages/contracts/demo-output/acta_apertura.signed.json --rpc http://127.0.0.1:8545 --contract <ADDRESS> --election 0
 ```
 
-Esto también exporta ABI/dirección a la dApp.
+Nota: el acta demo se escribe en `packages/contracts/demo-output/` (evita romper `hardhat compile`).
 
-## Notas de seguridad (MVP)
+4) Observer portal (configura env vars y corre dev):
 
-- Este MVP prioriza **transparencia**; el evento `VoteCast` hace que el voto sea trazable por dirección.
-- Si se requiere **anonimato**, habría que implementar otro esquema (p. ej. commit-reveal o ZK), lo cual aumenta complejidad.
+- Ejemplo de env: [apps/observer-portal/.env.example](apps/observer-portal/.env.example)
 
-## Guía de demo
+```bash
+pnpm --filter @blockurna/observer-portal dev
+```
 
-Ver `docs/DEMO.md`.
+## Observación sin RPC directo (Postgres)
+
+Este modo desacopla el portal del RPC: un indexer consume el RPC y persiste evidencias en Postgres, y una API sirve esas evidencias al portal.
+
+1) Levanta Postgres:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up -d
+```
+
+2) Levanta un nodo local y crea evidencias demo:
+
+```bash
+pnpm --filter @blockurna/contracts node
+pnpm --filter @blockurna/contracts demo:localhost
+```
+
+3) Configura y corre el indexer:
+
+- Ejemplo de env: [apps/evidence-indexer/.env.example](apps/evidence-indexer/.env.example)
+- Define `ELECTION_REGISTRY_ADDRESS` con el `registryAddress` que imprime el deploy/demo.
+
+```bash
+pnpm --filter @blockurna/evidence-indexer dev
+```
+
+4) Configura y corre la API:
+
+- Ejemplo de env: [apps/evidence-api/.env.example](apps/evidence-api/.env.example)
+- Define `ELECTION_REGISTRY_ADDRESS` y `CHAIN_ID` (en localhost suele ser `31337`).
+
+```bash
+pnpm --filter @blockurna/evidence-api dev
+```
+
+La API escucha en `http://127.0.0.1:3020` y expone:
+
+- `GET /` (info)
+- `GET /healthz`
+- `GET /v1/elections`
+
+5) Configura el portal para usar la API:
+
+- Ejemplo de env: [apps/observer-portal/.env.example](apps/observer-portal/.env.example)
+
+```bash
+pnpm --filter @blockurna/observer-portal dev
+```
+
+## Documentación
+
+- Documento académico base: `docs/thesis/BlockUrna_Base.md`
+- Protocolo: `docs/protocol/BU-PVP-1.md`
+- ADRs: `docs/adr/`
