@@ -1,0 +1,17 @@
+# Node
+node_modules/
+
+# Hardhat
+artifacts/
+cache/
+coverage/
+coverage.json
+
+# Ignition
+ignition/deployments/
+
+# Builds
+dist/
+
+# Env
+.env
