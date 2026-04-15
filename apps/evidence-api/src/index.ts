@@ -86,6 +86,14 @@ type SignupRow = {
   logIndex: number;
 };
 
+type SignupWithPermitRow = SignupRow & {
+  permitCredentialId: string | null;
+  permitIssuerAddress: string | null;
+  permitSig: string | null;
+  permitIssuedAt: Date | null;
+  permitRecordedAt: Date | null;
+};
+
 type BallotRow = {
   ballotIndex: string;
   ballotHash: string;
@@ -182,6 +190,43 @@ function requireElectionId(id: string): string {
   return id;
 }
 
+function requireTxHash(txHash: string): string {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+    throw new Error("Invalid txHash");
+  }
+  return txHash.toLowerCase();
+}
+
+function requireLogIndex(logIndex: string): number {
+  if (!/^[0-9]+$/.test(logIndex)) {
+    throw new Error("Invalid logIndex");
+  }
+  return Number(logIndex);
+}
+
+function parseSignupsCursor(cursor: string): { blockNumber: string; logIndex: number } {
+  const raw = String(cursor ?? "");
+  const parts = raw.split(":");
+  if (parts.length !== 2) throw new Error("Invalid cursor");
+  const [blockNumber, logIndex] = parts;
+  if (!blockNumber || !/^[0-9]+$/.test(blockNumber)) throw new Error("Invalid cursor");
+  if (!logIndex || !/^[0-9]+$/.test(logIndex)) throw new Error("Invalid cursor");
+  return { blockNumber, logIndex: Number(logIndex) };
+}
+
+function formatSignupsCursor(params: { blockNumber: string; logIndex: number }): string {
+  return `${params.blockNumber}:${params.logIndex}`;
+}
+
+function computeSignupDigest(params: { electionId: string; registryNullifier: string }): string {
+  return ethers.keccak256(
+    ethers.solidityPacked(
+      ["string", "uint256", "bytes32"],
+      ["BU-PVP-1:signup", BigInt(params.electionId), params.registryNullifier],
+    ),
+  );
+}
+
 async function main() {
   const env = getEnv();
 
@@ -210,6 +255,7 @@ async function main() {
         "/v1/elections/:id/anchors",
         "/v1/elections/:id/signups",
         "/v1/elections/:id/signups/summary",
+        "/v1/elections/:id/signups/:txHash/:logIndex",
         "/v1/elections/:id/ballots",
         "/v1/elections/:id/ballots/summary",
         "/v1/elections/:id/consistency",
@@ -735,29 +781,196 @@ async function main() {
         return { ok: false, error: "election_not_found" };
       }
 
-      const res = await pool.query<SignupRow>(
+      const orderRaw = String((req as any).query?.order ?? "").toLowerCase();
+      const order = orderRaw === "asc" || orderRaw === "desc" ? (orderRaw as "asc" | "desc") : null;
+
+      const limitRaw = (req as any).query?.limit;
+      const parsedLimit = limitRaw === undefined ? null : Number(limitRaw);
+      const limit = parsedLimit === null || Number.isNaN(parsedLimit)
+        ? null
+        : Math.max(1, Math.min(200, parsedLimit));
+
+      const cursorRaw = (req as any).query?.cursor;
+      const cursor = cursorRaw ? parseSignupsCursor(String(cursorRaw)) : null;
+
+      const usePagination = Boolean(limit !== null || order !== null || cursor !== null);
+      const effectiveOrder: "asc" | "desc" = order ?? (usePagination ? "desc" : "asc");
+      const effectiveLimit = usePagination ? (limit ?? 50) : null;
+      const fetchLimit = effectiveLimit ? effectiveLimit + 1 : null;
+
+      const args: Array<string | number> = [chainId, contractAddress, electionId];
+
+      let cursorSql = "";
+      if (cursor) {
+        const blockParam = args.length + 1;
+        args.push(cursor.blockNumber);
+        const logParam = args.length + 1;
+        args.push(cursor.logIndex);
+        cursorSql =
+          effectiveOrder === "asc"
+            ? `AND (s.block_number, s.log_index) > ($${blockParam}::bigint, $${logParam}::int)`
+            : `AND (s.block_number, s.log_index) < ($${blockParam}::bigint, $${logParam}::int)`;
+      }
+
+      let limitSql = "";
+      if (fetchLimit) {
+        args.push(fetchLimit);
+        limitSql = `LIMIT $${args.length}`;
+      }
+
+      const orderSql =
+        effectiveOrder === "asc"
+          ? "ORDER BY s.block_number ASC, s.log_index ASC"
+          : "ORDER BY s.block_number DESC, s.log_index DESC";
+
+      const res = await pool.query<SignupWithPermitRow>(
         `SELECT
-          registry_nullifier AS "registryNullifier",
-          voting_pub_key AS "votingPubKey",
-          block_number::text AS "blockNumber",
-          block_timestamp AS "blockTimestamp",
-          tx_hash AS "txHash",
-          log_index::int AS "logIndex"
-        FROM signup_records
-        WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
-        ORDER BY block_number ASC, log_index ASC`,
-        [chainId, contractAddress, electionId],
+          s.registry_nullifier AS "registryNullifier",
+          s.voting_pub_key AS "votingPubKey",
+          s.block_number::text AS "blockNumber",
+          s.block_timestamp AS "blockTimestamp",
+          s.tx_hash AS "txHash",
+          s.log_index::int AS "logIndex",
+          p.credential_id AS "permitCredentialId",
+          p.issuer_address AS "permitIssuerAddress",
+          p.permit_sig AS "permitSig",
+          p.issued_at AS "permitIssuedAt",
+          p.recorded_at AS "permitRecordedAt"
+        FROM signup_records s
+        LEFT JOIN rea_signup_permits p
+          ON p.chain_id=s.chain_id
+          AND p.contract_address=s.contract_address
+          AND p.election_id=s.election_id
+          AND p.registry_nullifier=s.registry_nullifier
+        WHERE s.chain_id=$1 AND s.contract_address=$2 AND s.election_id=$3
+        ${cursorSql}
+        ${orderSql}
+        ${limitSql}`,
+        args,
       );
+
+      const expectedRegistryAuthority = String(election.registryAuthority ?? "").toLowerCase();
+
+      let rows = res.rows;
+      let hasMore = false;
+      if (effectiveLimit && rows.length > effectiveLimit) {
+        hasMore = true;
+        rows = rows.slice(0, effectiveLimit);
+      }
+
+      const nextCursor =
+        hasMore && rows.length > 0
+          ? formatSignupsCursor({
+              blockNumber: rows[rows.length - 1]!.blockNumber,
+              logIndex: rows[rows.length - 1]!.logIndex,
+            })
+          : null;
 
       return {
         ok: true,
         chainId,
         contractAddress,
         electionId,
-        signups: res.rows.map((r) => ({
-          ...r,
-          blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
-        })),
+        page: usePagination
+          ? { limit: effectiveLimit, order: effectiveOrder, nextCursor }
+          : null,
+        signups: rows.map((r) => {
+          const permit = r.permitSig
+            ? {
+                credentialId: r.permitCredentialId,
+                issuerAddress: r.permitIssuerAddress,
+                permitSig: r.permitSig,
+                issuedAt: r.permitIssuedAt?.toISOString() ?? null,
+                recordedAt: r.permitRecordedAt?.toISOString() ?? null,
+              }
+            : null;
+
+          if (!permit || !permit.permitSig || !permit.issuerAddress) {
+            return {
+              registryNullifier: r.registryNullifier,
+              votingPubKey: r.votingPubKey,
+              blockNumber: r.blockNumber,
+              blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
+              txHash: r.txHash,
+              logIndex: r.logIndex,
+              permit,
+              validity: { status: "UNVERIFIED", reason: "missing_permit_log", recoveredIssuerAddress: null },
+            };
+          }
+
+          const digest = computeSignupDigest({
+            electionId,
+            registryNullifier: r.registryNullifier,
+          });
+
+          const declaredIssuer = String(permit.issuerAddress).toLowerCase();
+          try {
+            const recovered = ethers
+              .verifyMessage(ethers.getBytes(digest), String(permit.permitSig))
+              .toLowerCase();
+
+            if (recovered !== declaredIssuer) {
+              return {
+                registryNullifier: r.registryNullifier,
+                votingPubKey: r.votingPubKey,
+                blockNumber: r.blockNumber,
+                blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
+                txHash: r.txHash,
+                logIndex: r.logIndex,
+                permit,
+                validity: {
+                  status: "INVALID",
+                  reason: "issuer_address_field_mismatch",
+                  recoveredIssuerAddress: recovered,
+                },
+              };
+            }
+
+            if (expectedRegistryAuthority && recovered !== expectedRegistryAuthority) {
+              return {
+                registryNullifier: r.registryNullifier,
+                votingPubKey: r.votingPubKey,
+                blockNumber: r.blockNumber,
+                blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
+                txHash: r.txHash,
+                logIndex: r.logIndex,
+                permit,
+                validity: {
+                  status: "INVALID",
+                  reason: "not_signed_by_registry_authority",
+                  recoveredIssuerAddress: recovered,
+                },
+              };
+            }
+
+            return {
+              registryNullifier: r.registryNullifier,
+              votingPubKey: r.votingPubKey,
+              blockNumber: r.blockNumber,
+              blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
+              txHash: r.txHash,
+              logIndex: r.logIndex,
+              permit,
+              validity: { status: "VALID", reason: null, recoveredIssuerAddress: recovered },
+            };
+          } catch (err: unknown) {
+            return {
+              registryNullifier: r.registryNullifier,
+              votingPubKey: r.votingPubKey,
+              blockNumber: r.blockNumber,
+              blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
+              txHash: r.txHash,
+              logIndex: r.logIndex,
+              permit,
+              validity: {
+                status: "INVALID",
+                reason: "signature_parse_error",
+                recoveredIssuerAddress: null,
+                error: (err as Error).message,
+              },
+            };
+          }
+        }),
       };
     } catch (err: unknown) {
       reply.status(400);
@@ -796,6 +1009,154 @@ async function main() {
             uniqueNullifiers: row.unique_nullifiers,
           },
         };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string; txHash: string; logIndex: string } }>(
+    "/v1/elections/:id/signups/:txHash/:logIndex",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+
+        const txHash = requireTxHash(req.params.txHash);
+        const logIndex = requireLogIndex(req.params.logIndex);
+
+        const res = await pool.query<SignupWithPermitRow>(
+          `SELECT
+            s.registry_nullifier AS "registryNullifier",
+            s.voting_pub_key AS "votingPubKey",
+            s.block_number::text AS "blockNumber",
+            s.block_timestamp AS "blockTimestamp",
+            s.tx_hash AS "txHash",
+            s.log_index::int AS "logIndex",
+            p.credential_id AS "permitCredentialId",
+            p.issuer_address AS "permitIssuerAddress",
+            p.permit_sig AS "permitSig",
+            p.issued_at AS "permitIssuedAt",
+            p.recorded_at AS "permitRecordedAt"
+          FROM signup_records s
+          LEFT JOIN rea_signup_permits p
+            ON p.chain_id=s.chain_id
+            AND p.contract_address=s.contract_address
+            AND p.election_id=s.election_id
+            AND p.registry_nullifier=s.registry_nullifier
+          WHERE s.chain_id=$1 AND s.contract_address=$2 AND s.election_id=$3
+            AND s.tx_hash=$4 AND s.log_index=$5
+          LIMIT 1`,
+          [chainId, contractAddress, electionId, txHash, logIndex],
+        );
+
+        const row = res.rows[0];
+        if (!row) {
+          reply.status(404);
+          return { ok: false, error: "signup_not_found" };
+        }
+
+        const expectedRegistryAuthority = String(election.registryAuthority ?? "").toLowerCase();
+
+        const permit = row.permitSig
+          ? {
+              credentialId: row.permitCredentialId,
+              issuerAddress: row.permitIssuerAddress,
+              permitSig: row.permitSig,
+              issuedAt: row.permitIssuedAt?.toISOString() ?? null,
+              recordedAt: row.permitRecordedAt?.toISOString() ?? null,
+            }
+          : null;
+
+        if (!permit || !permit.permitSig || !permit.issuerAddress) {
+          return {
+            ok: true,
+            chainId,
+            contractAddress,
+            electionId,
+            signup: {
+              registryNullifier: row.registryNullifier,
+              votingPubKey: row.votingPubKey,
+              blockNumber: row.blockNumber,
+              blockTimestamp: row.blockTimestamp?.toISOString() ?? null,
+              txHash: row.txHash,
+              logIndex: row.logIndex,
+              permit,
+              validity: { status: "UNVERIFIED", reason: "missing_permit_log", recoveredIssuerAddress: null },
+            },
+          };
+        }
+
+        const digest = computeSignupDigest({
+          electionId,
+          registryNullifier: row.registryNullifier,
+        });
+
+        const declaredIssuer = String(permit.issuerAddress).toLowerCase();
+        try {
+          const recovered = ethers
+            .verifyMessage(ethers.getBytes(digest), String(permit.permitSig))
+            .toLowerCase();
+
+          const validity =
+            recovered !== declaredIssuer
+              ? {
+                  status: "INVALID",
+                  reason: "issuer_address_field_mismatch",
+                  recoveredIssuerAddress: recovered,
+                }
+              : expectedRegistryAuthority && recovered !== expectedRegistryAuthority
+                ? {
+                    status: "INVALID",
+                    reason: "not_signed_by_registry_authority",
+                    recoveredIssuerAddress: recovered,
+                  }
+                : { status: "VALID", reason: null, recoveredIssuerAddress: recovered };
+
+          return {
+            ok: true,
+            chainId,
+            contractAddress,
+            electionId,
+            signup: {
+              registryNullifier: row.registryNullifier,
+              votingPubKey: row.votingPubKey,
+              blockNumber: row.blockNumber,
+              blockTimestamp: row.blockTimestamp?.toISOString() ?? null,
+              txHash: row.txHash,
+              logIndex: row.logIndex,
+              permit,
+              validity,
+            },
+          };
+        } catch (err: unknown) {
+          return {
+            ok: true,
+            chainId,
+            contractAddress,
+            electionId,
+            signup: {
+              registryNullifier: row.registryNullifier,
+              votingPubKey: row.votingPubKey,
+              blockNumber: row.blockNumber,
+              blockTimestamp: row.blockTimestamp?.toISOString() ?? null,
+              txHash: row.txHash,
+              logIndex: row.logIndex,
+              permit,
+              validity: {
+                status: "INVALID",
+                reason: "signature_parse_error",
+                recoveredIssuerAddress: null,
+                error: (err as Error).message,
+              },
+            },
+          };
+        }
       } catch (err: unknown) {
         reply.status(400);
         return { ok: false, error: (err as Error).message };

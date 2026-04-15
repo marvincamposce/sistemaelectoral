@@ -4,8 +4,17 @@ import fs from "node:fs/promises";
 
 import { Command } from "commander";
 import { ethers } from "ethers";
+import { Pool } from "pg";
 
-import { verifyActaAnchoredOnChain, verifyActaFile } from "@blockurna/sdk";
+import {
+  generateExperimentalRegistryCredential,
+  issueSignupPermit,
+  verifyActaAnchoredOnChain,
+  verifyActaFile,
+  verifySignupPermit,
+} from "@blockurna/sdk";
+
+import { RegistryCredentialSchema, SignupPermitSchema } from "@blockurna/shared";
 
 const program = new Command();
 
@@ -32,6 +41,48 @@ async function fetchJson<T>(url: string): Promise<T> {
     throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
   }
   return (await res.json()) as T;
+}
+
+async function insertReaSignupPermit(params: {
+  databaseUrl: string;
+  permit: {
+    chainId: string;
+    contractAddress: string;
+    electionId: string;
+    registryNullifier: string;
+    credentialId: string;
+    issuerAddress: string;
+    permitSig: string;
+    issuedAt: string;
+  };
+}): Promise<{ ok: boolean; error?: string; pgCode?: string }> {
+  const pool = new Pool({ connectionString: params.databaseUrl });
+  try {
+    await pool.query(
+      `INSERT INTO rea_signup_permits(
+        chain_id, contract_address, election_id,
+        registry_nullifier, credential_id,
+        issuer_address, permit_sig,
+        issued_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        params.permit.chainId,
+        params.permit.contractAddress,
+        params.permit.electionId,
+        params.permit.registryNullifier,
+        params.permit.credentialId,
+        params.permit.issuerAddress,
+        params.permit.permitSig,
+        params.permit.issuedAt,
+      ],
+    );
+    return { ok: true };
+  } catch (err: any) {
+    const pgCode = typeof err?.code === "string" ? err.code : undefined;
+    return { ok: false, error: (err as Error).message, pgCode };
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
 }
 
 program
@@ -273,6 +324,168 @@ program
 
     await fs.writeFile(opts.out, JSON.stringify(bundle, null, 2) + "\n", "utf8");
     console.log(JSON.stringify({ ok: true, out: opts.out, acts: bundleActs.length }, null, 2));
+  });
+
+program
+  .command("rea-credential")
+  .description("Genera una credencial experimental REA (incluye secretHex)")
+  .option("--registry-authority <address>", "Address del REA (opcional)")
+  .option("--subject <label>", "Etiqueta del sujeto (opcional)")
+  .option("--out <path>", "Ruta de salida (JSON)")
+  .action(async (opts) => {
+    const credential = generateExperimentalRegistryCredential({
+      registryAuthority: opts.registryAuthority,
+      subjectLabel: opts.subject,
+    });
+
+    if (opts.out) {
+      await fs.writeFile(opts.out, JSON.stringify(credential, null, 2) + "\n", "utf8");
+    }
+
+    console.log(JSON.stringify({ ok: true, credential, out: opts.out ?? null }, null, 2));
+  });
+
+program
+  .command("rea-issue-permit")
+  .description("Emite un SignupPermit (REA) para una elección y lo firma (EIP-191)")
+  .requiredOption("--credential <path>", "Ruta al JSON de la credencial REA")
+  .requiredOption("--chain <id>", "ChainId (ej: 31337)")
+  .requiredOption("--contract <address>", "Dirección del BU_PVP_1_ElectionRegistry")
+  .requiredOption("--election <id>", "ElectionId (uint256)")
+  .requiredOption("--rea-key <hex>", "Private key del REA (0x...)")
+  .option("--db <url>", "DATABASE_URL Postgres para registrar la bitácora (opcional)")
+  .option("--out <path>", "Ruta de salida (JSON)")
+  .action(async (opts) => {
+    const raw = await fs.readFile(opts.credential, "utf8");
+    const json = JSON.parse(raw) as unknown;
+    const credential = RegistryCredentialSchema.parse(json);
+
+    const permit = await issueSignupPermit({
+      chainId: String(opts.chain),
+      contractAddress: String(opts.contract),
+      electionId: String(opts.election),
+      credential,
+      reaPrivateKey: String(opts.reaKey),
+    });
+
+    const db = typeof opts.db === "string" ? String(opts.db) : null;
+    const dbWrite = db
+      ? await insertReaSignupPermit({
+          databaseUrl: db,
+          permit: {
+            chainId: permit.chainId,
+            contractAddress: permit.contractAddress,
+            electionId: permit.electionId,
+            registryNullifier: permit.registryNullifier,
+            credentialId: permit.credentialId,
+            issuerAddress: permit.issuerAddress,
+            permitSig: permit.permitSig,
+            issuedAt: permit.issuedAt,
+          },
+        })
+      : null;
+
+    if (opts.out) {
+      await fs.writeFile(opts.out, JSON.stringify(permit, null, 2) + "\n", "utf8");
+    }
+
+    const reused = dbWrite && !dbWrite.ok && dbWrite.pgCode === "23505";
+    if (reused) {
+      console.error(JSON.stringify({ ok: false, error: "permit_already_issued", pgCode: dbWrite.pgCode }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(JSON.stringify({ ok: true, permit, out: opts.out ?? null, dbWrite }, null, 2));
+  });
+
+program
+  .command("rea-validate-permit")
+  .description("Verifica un SignupPermit (firma y emisor)")
+  .requiredOption("--permit <path>", "Ruta al JSON del permit")
+  .option("--issuer <address>", "Issuer esperado (opcional)")
+  .action(async (opts) => {
+    const raw = await fs.readFile(opts.permit, "utf8");
+    const json = JSON.parse(raw) as unknown;
+    const permit = SignupPermitSchema.parse(json);
+
+    const verified = verifySignupPermit({
+      permit,
+      expectedIssuerAddress: opts.issuer,
+    });
+
+    console.log(JSON.stringify({ ok: true, verified }, null, 2));
+  });
+
+program
+  .command("rea-signup")
+  .description("Ejecuta signup() on-chain usando un SignupPermit y muestra el resultado")
+  .requiredOption("--permit <path>", "Ruta al JSON del permit")
+  .requiredOption("--rpc <url>", "RPC URL (ej: http://127.0.0.1:8545)")
+  .requiredOption("--contract <address>", "Dirección del BU_PVP_1_ElectionRegistry")
+  .requiredOption("--voter-key <hex>", "Private key del votante (0x...)")
+  .option("--voting-pub-key <hex>", "Voting public key (bytes). Si no se provee, se genera aleatoria")
+  .option("--attempt-twice", "Intenta registrar 2 veces (debería revertir por nullifier reuse)")
+  .action(async (opts) => {
+    const raw = await fs.readFile(opts.permit, "utf8");
+    const json = JSON.parse(raw) as unknown;
+    const permit = SignupPermitSchema.parse(json);
+
+    const contractAddress = ethers.getAddress(String(opts.contract)).toLowerCase();
+    if (permit.contractAddress.toLowerCase() !== contractAddress) {
+      console.error(
+        JSON.stringify(
+          { ok: false, error: "permit_contract_mismatch", permitContract: permit.contractAddress, contractAddress },
+          null,
+          2,
+        ),
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    const provider = new ethers.JsonRpcProvider(String(opts.rpc));
+    const voter = new ethers.Wallet(String(opts.voterKey), provider);
+
+    const votingPubKey =
+      typeof opts.votingPubKey === "string" && String(opts.votingPubKey).length > 0
+        ? String(opts.votingPubKey)
+        : ethers.hexlify(ethers.randomBytes(32));
+
+    const abi = [
+      "function signup(uint256 electionId, bytes32 registryNullifier, bytes votingPubKey, bytes permitSig)",
+    ];
+    const registry = new ethers.Contract(contractAddress, abi, voter) as any;
+
+    const attemptOnce = async () => {
+      const tx = await registry.signup(
+        BigInt(permit.electionId),
+        permit.registryNullifier,
+        votingPubKey,
+        permit.permitSig,
+      );
+      const receipt = await tx.wait();
+      return { txHash: tx.hash, blockNumber: receipt?.blockNumber ?? null };
+    };
+
+    try {
+      const first = await attemptOnce();
+      const out: any = { ok: true, first, electionId: permit.electionId, contractAddress, votingPubKey };
+
+      if (opts.attemptTwice) {
+        try {
+          await attemptOnce();
+          out.second = { ok: true, unexpected: true };
+        } catch (err: unknown) {
+          out.second = { ok: false, error: (err as Error).message };
+        }
+      }
+
+      console.log(JSON.stringify(out, null, 2));
+    } catch (err: unknown) {
+      console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+      process.exitCode = 1;
+    }
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

@@ -47,6 +47,14 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+  try {
+    return await fetchJson<T>(url);
+  } catch {
+    return fallback;
+  }
+}
+
 const CreateElectionInputSchema = z
   .object({
     title: z.string().min(1).max(140),
@@ -223,8 +231,11 @@ export default async function Page() {
 
   const env = envRes.env;
 
-  const electionsRes = await fetchJson<ElectionsApiResponse>(`${env.EVIDENCE_API_URL}/v1/elections`);
-  const elections = electionsRes.elections ?? [];
+  const electionsRes = await safeFetchJson<ElectionsApiResponse | null>(
+    `${env.EVIDENCE_API_URL}/v1/elections`,
+    null,
+  );
+  const elections = electionsRes?.elections ?? [];
 
   return (
     <main className="min-h-screen bg-white text-neutral-900">
@@ -241,7 +252,9 @@ export default async function Page() {
 
         <section className="rounded-lg border border-neutral-200 p-4 space-y-3">
           <div className="text-sm font-medium">Elecciones (lectura desde Evidence API)</div>
-          {elections.length === 0 ? (
+          {electionsRes === null ? (
+            <div className="text-sm text-neutral-600">(Evidence API no disponible)</div>
+          ) : elections.length === 0 ? (
             <div className="text-sm text-neutral-600">(Sin elecciones indexadas todavía)</div>
           ) : (
             <div className="space-y-2">

@@ -1,6 +1,7 @@
 import {
   type SignedSnapshot,
   type SnapshotBody,
+  SnapshotBodySchema,
   SignedSnapshotSchema,
 } from "@blockurna/shared";
 
@@ -12,14 +13,15 @@ export async function signSnapshot(
   snapshot: SnapshotBody,
   privateKeyHex: string,
 ): Promise<SignedSnapshot> {
-  const canonical = canonicalizeJson(snapshot);
+  const normalizedSnapshot = SnapshotBodySchema.parse(snapshot);
+  const canonical = canonicalizeJson(normalizedSnapshot);
   const snapshotHashHex = sha256Hex(canonical);
 
   const publicKeyHex = await getPublicKeyHex(privateKeyHex);
   const signatureHex = await signEd25519Hex(utf8ToBytes(snapshotHashHex), privateKeyHex);
 
   return SignedSnapshotSchema.parse({
-    snapshot,
+    snapshot: normalizedSnapshot,
     signature: {
       algorithm: "ed25519-sha256-jcs",
       publicKeyHex,

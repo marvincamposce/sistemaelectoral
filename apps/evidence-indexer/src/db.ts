@@ -132,6 +132,25 @@ ALTER TABLE signup_records
 CREATE INDEX IF NOT EXISTS signup_records_election_idx
   ON signup_records(chain_id, contract_address, election_id, block_number, log_index);
 
+CREATE TABLE IF NOT EXISTS rea_signup_permits (
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  registry_nullifier TEXT NOT NULL,
+  credential_id TEXT NOT NULL,
+  issuer_address TEXT NOT NULL,
+  permit_sig TEXT NOT NULL,
+  issued_at TIMESTAMPTZ NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (chain_id, contract_address, election_id, registry_nullifier)
+);
+
+CREATE INDEX IF NOT EXISTS rea_signup_permits_election_idx
+  ON rea_signup_permits(chain_id, contract_address, election_id, recorded_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS rea_signup_permits_credential_uniq
+  ON rea_signup_permits(chain_id, contract_address, election_id, credential_id);
+
 CREATE TABLE IF NOT EXISTS ballots (
   chain_id TEXT NOT NULL,
   contract_address TEXT NOT NULL,

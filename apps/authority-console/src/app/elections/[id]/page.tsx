@@ -5,7 +5,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ethers } from "ethers";
 import { signSnapshot } from "@blockurna/crypto";
-import { BU_PVP_1_TRANSITIONS, type ElectoralEventType } from "@blockurna/shared";
+import { BU_PVP_1_TRANSITIONS, nextPhaseFor, type ElectoralEventType } from "@blockurna/shared";
 import { z } from "zod";
 
 import { getEnv, getEnvResult } from "../../../lib/env";
@@ -158,6 +158,8 @@ async function transitionPhaseAction(formData: FormData) {
 
   validateTransitionOrThrow({ currentPhase, event });
 
+  const nextPhase = nextPhaseFor(currentPhase, event);
+
   const fn = EVENT_TO_FUNCTION[event];
   if (!fn) throw new Error(`No contract function mapping for event ${event}`);
 
@@ -174,7 +176,7 @@ async function transitionPhaseAction(formData: FormData) {
     contractAddress: env.CONTRACT_ADDRESS,
     electionId,
     code: event,
-    message: `Phase transition executed: ${currentPhase} -> ${event}`,
+    message: `Phase transition executed: ${currentPhase} -> ${nextPhase}`,
     details: {
       electionId,
       currentPhase,
@@ -250,7 +252,7 @@ async function publishActaAction(formData: FormData) {
     kind: kindLabel,
     generatedAt: new Date().toISOString(),
     chainId: env.CHAIN_ID,
-    blockRange: { fromBlock: 0, toBlock },
+    blockRange: { fromBlock: Number(election.createdAtBlock), toBlock },
     commitments: {
       manifestHash,
     },
@@ -628,8 +630,6 @@ export default async function ElectionPage({
                     >
                       descargar contenido firmado
                     </a>
-                    <span className="text-neutral-400"> · </span>
-                    <Link className="underline" href={`/`}>TPE</Link>
                   </div>
                 </div>
               ))}

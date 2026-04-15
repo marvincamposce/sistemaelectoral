@@ -66,18 +66,6 @@ type SignupsSummaryResponse = {
   summary: { total: number; uniqueNullifiers: number };
 };
 
-type SignupsResponse = {
-  ok: boolean;
-  signups: Array<{
-    registryNullifier: string;
-    votingPubKey: string;
-    blockNumber: string;
-    blockTimestamp: string | null;
-    txHash: string;
-    logIndex: number;
-  }>;
-};
-
 type BallotsSummaryResponse = {
   ok: boolean;
   summary: { total: number; uniqueBallotIndexes: number };
@@ -177,8 +165,11 @@ export default async function Page() {
   const apiBase = env.NEXT_PUBLIC_EVIDENCE_API_URL.replace(/\/$/, "");
   const sourceLabel = `API: ${apiBase}`;
 
-  const electionsRes = await fetchJson<ElectionsApiResponse>(`${apiBase}/v1/elections`);
-  const elections = electionsRes.elections ?? [];
+  const electionsRes = await safeFetchJson<ElectionsApiResponse | null>(
+    `${apiBase}/v1/elections`,
+    null,
+  );
+  const elections = electionsRes?.elections ?? [];
 
   const electionsDetailed = await Promise.all(
     elections.map(async (e) => {
@@ -188,7 +179,6 @@ export default async function Page() {
         actsRes,
         anchorsRes,
         signupsSummaryRes,
-        signupsRes,
         ballotsSummaryRes,
         ballotsRes,
         consistencyRes,
@@ -207,10 +197,6 @@ export default async function Page() {
           `${apiBase}/v1/elections/${id}/signups/summary`,
           { ok: true, summary: { total: 0, uniqueNullifiers: 0 } },
         ),
-        safeFetchJson<SignupsResponse>(`${apiBase}/v1/elections/${id}/signups`, {
-          ok: true,
-          signups: [],
-        }),
         safeFetchJson<BallotsSummaryResponse>(
           `${apiBase}/v1/elections/${id}/ballots/summary`,
           { ok: true, summary: { total: 0, uniqueBallotIndexes: 0 } },
@@ -235,7 +221,6 @@ export default async function Page() {
         acts: actsRes.acts,
         anchors: anchorsRes.anchors,
         signupsSummary: signupsSummaryRes.summary,
-        signups: signupsRes.signups,
         ballotsSummary: ballotsSummaryRes.summary,
         ballots: ballotsRes.ballots,
         consistency: consistencyRes.consistency,
@@ -259,7 +244,11 @@ export default async function Page() {
 
         <section className="rounded-lg border border-neutral-200 p-4">
           <div className="text-sm font-medium">Elecciones registradas</div>
-          <div className="mt-2 text-sm text-neutral-700">Total: {elections.length}</div>
+          {electionsRes === null ? (
+            <div className="mt-2 text-sm text-neutral-700">(Evidence API no disponible)</div>
+          ) : (
+            <div className="mt-2 text-sm text-neutral-700">Total: {elections.length}</div>
+          )}
         </section>
 
         <div className="space-y-4">
@@ -300,15 +289,6 @@ export default async function Page() {
                 logIndex: a.logIndex,
                 label: `ActaPublished kind ${a.kind}`,
                 detail: `snapshotHash: ${a.snapshotHash}`,
-              })),
-              ...e.signups.map((s) => ({
-                key: `signup:${s.txHash}:${s.logIndex}`,
-                blockNumber: s.blockNumber,
-                blockTimestamp: s.blockTimestamp,
-                txHash: s.txHash,
-                logIndex: s.logIndex,
-                label: "SignupRecorded",
-                detail: `nullifier: ${s.registryNullifier}`,
               })),
               ...e.ballots.map((b) => ({
                 key: `ballot:${b.txHash}:${b.logIndex}`,
@@ -365,6 +345,14 @@ export default async function Page() {
                   <div className="text-sm font-medium">{e.counts.signups}</div>
                   <div className="text-xs text-neutral-500">
                     únicos: {e.signupsSummary.uniqueNullifiers}
+                  </div>
+                  <div className="mt-2">
+                    <a
+                      className="text-xs text-neutral-700 underline"
+                      href={`/elections/${encodeURIComponent(String(e.electionId))}/signups`}
+                    >
+                      Abrir signups
+                    </a>
                   </div>
                 </div>
                 <div className="rounded-md border border-neutral-200 p-3">
@@ -570,34 +558,6 @@ export default async function Page() {
                         ))
                       )}
                     </>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">Signups (tabla)</div>
-                <div className="mt-2 space-y-2">
-                  {e.signups.length === 0 ? (
-                    <div className="text-sm text-neutral-600">(Sin signups)</div>
-                  ) : (
-                    e.signups.map((s) => (
-                      <div
-                        key={`${s.txHash}:${s.logIndex}`}
-                        className="rounded-md border border-neutral-200 p-3"
-                      >
-                        <div className="text-xs text-neutral-500">
-                          block {s.blockNumber}
-                          {s.blockTimestamp ? ` · ${s.blockTimestamp}` : ""}
-                        </div>
-                        <div className="text-xs text-neutral-700 break-all">
-                          registryNullifier: {s.registryNullifier}
-                        </div>
-                        <div className="text-xs text-neutral-700 break-all">
-                          votingPubKey: {s.votingPubKey}
-                        </div>
-                        <div className="text-xs text-neutral-700 break-all">tx: {s.txHash}</div>
-                      </div>
-                    ))
                   )}
                 </div>
               </div>

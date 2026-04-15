@@ -33,7 +33,10 @@ const PHASE_LABELS = [
 ] as const;
 
 export function phaseLabelFromNumber(phase: number): ElectoralPhase {
-  const label = PHASE_LABELS[phase] ?? "SETUP";
+  const label = PHASE_LABELS[phase];
+  if (label === undefined) {
+    throw new Error(`Unknown electoral phase number: ${phase}`);
+  }
   return label as ElectoralPhase;
 }
 
