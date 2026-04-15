@@ -3,6 +3,7 @@ import fastify from "fastify";
 import cors from "@fastify/cors";
 import { ethers } from "ethers";
 import { z } from "zod";
+import { decodeBallotCiphertextEnvelope } from "@blockurna/crypto";
 
 import { createPool, ensureSchema } from "./db.js";
 import { runWorkerLoop } from "./worker.js";
@@ -46,14 +47,32 @@ app.post("/v1/mrd/elections/:electionId/signup", async (request, reply) => {
 app.post("/v1/mrd/elections/:electionId/ballot", async (request, reply) => {
   const { electionId } = request.params as any;
   const payload = request.body as any;
+  const ciphertext = typeof payload?.ciphertext === "string" ? payload.ciphertext : "";
 
-  if (!payload.ciphertext) {
+  if (!ciphertext) {
     return reply.status(400).send({ ok: false, error: "Missing required ballot payload fields" });
   }
 
+  let encryptionScheme = "LEGACY_RAW_HEX";
+  try {
+    const envelope = decodeBallotCiphertextEnvelope(ciphertext);
+    encryptionScheme = envelope.version;
+  } catch {
+    // Transitional compatibility: keep accepting old raw hex payloads while clients migrate.
+    if (!/^0x[0-9a-fA-F]+$/.test(ciphertext)) {
+      return reply.status(400).send({ ok: false, error: "Invalid ballot ciphertext format" });
+    }
+  }
+
+  const normalizedPayload = {
+    ...payload,
+    ciphertext,
+    encryptionScheme,
+  };
+
   const res = await pool.query(
     `INSERT INTO mrd_submissions (election_id, kind, payload, status) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [electionId, "BALLOT", payload, "PENDING"]
+    [electionId, "BALLOT", normalizedPayload, "PENDING"]
   );
 
   return { ok: true, submissionId: res.rows[0].id };

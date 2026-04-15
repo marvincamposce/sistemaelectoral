@@ -2,9 +2,17 @@
 
 import { use, useEffect, useState } from "react";
 import { ethers } from "ethers";
+import { encryptBallotPayload } from "@blockurna/crypto";
 import { getPublicEnv } from "@/lib/env";
 
 type WizardStep = "SETUP" | "SIGNUP_FLIGHT" | "VOTING" | "BALLOT_FLIGHT" | "RECEIPT";
+
+type ElectionPhasesResponse = {
+  ok: boolean;
+  election?: {
+    coordinatorPubKey?: string;
+  };
+};
 
 export default function VotePage({ params }: { params: Promise<{ electionId: string }> }) {
   const resolvedParams = use(params);
@@ -57,10 +65,28 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
     setErrorMsg("");
     try {
       if (!selection) throw new Error("Debes seleccionar una opción.");
-      
-      // Mock encryption: In production, fetch coordinatorPubKey from EvidenceAPI and hybrid-encrypt.
-      const payload = JSON.stringify({ selection, timestamp: Date.now() });
-      const ciphertext = ethers.hexlify(ethers.toUtf8Bytes(payload));
+
+      const electionRes = await fetch(
+        `${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/elections/${electionId}/phases`,
+        { cache: "no-store" },
+      );
+      if (!electionRes.ok) {
+        throw new Error("No se pudo obtener coordinatorPubKey de Evidence API");
+      }
+      const electionData = (await electionRes.json()) as ElectionPhasesResponse;
+      const coordinatorPubKey = electionData.election?.coordinatorPubKey;
+      if (typeof coordinatorPubKey !== "string" || coordinatorPubKey.length === 0) {
+        throw new Error("coordinatorPubKey ausente para esta elección");
+      }
+
+      const ciphertext = encryptBallotPayload(
+        {
+          electionId,
+          selection,
+          timestamp: Date.now(),
+        },
+        coordinatorPubKey,
+      );
       
       // We calculate the hash for the receipt
       const hash = ethers.keccak256(ciphertext);

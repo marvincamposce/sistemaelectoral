@@ -11,6 +11,10 @@ export const HexBytesSchema = z
   .string()
   .regex(/^0x[0-9a-fA-F]*$/, "Expected 0x-prefixed hex");
 
+export const Hex24Schema = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]{48}$/, "Expected 0x-prefixed 24-byte hex");
+
 export const EthAddressSchema = z
   .string()
   .regex(/^0x[0-9a-fA-F]{40}$/, "Expected 0x-prefixed 20-byte hex address")
@@ -99,6 +103,23 @@ export const SignedSnapshotSchema = z
   .strict();
 
 export type SignedSnapshot = z.infer<typeof SignedSnapshotSchema>;
+
+// --- Ballot encryption envelope (real ciphertext transport) ---
+
+export const BallotCiphertextEnvelopeVersionSchema = z.literal("BU-PVP-1_BALLOT_X25519_XCHACHA20_V1");
+
+export const BallotCiphertextEnvelopeSchema = z
+  .object({
+    version: BallotCiphertextEnvelopeVersionSchema,
+    kdf: z.literal("X25519"),
+    aead: z.literal("XCHACHA20POLY1305"),
+    ephemeralPublicKeyHex: Hex32Schema,
+    nonceHex: Hex24Schema,
+    ciphertextHex: HexBytesSchema.refine((v) => v.length > 2, "Expected non-empty ciphertext hex"),
+  })
+  .strict();
+
+export type BallotCiphertextEnvelope = z.infer<typeof BallotCiphertextEnvelopeSchema>;
 
 // --- Registry Authority (REA) — experimental eligibility scaffold ---
 
