@@ -1,0 +1,24 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-15T03:25:14.360Z",
+    "chainId": "31337",
+    "contractAddress": "0x59b670e9fa9d0a427751af201d676719a970857b",
+    "title": "Elección de prueba (console)",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+    },
+    "coordinatorPubKey": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "notes": "creada via curl"
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x50a3d30fe447073bc972bd461e2da1d85c10c9eecaa99ac98a18cbd2ac41e0c05e09a475f39f7c0bb3e04b92051a434ef215f32a1f3c12397f32daca56216a0f",
+    "manifestHashHex": "0xbd6f753d97d9302473990bfb46b2b2f48339aa800ce2bdf6db5e85d39f71f748"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-15T03:26:20.602Z",
+    "chainId": "31337",
+    "contractAddress": "0x59b670e9fa9d0a427751af201d676719a970857b",
+    "title": "Elección experimental Grupo A - Abril 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0x1234567890AbcdEF1234567890aBcdef12345678"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Instancia experimental local para pruebas de actas, anclaje y observación."
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0xb2df9867d310bf42854f75ac0d66d3245465b153af0d8f866c0850028129bf455d1e64e364c0977578495aa7676ce0c0a1b607418b059d19c245a2cc59ea580b",
+    "manifestHashHex": "0xe2000d003b9254c89774850e82ef76c08851ba4cf4c041da0e0e47b56eb0172f"
+  }
+}

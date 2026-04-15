@@ -222,6 +222,29 @@ CREATE INDEX IF NOT EXISTS consistency_report_runs_election_idx
   ON consistency_report_runs(chain_id, contract_address, election_id, computed_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS consistency_report_runs_version_uniq
   ON consistency_report_runs(chain_id, contract_address, election_id, data_version);
+
+CREATE TABLE IF NOT EXISTS admin_log_entries (
+  entry_id BIGSERIAL PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT,
+  code TEXT NOT NULL,
+  severity TEXT,
+  message TEXT NOT NULL,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  evidence_pointers JSONB NOT NULL DEFAULT '[]'::jsonb,
+  actor_address TEXT,
+  related_tx_hash TEXT,
+  related_block_number BIGINT,
+  related_block_timestamp TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS admin_log_entries_election_idx
+  ON admin_log_entries(chain_id, contract_address, election_id, created_at DESC, entry_id DESC);
+
+CREATE INDEX IF NOT EXISTS admin_log_entries_created_idx
+  ON admin_log_entries(chain_id, contract_address, created_at DESC, entry_id DESC);
 `;
 
 export function createPool(databaseUrl: string): Pool {

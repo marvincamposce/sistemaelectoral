@@ -718,7 +718,7 @@ async function upsertIncident(params: {
       related_tx_hash, related_block_number, related_block_timestamp,
       related_entity_type, related_entity_id, evidence_pointers,
       active, resolved_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
     ON CONFLICT (chain_id, contract_address, election_id, fingerprint) DO UPDATE SET
       last_seen_at=NOW(),
       occurrences=incident_logs.occurrences + 1,
@@ -742,13 +742,13 @@ async function upsertIncident(params: {
       incident.code,
       incident.severity,
       incident.message,
-      incident.details,
+      JSON.stringify(incident.details),
       incident.relatedTxHash ?? null,
       incident.relatedBlockNumber ?? null,
       incident.relatedBlockTimestamp ?? null,
       incident.relatedEntityType ?? null,
       incident.relatedEntityId ?? null,
-      incident.evidencePointers ?? [],
+      JSON.stringify(incident.evidencePointers ?? []),
       active,
       resolvedAt,
     ],
