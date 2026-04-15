@@ -391,10 +391,43 @@ program
       api: apiBase,
       electionId,
       acts: bundleActs,
+      results: [] as any[],
+      batches: [] as any[],
+      tallyJobs: [] as any[],
+      auditWindow: null as any,
     };
 
+    // Fetch additional data for complete bundle
+    try {
+      const resultsData = await fetchJson<{ ok: boolean; results: any[] }>(
+        `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/results`,
+      );
+      bundle.results = resultsData.results ?? [];
+    } catch { /* optional */ }
+
+    try {
+      const batchesData = await fetchJson<{ ok: boolean; batches: any[] }>(
+        `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/processing/batches`,
+      );
+      bundle.batches = batchesData.batches ?? [];
+    } catch { /* optional */ }
+
+    try {
+      const jobsData = await fetchJson<{ ok: boolean; jobs: any[] }>(
+        `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/tally/jobs`,
+      );
+      bundle.tallyJobs = jobsData.jobs ?? [];
+    } catch { /* optional */ }
+
+    try {
+      const auditData = await fetchJson<{ ok: boolean; auditWindow: any }>(
+        `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/audit-window`,
+      );
+      bundle.auditWindow = auditData.auditWindow ?? null;
+    } catch { /* optional */ }
+
     await fs.writeFile(opts.out, JSON.stringify(bundle, null, 2) + "\n", "utf8");
-    console.log(JSON.stringify({ ok: true, out: opts.out, acts: bundleActs.length }, null, 2));
+    console.log(JSON.stringify({ ok: true, out: opts.out, acts: bundleActs.length, results: bundle.results.length, batches: bundle.batches.length, tallyJobs: bundle.tallyJobs.length }, null, 2));
   });
 
 program
@@ -789,6 +822,103 @@ program
       }
 
       console.log(JSON.stringify(out, null, 2));
+    } catch (err: unknown) {
+      console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("verify-audit-bundle")
+  .description("Descarga y verifica el audit bundle completo de una elección")
+  .requiredOption("--api <url>", "Base URL de evidence-api (ej: http://127.0.0.1:3020)")
+  .requiredOption("--election <id>", "ElectionId (uint256)")
+  .action(async (opts) => {
+    try {
+      const apiBase = normalizeApiBase(opts.api);
+      const electionId = String(opts.election);
+
+      // 1. Fetch the full audit bundle
+      const bundle = await fetchJson<any>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/audit-bundle`);
+
+      if (!bundle.ok) {
+        console.log(JSON.stringify({ ok: false, error: bundle.error ?? "Bundle fetch failed" }, null, 2));
+        process.exitCode = 1;
+        return;
+      }
+
+      // 2. Verify each acta
+      const actaVerifications = [] as any[];
+      for (const acta of (bundle.actas ?? [])) {
+        try {
+          const verify = await fetchJson<any>(
+            `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(acta.actId)}/verify`,
+          );
+          actaVerifications.push({
+            actId: acta.actId,
+            actType: acta.actType,
+            signatureValid: verify.signatureValid,
+            hashMatchesAnchor: verify.hashMatchesAnchor,
+            anchorFoundOnChain: verify.anchorFoundOnChain,
+            consistencyStatus: verify.consistencyStatus,
+          });
+        } catch (err: any) {
+          actaVerifications.push({
+            actId: acta.actId,
+            actType: acta.actType,
+            error: err.message,
+          });
+        }
+      }
+
+      // 3. Check for both required acta types
+      const actaTypes = (bundle.actas ?? []).map((a: any) => a.actType);
+      const hasEscrutinio = actaTypes.includes("ACTA_ESCRUTINIO");
+      const hasResultados = actaTypes.includes("ACTA_RESULTADOS");
+
+      // 4. Summary
+      const result = bundle.resultPayloads?.[0] ?? null;
+
+      console.log(JSON.stringify({
+        ok: true,
+        electionId,
+        bundleHash: bundle.bundleHash,
+        exportStatus: bundle.exportStatus,
+        election: bundle.election,
+        counts: {
+          ballots: bundle.ballotsSummary?.total ?? 0,
+          processingBatches: (bundle.processingBatches ?? []).length,
+          tallyJobs: (bundle.tallyJobs ?? []).length,
+          resultPayloads: (bundle.resultPayloads ?? []).length,
+          actas: (bundle.actas ?? []).length,
+          anchors: (bundle.anchors ?? []).length,
+          incidents: (bundle.incidents ?? []).length,
+        },
+        actaPresence: {
+          ACTA_ESCRUTINIO: hasEscrutinio,
+          ACTA_RESULTADOS: hasResultados,
+          complete: hasEscrutinio && hasResultados,
+        },
+        actaVerifications,
+        resultPayload: result ? {
+          resultMode: result.resultMode,
+          proofState: result.proofState,
+          payloadHash: result.payloadHash,
+          isSimulated: result.resultMode === "SIMULATED",
+        } : null,
+        auditWindow: bundle.auditWindow ? {
+          status: bundle.auditWindow.status,
+          openedAt: bundle.auditWindow.openedAt,
+        } : null,
+        honesty: bundle.honesty,
+        warnings: [
+          ...(result?.resultMode === "SIMULATED" ? ["resultSummary es estático, no proviene de descifrado real"] : []),
+          ...(!hasEscrutinio ? ["Falta ACTA_ESCRUTINIO"] : []),
+          ...(!hasResultados ? ["Falta ACTA_RESULTADOS"] : []),
+          ...(bundle.exportStatus !== "MATERIALIZED" ? ["Bundle no materializado"] : []),
+        ],
+      }, null, 2));
+
     } catch (err: unknown) {
       console.error(JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
       process.exitCode = 1;

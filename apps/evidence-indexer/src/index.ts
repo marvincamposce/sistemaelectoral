@@ -1769,6 +1769,33 @@ async function main() {
             ],
           );
         }
+
+        if (parsed.name === "TallyProofPublished") {
+          const electionId = (parsed.args as any).electionId as bigint;
+          const proofHash = String((parsed.args as any).proofHash);
+          const proofPayload = String((parsed.args as any).proofPayload);
+
+          touchedElectionIds.add(electionId.toString());
+
+          await client.query(
+            `INSERT INTO tally_proofs(
+              chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
+              election_id, proof_hash, proof_payload
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            ON CONFLICT DO NOTHING`,
+            [
+              chainId,
+              contractAddress,
+              txHash,
+              logIndex,
+              blockNumber,
+              blockTimestamp,
+              electionId.toString(),
+              proofHash,
+              proofPayload,
+            ],
+          );
+        }
       }
     });
 

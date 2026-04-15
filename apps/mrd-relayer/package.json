@@ -1,29 +1,31 @@
 {
-  "name": "@blockurna/crypto",
+  "name": "@blockurna/mrd-relayer",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node --enable-source-maps dist/index.js",
     "lint": "echo 'lint: configure eslint in packages/config'",
-    "test": "node --test dist/test/snapshot.test.js",
+    "test": "echo 'test: add later'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@blockurna/crypto": "workspace:*",
+    "@blockurna/sdk": "workspace:*",
     "@blockurna/shared": "workspace:*",
-    "@noble/ed25519": "^3.0.0",
-    "@noble/hashes": "^1.8.0",
+    "@fastify/cors": "^9.0.1",
+    "dotenv": "^16.4.5",
     "ethers": "^6.16.0",
-    "json-canonicalize": "^1.0.6"
+    "fastify": "^4.27.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.5"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.3"
   }
 }

@@ -79,6 +79,12 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         bytes32 indexed snapshotHash
     );
 
+    event TallyProofPublished(
+        uint256 indexed electionId,
+        bytes32 indexed proofHash,
+        bytes proofPayload
+    );
+
     error NotElectionAuthority(uint256 electionId, address caller);
     error WrongPhase(uint256 electionId, Phase expected, Phase actual);
     error RegistryNullifierAlreadyUsed(uint256 electionId, bytes32 nullifier);
@@ -251,6 +257,16 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         bytes32 snapshotHash
     ) external onlyElectionAuthority(electionId) {
         emit ActaPublished(electionId, kind, snapshotHash);
+    }
+
+    /// @notice Publishes a tally proof / batch proof stub.
+    /// @dev In full ZK implementations, this is parsed by a verifier. Currently an abstract evidence stub.
+    function publishTallyProof(
+        uint256 electionId,
+        bytes calldata proofPayload
+    ) external onlyElectionAuthority(electionId) inPhase(electionId, Phase.TALLYING) {
+        bytes32 proofHash = keccak256(proofPayload);
+        emit TallyProofPublished(electionId, proofHash, proofPayload);
     }
 
     function _setPhase(uint256 electionId, Phase newPhase) private {

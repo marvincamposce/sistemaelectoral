@@ -13,9 +13,9 @@ export declare namespace BU_PVP_1_ElectionRegistry {
     }
 
   export interface BU_PVP_1_ElectionRegistryInterface extends Interface {
-    getFunction(nameOrSignature: "archiveElection" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "registryNullifierUsed" | "renounceOwnership" | "signup" | "signupCount" | "startProcessing" | "transferOwnership"): FunctionFragment;
+    getFunction(nameOrSignature: "archiveElection" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyProof" | "registryNullifierUsed" | "renounceOwnership" | "signup" | "signupCount" | "startProcessing" | "transferOwnership"): FunctionFragment;
 
-    getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded"): EventFragment;
+    getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded" | "TallyProofPublished"): EventFragment;
 
     encodeFunctionData(functionFragment: 'archiveElection', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'ballotCount', values: [BigNumberish]): string;
@@ -32,6 +32,7 @@ encodeFunctionData(functionFragment: 'owner', values?: undefined): string;
 encodeFunctionData(functionFragment: 'publishActa', values: [BigNumberish, BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'publishBallot', values: [BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'publishResults', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'publishTallyProof', values: [BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'registryNullifierUsed', values: [BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'renounceOwnership', values?: undefined): string;
 encodeFunctionData(functionFragment: 'signup', values: [BigNumberish, BytesLike, BytesLike, BytesLike]): string;
@@ -54,6 +55,7 @@ decodeFunctionResult(functionFragment: 'owner', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishActa', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishBallot', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishResults', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'publishTallyProof', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'registryNullifierUsed', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'renounceOwnership', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'signup', data: BytesLike): Result;
@@ -127,6 +129,18 @@ decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Re
       export type InputTuple = [electionId: BigNumberish, registryNullifier: BytesLike, votingPubKey: BytesLike];
       export type OutputTuple = [electionId: bigint, registryNullifier: string, votingPubKey: string];
       export interface OutputObject {electionId: bigint, registryNullifier: string, votingPubKey: string };
+      export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
+      export type Filter = TypedDeferredTopicFilter<Event>
+      export type Log = TypedEventLog<Event>
+      export type LogDescription = TypedLogDescription<Event>
+    }
+
+  
+
+    export namespace TallyProofPublishedEvent {
+      export type InputTuple = [electionId: BigNumberish, proofHash: BytesLike, proofPayload: BytesLike];
+      export type OutputTuple = [electionId: bigint, proofHash: string, proofPayload: string];
+      export interface OutputObject {electionId: bigint, proofHash: string, proofPayload: string };
       export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
       export type Filter = TypedDeferredTopicFilter<Event>
       export type Log = TypedEventLog<Event>
@@ -289,6 +303,14 @@ decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Re
     
 
     
+    publishTallyProof: TypedContractMethod<
+      [electionId: BigNumberish, proofPayload: BytesLike, ],
+      [void],
+      'nonpayable'
+    >
+    
+
+    
     registryNullifierUsed: TypedContractMethod<
       [arg0: BigNumberish, arg1: BytesLike, ],
       [boolean],
@@ -414,6 +436,11 @@ getFunction(nameOrSignature: 'publishResults'): TypedContractMethod<
       [void],
       'nonpayable'
     >;
+getFunction(nameOrSignature: 'publishTallyProof'): TypedContractMethod<
+      [electionId: BigNumberish, proofPayload: BytesLike, ],
+      [void],
+      'nonpayable'
+    >;
 getFunction(nameOrSignature: 'registryNullifierUsed'): TypedContractMethod<
       [arg0: BigNumberish, arg1: BytesLike, ],
       [boolean],
@@ -451,6 +478,7 @@ getEvent(key: 'ElectionCreated'): TypedContractEvent<ElectionCreatedEvent.InputT
 getEvent(key: 'OwnershipTransferred'): TypedContractEvent<OwnershipTransferredEvent.InputTuple, OwnershipTransferredEvent.OutputTuple, OwnershipTransferredEvent.OutputObject>;
 getEvent(key: 'PhaseChanged'): TypedContractEvent<PhaseChangedEvent.InputTuple, PhaseChangedEvent.OutputTuple, PhaseChangedEvent.OutputObject>;
 getEvent(key: 'SignupRecorded'): TypedContractEvent<SignupRecordedEvent.InputTuple, SignupRecordedEvent.OutputTuple, SignupRecordedEvent.OutputObject>;
+getEvent(key: 'TallyProofPublished'): TypedContractEvent<TallyProofPublishedEvent.InputTuple, TallyProofPublishedEvent.OutputTuple, TallyProofPublishedEvent.OutputObject>;
 
     filters: {
       
@@ -476,6 +504,10 @@ getEvent(key: 'SignupRecorded'): TypedContractEvent<SignupRecordedEvent.InputTup
 
       'SignupRecorded(uint256,bytes32,bytes)': TypedContractEvent<SignupRecordedEvent.InputTuple, SignupRecordedEvent.OutputTuple, SignupRecordedEvent.OutputObject>;
       SignupRecorded: TypedContractEvent<SignupRecordedEvent.InputTuple, SignupRecordedEvent.OutputTuple, SignupRecordedEvent.OutputObject>;
+    
+
+      'TallyProofPublished(uint256,bytes32,bytes)': TypedContractEvent<TallyProofPublishedEvent.InputTuple, TallyProofPublishedEvent.OutputTuple, TallyProofPublishedEvent.OutputObject>;
+      TallyProofPublished: TypedContractEvent<TallyProofPublishedEvent.InputTuple, TallyProofPublishedEvent.OutputTuple, TallyProofPublishedEvent.OutputObject>;
     
     };
   }

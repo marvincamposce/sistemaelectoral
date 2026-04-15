@@ -120,6 +120,41 @@ type IncidentsResponse = {
   }>;
 };
 
+type ResultsResponse = {
+  ok: boolean;
+  results: Array<{
+    id: string;
+    tallyJobId: string;
+    resultKind: string;
+    payloadJson: any;
+    payloadHash: string;
+    publicationStatus: string;
+    proofState: string;
+    resultMode: string;
+    createdAt: string;
+    publishedAt: string | null;
+  }>;
+};
+
+type AuditWindowResponse = {
+  ok: boolean;
+  auditWindow: null | {
+    id: string;
+    status: string;
+    openedAt: string | null;
+    closesAt: string | null;
+    openedBy: string;
+    notes: string;
+    createdAt: string;
+  };
+};
+
+type AuditBundleResponse = {
+  ok: boolean;
+  bundleHash: string | null;
+  exportStatus: string;
+};
+
 function isCriticalSeverity(severity: string): boolean {
   const s = String(severity ?? "").toUpperCase();
   return s === "CRITICAL" || s === "ERROR";
@@ -183,6 +218,9 @@ export default async function Page() {
         ballotsRes,
         consistencyRes,
         incidentsRes,
+        resultsRes,
+        auditWindowRes,
+        auditBundleRes,
       ] = await Promise.all([
         safeFetchJson<PhaseChangesResponse>(
           `${apiBase}/v1/elections/${id}/phase-changes`,
@@ -213,6 +251,19 @@ export default async function Page() {
           ok: true,
           incidents: [],
         }),
+        safeFetchJson<ResultsResponse>(`${apiBase}/v1/elections/${id}/results`, {
+          ok: true,
+          results: [],
+        }),
+        safeFetchJson<AuditWindowResponse>(`${apiBase}/v1/elections/${id}/audit-window`, {
+          ok: true,
+          auditWindow: null,
+        }),
+        safeFetchJson<AuditBundleResponse>(`${apiBase}/v1/elections/${id}/audit-bundle`, {
+          ok: true,
+          bundleHash: null,
+          exportStatus: "NOT_MATERIALIZED",
+        }),
       ]);
 
       return {
@@ -225,6 +276,10 @@ export default async function Page() {
         ballots: ballotsRes.ballots,
         consistency: consistencyRes.consistency,
         incidents: incidentsRes.incidents,
+        results: resultsRes.results,
+        auditWindow: auditWindowRes.auditWindow,
+        bundleHash: auditBundleRes.bundleHash,
+        bundleExportStatus: auditBundleRes.exportStatus,
       };
     }),
   );
@@ -363,6 +418,61 @@ export default async function Page() {
                   </div>
                 </div>
               </div>
+
+              {e.results && e.results.length > 0 && (() => {
+                const r = e.results[0]!;
+                return (
+                <div className="rounded-md border border-purple-200 bg-purple-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-purple-900">Resultados Experimentales Publicados</div>
+                    <div className="rounded bg-purple-200 px-2 py-0.5 text-xs font-semibold text-purple-800">Result Mode: {r.resultMode}</div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between border-b border-purple-200 pb-2">
+                      <span className="text-xs text-purple-700">Tally Job vinculado:</span>
+                      <span className="text-xs font-mono">{r.tallyJobId.substring(0, 16)}...</span>
+                    </div>
+                    <div className="flex flex-col border-b border-purple-200 pb-2">
+                      <span className="text-xs text-purple-700 mb-1">Payload On-Chain Hash:</span>
+                      <span className="text-xs font-mono break-all bg-white p-1 rounded border border-purple-100">{r.payloadHash}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-purple-700">Proof State:</span>
+                      <span className="text-xs font-mono">{r.proofState}</span>
+                    </div>
+                    <div className="mt-2 border-t border-purple-200 pt-2">
+                      <div className="text-[10px] text-purple-700 bg-purple-100 p-2 rounded">
+                        <strong>Nota de honestidad:</strong> El resultSummary (conteo de votos) es estático y no proviene del descifrado real de los ciphertexts. Los anchorajes on-chain, hashes y conteos de boletas sí son reales.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                );
+              })()}
+
+              {e.auditWindow && (
+                <div className="rounded-md border border-neutral-700 bg-neutral-900 text-white p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-neutral-100">Ventana de Auditoría</div>
+                    <div className={`rounded px-2 py-0.5 text-xs font-bold ${e.auditWindow.status === 'OPEN' ? 'bg-green-600 text-white' : 'bg-neutral-600 text-neutral-300'}`}>{e.auditWindow.status}</div>
+                  </div>
+                  <div className="mt-3 space-y-2 text-xs text-neutral-400">
+                    <div>Abierto por: {e.auditWindow.openedBy}</div>
+                    <div>Fecha Apertura: {e.auditWindow.openedAt}</div>
+                    {e.auditWindow.closesAt && <div>Fecha Cierre: {e.auditWindow.closesAt}</div>}
+                    {e.bundleHash && (
+                      <div className="flex flex-col border-t border-neutral-700 pt-2 mt-2">
+                        <span className="text-neutral-500 mb-1">Bundle Hash:</span>
+                        <span className="font-mono text-neutral-300 break-all bg-neutral-800 p-1 rounded">{e.bundleHash}</span>
+                        <span className="text-neutral-500 mt-1">Estado: {e.bundleExportStatus}</span>
+                      </div>
+                    )}
+                    <div className="mt-2 text-yellow-400 font-bold border border-yellow-700 bg-yellow-900/30 p-2 rounded">
+                      ADVERTENCIA: Resultados basados en pruebas SIMULADAS (ZK SNARK pendiente).
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <div className="text-sm font-medium">Timeline (eventos)</div>

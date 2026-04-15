@@ -263,6 +263,100 @@ CREATE INDEX IF NOT EXISTS admin_log_entries_election_idx
 
 CREATE INDEX IF NOT EXISTS admin_log_entries_created_idx
   ON admin_log_entries(chain_id, contract_address, created_at DESC, entry_id DESC);
+
+CREATE TABLE IF NOT EXISTS tally_proofs (
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  tx_hash TEXT NOT NULL,
+  log_index INTEGER NOT NULL,
+  block_number BIGINT NOT NULL,
+  block_timestamp TIMESTAMPTZ,
+  election_id BIGINT NOT NULL,
+  proof_hash TEXT NOT NULL,
+  proof_payload TEXT NOT NULL,
+  PRIMARY KEY (chain_id, contract_address, tx_hash, log_index)
+);
+CREATE INDEX IF NOT EXISTS tally_proofs_election_idx
+  ON tally_proofs(chain_id, contract_address, election_id, block_number, log_index);    
+
+CREATE TABLE IF NOT EXISTS processing_batches (
+  batch_id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  batch_index INTEGER NOT NULL,
+  input_count INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  error_message TEXT,
+  related_root TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS processing_batches_election_idx
+  ON processing_batches(chain_id, contract_address, election_id, batch_index ASC);
+
+CREATE TABLE IF NOT EXISTS tally_jobs (
+  tally_job_id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  based_on_batch_set TEXT NOT NULL,
+  status TEXT NOT NULL,
+  proof_state TEXT NOT NULL DEFAULT 'NOT_IMPLEMENTED',
+  result_summary JSONB,
+  tally_commitment TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS tally_jobs_election_idx
+  ON tally_jobs(chain_id, contract_address, election_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS result_payloads (
+  id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  tally_job_id TEXT NOT NULL,
+  result_kind TEXT NOT NULL,
+  payload_json JSONB NOT NULL,
+  payload_hash TEXT NOT NULL,
+  publication_status TEXT NOT NULL,
+  proof_state TEXT NOT NULL DEFAULT 'NOT_IMPLEMENTED',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  published_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS result_payloads_election_idx
+  ON result_payloads(chain_id, contract_address, election_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS audit_windows (
+  id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  status TEXT NOT NULL,
+  opened_at TIMESTAMPTZ,
+  closes_at TIMESTAMPTZ,
+  opened_by TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS audit_windows_election_idx
+  ON audit_windows(chain_id, contract_address, election_id);
+
+CREATE TABLE IF NOT EXISTS audit_bundle_exports (
+  id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  bundle_hash TEXT,
+  bundle_manifest_json JSONB,
+  export_status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS audit_bundle_exports_election_idx
+  ON audit_bundle_exports(chain_id, contract_address, election_id, created_at DESC);
 `;
 
 export function createPool(databaseUrl: string): Pool {
@@ -305,6 +399,12 @@ export async function resetEvidenceForContract(params: {
   await pool.query("DELETE FROM ballot_records WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM signups WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM ballots WHERE chain_id=$1 AND contract_address=$2", args);
+  await pool.query("DELETE FROM tally_proofs WHERE chain_id=$1 AND contract_address=$2", args);
+  await pool.query("DELETE FROM processing_batches WHERE chain_id=$1 AND contract_address=$2", args);
+  await pool.query("DELETE FROM tally_jobs WHERE chain_id=$1 AND contract_address=$2", args);
+  await pool.query("DELETE FROM result_payloads WHERE chain_id=$1 AND contract_address=$2", args);
+  await pool.query("DELETE FROM audit_windows WHERE chain_id=$1 AND contract_address=$2", args);
+  await pool.query("DELETE FROM audit_bundle_exports WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM incident_logs WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query(
     "DELETE FROM consistency_report_runs WHERE chain_id=$1 AND contract_address=$2",

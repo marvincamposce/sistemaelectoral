@@ -1243,6 +1243,140 @@ async function main() {
   );
 
   app.get<{ Params: { id: string } }>(
+    "/v1/elections/:id/tally",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+
+        const res = await pool.query<{
+          proof_hash: string;
+          proof_payload: string;
+          tx_hash: string;
+          block_timestamp: Date | null;
+        }>(
+          `SELECT
+            proof_hash,
+            proof_payload,
+            tx_hash,
+            block_timestamp
+          FROM tally_proofs
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          ORDER BY block_number DESC, log_index DESC
+          LIMIT 1`,
+          [chainId, contractAddress, electionId],
+        );
+
+        const proof = res.rows[0] ?? null;
+
+        return {
+          ok: true,
+          chainId,
+          contractAddress,
+          electionId: electionId.toString(),
+          proof: proof ? {
+            proofHash: proof.proof_hash,
+            proofPayload: proof.proof_payload,
+            txHash: proof.tx_hash,
+            blockTimestamp: proof.block_timestamp?.toISOString() ?? null,
+          } : null,
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/v1/elections/:id/processing/batches",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+
+        const res = await pool.query(
+          `SELECT
+            batch_id AS "batchId",
+            batch_index AS "batchIndex",
+            input_count AS "inputCount",
+            status AS "status",
+            error_message AS "errorMessage",
+            related_root AS "relatedRoot",
+            created_at AS "createdAt",
+            started_at AS "startedAt",
+            completed_at AS "completedAt"
+          FROM processing_batches
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          ORDER BY batch_index ASC`,
+          [chainId, contractAddress, electionId],
+        );
+
+        return {
+          ok: true,
+          chainId,
+          contractAddress,
+          electionId: electionId.toString(),
+          batches: res.rows.map(r => ({ ...r, createdAt: r.createdAt?.toISOString(), startedAt: r.startedAt?.toISOString(), completedAt: r.completedAt?.toISOString() })),
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/v1/elections/:id/tally/jobs",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+
+        const res = await pool.query(
+          `SELECT
+            tally_job_id AS "tallyJobId",
+            based_on_batch_set AS "basedOnBatchSet",
+            status AS "status",
+            proof_state AS "proofState",
+            result_summary AS "resultSummary",
+            tally_commitment AS "tallyCommitment",
+            error_message AS "errorMessage",
+            created_at AS "createdAt",
+            completed_at AS "completedAt"
+          FROM tally_jobs
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          ORDER BY created_at DESC`,
+          [chainId, contractAddress, electionId],
+        );
+
+        return {
+          ok: true,
+          chainId,
+          contractAddress,
+          electionId: electionId.toString(),
+          jobs: res.rows.map(r => ({ ...r, createdAt: r.createdAt?.toISOString(), completedAt: r.completedAt?.toISOString() })),
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
     "/v1/elections/:id/consistency",
     async (req, reply) => {
       try {
@@ -1344,6 +1478,272 @@ async function main() {
     }
   });
 
+  app.get<{ Params: { id: string } }>("/v1/elections/:id/results", async (req, reply) => {
+    try {
+      const electionId = requireElectionId(req.params.id);
+      const election = await getElectionMeta(electionId);
+      if (!election) {
+        reply.status(404);
+        return { ok: false, error: "election_not_found" };
+      }
+
+      const res = await pool.query(
+        `SELECT
+          id,
+          tally_job_id AS "tallyJobId",
+          result_kind AS "resultKind",
+          payload_json AS "payloadJson",
+          payload_hash AS "payloadHash",
+          publication_status AS "publicationStatus",
+          proof_state AS "proofState",
+          created_at AS "createdAt",
+          published_at AS "publishedAt"
+        FROM result_payloads
+        WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+        ORDER BY created_at DESC`,
+        [chainId, contractAddress, electionId],
+      );
+
+      return {
+        ok: true,
+        chainId,
+        contractAddress,
+        electionId: electionId.toString(),
+        results: res.rows.map((r) => ({
+          ...r,
+          resultMode: r.proofState === "VERIFIED" ? "VERIFIED" : "SIMULATED",
+          createdAt: r.createdAt.toISOString(),
+          publishedAt: r.publishedAt?.toISOString() ?? null,
+        })),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/v1/elections/:id/audit-window", async (req, reply) => {
+    try {
+      const electionId = requireElectionId(req.params.id);
+      const election = await getElectionMeta(electionId);
+      if (!election) {
+        reply.status(404);
+        return { ok: false, error: "election_not_found" };
+      }
+
+      const res = await pool.query(
+        `SELECT
+          id,
+          status,
+          opened_at AS "openedAt",
+          closes_at AS "closesAt",
+          opened_by AS "openedBy",
+          notes,
+          created_at AS "createdAt"
+        FROM audit_windows
+        WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+        LIMIT 1`,
+        [chainId, contractAddress, electionId],
+      );
+
+      return {
+        ok: true,
+        chainId,
+        contractAddress,
+        electionId: electionId.toString(),
+        auditWindow: res.rows.length ? {
+          ...res.rows[0],
+          openedAt: res.rows[0].openedAt?.toISOString() ?? null,
+          closesAt: res.rows[0].closesAt?.toISOString() ?? null,
+          createdAt: res.rows[0].createdAt.toISOString(),
+        } : null,
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  // ── Result detail ──────────────────────────────────────────────────
+  app.get<{ Params: { id: string; resultId: string } }>(
+    "/v1/elections/:id/results/:resultId",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+        const resultId = String(req.params.resultId);
+
+        const res = await pool.query(
+          `SELECT
+            id,
+            tally_job_id AS "tallyJobId",
+            result_kind AS "resultKind",
+            payload_json AS "payloadJson",
+            payload_hash AS "payloadHash",
+            publication_status AS "publicationStatus",
+            proof_state AS "proofState",
+            created_at AS "createdAt",
+            published_at AS "publishedAt"
+          FROM result_payloads
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND id=$4
+          LIMIT 1`,
+          [chainId, contractAddress, electionId, resultId],
+        );
+
+        if (res.rows.length === 0) {
+          reply.status(404);
+          return { ok: false, error: "result_not_found" };
+        }
+
+        const r = res.rows[0]!;
+        return {
+          ok: true,
+          chainId,
+          contractAddress,
+          electionId: electionId.toString(),
+          result: {
+            ...r,
+            resultMode: r.proofState === "VERIFIED" ? "VERIFIED" : "SIMULATED",
+            createdAt: r.createdAt.toISOString(),
+            publishedAt: r.publishedAt?.toISOString() ?? null,
+          },
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  // ── Audit Bundle ───────────────────────────────────────────────────
+  app.get<{ Params: { id: string } }>("/v1/elections/:id/audit-bundle", async (req, reply) => {
+    try {
+      const electionId = requireElectionId(req.params.id);
+      const election = await getElectionMeta(electionId);
+      if (!election) {
+        reply.status(404);
+        return { ok: false, error: "election_not_found" };
+      }
+
+      // Collect all evidence in one shot
+      const [
+        batchesRes, jobsRes, resultsRes, actsRes, anchorsRes,
+        auditWindowRes, bundleExportRes, ballotsCountRes, incidentsRes,
+      ] = await Promise.all([
+        pool.query(
+          `SELECT batch_id AS "batchId", batch_index AS "batchIndex", input_count AS "inputCount", status, related_root AS "relatedRoot", created_at AS "createdAt", completed_at AS "completedAt"
+           FROM processing_batches WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY batch_index`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT tally_job_id AS "tallyJobId", based_on_batch_set AS "basedOnBatchSet", status, proof_state AS "proofState", result_summary AS "resultSummary", tally_commitment AS "tallyCommitment", created_at AS "createdAt", completed_at AS "completedAt"
+           FROM tally_jobs WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at DESC`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT id, tally_job_id AS "tallyJobId", result_kind AS "resultKind", payload_hash AS "payloadHash", proof_state AS "proofState", publication_status AS "publicationStatus", created_at AS "createdAt", published_at AS "publishedAt"
+           FROM result_payloads WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at DESC`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT act_id AS "actId", act_type AS "actType", content_hash AS "contentHash", verification_status AS "verificationStatus", created_at AS "createdAt"
+           FROM acta_contents WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT kind, snapshot_hash AS "snapshotHash", tx_hash AS "txHash", block_number AS "blockNumber", block_timestamp AS "blockTimestamp"
+           FROM acta_anchors WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY block_number`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT id, status, opened_at AS "openedAt", closes_at AS "closesAt", opened_by AS "openedBy", notes, created_at AS "createdAt"
+           FROM audit_windows WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 LIMIT 1`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT id, bundle_hash AS "bundleHash", bundle_manifest_json AS "bundleManifest", export_status AS "exportStatus", created_at AS "createdAt"
+           FROM audit_bundle_exports WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at DESC LIMIT 1`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT COUNT(*)::int AS c FROM ballot_records WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query(
+          `SELECT fingerprint, code, severity, message, active, occurrences, first_seen_at AS "firstSeenAt", last_seen_at AS "lastSeenAt"
+           FROM incident_logs WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY last_seen_at DESC LIMIT 50`,
+          [chainId, contractAddress, electionId],
+        ),
+      ]);
+
+      const bundleExport = bundleExportRes.rows[0] ?? null;
+
+      return {
+        ok: true,
+        chainId,
+        contractAddress,
+        electionId: electionId.toString(),
+        generatedAt: new Date().toISOString(),
+        bundleHash: bundleExport?.bundleHash ?? null,
+        bundleManifest: bundleExport?.bundleManifest ?? null,
+        exportStatus: bundleExport?.exportStatus ?? "NOT_MATERIALIZED",
+        election: {
+          manifestHash: election.manifestHash,
+          authority: election.authority,
+          registryAuthority: election.registryAuthority,
+          phase: election.phase,
+        },
+        ballotsSummary: { total: ballotsCountRes.rows[0]?.c ?? 0 },
+        processingBatches: batchesRes.rows.map((r: any) => ({
+          ...r,
+          createdAt: r.createdAt?.toISOString() ?? null,
+          completedAt: r.completedAt?.toISOString() ?? null,
+        })),
+        tallyJobs: jobsRes.rows.map((r: any) => ({
+          ...r,
+          createdAt: r.createdAt?.toISOString() ?? null,
+          completedAt: r.completedAt?.toISOString() ?? null,
+        })),
+        resultPayloads: resultsRes.rows.map((r: any) => ({
+          ...r,
+          resultMode: r.proofState === "VERIFIED" ? "VERIFIED" : "SIMULATED",
+          createdAt: r.createdAt?.toISOString() ?? null,
+          publishedAt: r.publishedAt?.toISOString() ?? null,
+        })),
+        actas: actsRes.rows.map((r: any) => ({
+          ...r,
+          createdAt: r.createdAt?.toISOString() ?? null,
+        })),
+        anchors: anchorsRes.rows.map((r: any) => ({
+          ...r,
+          blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
+        })),
+        auditWindow: auditWindowRes.rows[0] ? {
+          ...auditWindowRes.rows[0],
+          openedAt: auditWindowRes.rows[0].openedAt?.toISOString() ?? null,
+          closesAt: auditWindowRes.rows[0].closesAt?.toISOString() ?? null,
+          createdAt: auditWindowRes.rows[0].createdAt?.toISOString() ?? null,
+        } : null,
+        incidents: incidentsRes.rows.map((r: any) => ({
+          ...r,
+          firstSeenAt: r.firstSeenAt?.toISOString() ?? null,
+          lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
+        })),
+        honesty: {
+          resultMode: "SIMULATED",
+          proofState: "SIMULATED",
+          note: "El resultSummary es estático. Los anchorajes on-chain son reales. ZK SNARK pendiente.",
+        },
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
   await app.listen({ host: env.HOST, port: env.PORT });
 }
 
