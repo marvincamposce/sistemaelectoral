@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ethers } from "ethers";
 import { signSnapshot } from "@blockurna/crypto";
@@ -199,6 +200,8 @@ async function transitionPhaseAction(formData: FormData) {
     relatedBlockTimestampIso: blockTimestampIso,
   });
 
+  revalidatePath("/");
+  revalidatePath(`/elections/${electionId}`);
   redirect(`/elections/${electionId}`);
 }
 
@@ -319,6 +322,8 @@ async function publishActaAction(formData: FormData) {
     relatedBlockTimestampIso: blockTimestampIso,
   });
 
+  revalidatePath("/");
+  revalidatePath(`/elections/${electionId}`);
   redirect(`/elections/${electionId}`);
 }
 
@@ -367,6 +372,8 @@ async function registerOperationalIncidentAction(formData: FormData) {
     actorAddress: authorityAddress,
   });
 
+  revalidatePath("/");
+  revalidatePath(`/elections/${electionId}`);
   redirect(`/elections/${electionId}`);
 }
 

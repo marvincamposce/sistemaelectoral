@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS acta_contents (
 
 ALTER TABLE acta_contents
   ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'UNKNOWN';
+ALTER TABLE acta_contents
+  ADD COLUMN IF NOT EXISTS signature_scheme TEXT;
+ALTER TABLE acta_contents
+  ADD COLUMN IF NOT EXISTS signer_address TEXT;
+ALTER TABLE acta_contents
+  ADD COLUMN IF NOT EXISTS signer_role TEXT;
+ALTER TABLE acta_contents
+  ADD COLUMN IF NOT EXISTS signing_digest TEXT;
+ALTER TABLE acta_contents
+  ADD COLUMN IF NOT EXISTS expected_signer_address TEXT;
+ALTER TABLE acta_contents
+  ADD COLUMN IF NOT EXISTS signing_payload JSONB;
 CREATE INDEX IF NOT EXISTS acta_contents_election_idx
   ON acta_contents(chain_id, contract_address, election_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS acta_contents_content_hash_uniq

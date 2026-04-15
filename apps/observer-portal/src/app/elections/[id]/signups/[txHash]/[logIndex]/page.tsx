@@ -42,9 +42,9 @@ type SignupEvidenceResponse =
 
 function validityBadge(status: string): { label: string; className: string } {
   const s = String(status ?? "").toUpperCase();
-  if (s === "VALID") return { label: "VÁLIDA", className: "bg-neutral-900 text-white" };
-  if (s === "UNVERIFIED") return { label: "SIN BITÁCORA", className: "bg-neutral-200 text-neutral-900" };
-  return { label: "INVÁLIDA", className: "bg-neutral-700 text-white" };
+  if (s === "VALID") return { label: "VÁLIDA", className: "badge badge-valid" };
+  if (s === "UNVERIFIED") return { label: "SIN BITÁCORA", className: "badge badge-neutral" };
+  return { label: "INVÁLIDA", className: "badge badge-critical" };
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -62,6 +62,16 @@ async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
+}
+
+function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString("es-MX", {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  } catch { return ts; }
 }
 
 export default async function SignupEvidencePage({
@@ -84,29 +94,20 @@ export default async function SignupEvidencePage({
 
   if (!evidence || !evidence.ok) {
     return (
-      <main className="min-h-screen bg-white text-neutral-900">
-        <div className="mx-auto max-w-5xl p-6 space-y-6">
-          <header className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="text-2xl font-semibold break-all">Signup</h1>
-              <div className="rounded-md px-3 py-1 text-xs font-semibold bg-neutral-200 text-neutral-900">
-                NO ENCONTRADA
-              </div>
-            </div>
-            <div className="text-xs text-neutral-600">
-              Elección #{electionId} · <Link className="underline" href={`/elections/${encodeURIComponent(electionId)}/signups`}>
-                volver
-              </Link>
-            </div>
-            <div className="text-xs text-neutral-500 break-all">API: {apiBase}</div>
-          </header>
-
-          <section className="rounded-lg border border-neutral-200 p-4 space-y-2">
-            <div className="text-sm font-medium">No se encontró el signup</div>
-            <div className="text-sm text-neutral-700 break-all">
-              tx: {txHash} · logIndex: {logIndex}
-            </div>
-          </section>
+      <main className="min-h-screen" style={{ background: "#f8fafc" }}>
+        <div className="mx-auto" style={{ maxWidth: "960px", padding: "2rem 1.5rem" }}>
+          <nav style={{ marginBottom: "1.5rem" }}>
+            <Link href={`/elections/${encodeURIComponent(electionId)}/signups`} className="btn-subtle">← Volver a registros</Link>
+          </nav>
+          <div className="card" style={{ padding: "3rem", textAlign: "center" }}>
+            <span style={{ fontSize: "2rem", marginBottom: "1rem", display: "block" }}>🔍</span>
+            <h1 style={{ fontSize: "1.125rem", fontWeight: 600, color: "#0f172a", marginBottom: "0.5rem" }}>
+              Registro no encontrado
+            </h1>
+            <p style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+              tx: <span className="hash-display">{txHash}</span> · logIndex: {logIndex}
+            </p>
+          </div>
         </div>
       </main>
     );
@@ -116,58 +117,116 @@ export default async function SignupEvidencePage({
   const badge = validityBadge(s.validity?.status);
 
   return (
-    <main className="min-h-screen bg-white text-neutral-900">
-      <div className="mx-auto max-w-5xl p-6 space-y-6">
-        <header className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-semibold break-all">Signup · Evidencia</h1>
-            <div className={`rounded-md px-3 py-1 text-xs font-semibold ${badge.className}`}>{badge.label}</div>
+    <main className="min-h-screen" style={{ background: "#f8fafc" }}>
+      {/* Header */}
+      <header style={{ background: "white", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0, zIndex: 50 }}>
+        <div className="mx-auto" style={{ maxWidth: "960px", padding: "1rem 1.5rem" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span style={{ fontSize: "1.5rem" }}>🔐</span>
+              <div>
+                <h1 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a" }}>
+                  Evidencia de registro
+                </h1>
+                <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                  Elección #{electionId}
+                </p>
+              </div>
+            </div>
+            <span className={badge.className}>{badge.label}</span>
           </div>
-          <div className="text-xs text-neutral-600">
-            Elección #{electionId} · <Link className="underline" href={`/elections/${encodeURIComponent(electionId)}/signups`}>
-              volver
-            </Link>
+        </div>
+      </header>
+
+      <div className="mx-auto" style={{ maxWidth: "960px", padding: "2rem 1.5rem 4rem" }}>
+        <nav style={{ marginBottom: "1.5rem" }}>
+          <Link href={`/elections/${encodeURIComponent(electionId)}/signups`} className="btn-subtle">← Volver a registros</Link>
+        </nav>
+
+        {/* On-chain data */}
+        <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "1.5rem" }}>
+          <h2 className="section-title" style={{ marginBottom: "1rem" }}>Datos on-chain (evento indexado)</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", fontSize: "0.75rem" }}>
+            <MetaRow label="Tx Hash" value={s.txHash} mono />
+            <MetaRow label="Log Index" value={String(s.logIndex)} />
+            <MetaRow label="Bloque" value={s.blockNumber} />
+            <MetaRow label="Timestamp" value={formatTimestamp(s.blockTimestamp)} />
+            <MetaRow label="Registry Nullifier" value={s.registryNullifier} mono />
+            <MetaRow label="Voting PubKey" value={s.votingPubKey} mono />
           </div>
-          <div className="text-xs text-neutral-500 break-all">API: {apiBase}</div>
-        </header>
+        </div>
 
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-2">
-          <div className="text-sm font-medium">On-chain (evento indexado)</div>
-          <div className="text-xs text-neutral-700 break-all">txHash: {s.txHash}</div>
-          <div className="text-xs text-neutral-700">logIndex: {s.logIndex}</div>
-          <div className="text-xs text-neutral-700">blockNumber: {s.blockNumber}</div>
-          <div className="text-xs text-neutral-700">blockTimestamp: {s.blockTimestamp ?? "(sin timestamp)"}</div>
-          <div className="text-xs text-neutral-700 break-all">registryNullifier: {s.registryNullifier}</div>
-          <div className="text-xs text-neutral-700 break-all">votingPubKey: {s.votingPubKey}</div>
-        </section>
-
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-2">
-          <div className="text-sm font-medium">Validez</div>
-          <div className="text-xs text-neutral-700">status: {s.validity.status}</div>
-          <div className="text-xs text-neutral-700">reason: {s.validity.reason ?? "(none)"}</div>
-          <div className="text-xs text-neutral-700 break-all">
-            recoveredIssuerAddress: {s.validity.recoveredIssuerAddress ?? "(none)"}
+        {/* Validity */}
+        <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "1.5rem" }}>
+          <h2 className="section-title" style={{ marginBottom: "1rem" }}>Verificación de validez</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
+            <div>
+              <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Estado</span>
+              <div style={{ marginTop: "0.375rem" }}>
+                <span className={badge.className}>{badge.label}</span>
+              </div>
+            </div>
+            <div>
+              <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Motivo</span>
+              <div style={{ marginTop: "0.375rem", fontSize: "0.8125rem", color: "#475569" }}>
+                {s.validity.reason ?? "(ninguno)"}
+              </div>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Issuer recuperado</span>
+              <div style={{ marginTop: "0.375rem" }}>
+                <span className="hash-display">{s.validity.recoveredIssuerAddress ?? "(ninguno)"}</span>
+              </div>
+            </div>
+            {s.validity.error && (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Error</span>
+                <div style={{ marginTop: "0.375rem", fontSize: "0.75rem", color: "#be123c" }}>
+                  {s.validity.error}
+                </div>
+              </div>
+            )}
           </div>
-          {s.validity.error ? (
-            <div className="text-xs text-neutral-700 break-all">error: {s.validity.error}</div>
-          ) : null}
-        </section>
+        </div>
 
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-2">
-          <div className="text-sm font-medium">Bitácora REA (permit emitido)</div>
+        {/* Permit (REA Log) */}
+        <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
+          <h2 className="section-title" style={{ marginBottom: "1rem" }}>Bitácora REA (permit emitido)</h2>
           {s.permit ? (
-            <>
-              <div className="text-xs text-neutral-700 break-all">credentialId: {s.permit.credentialId ?? "(unknown)"}</div>
-              <div className="text-xs text-neutral-700 break-all">issuerAddress: {s.permit.issuerAddress ?? "(unknown)"}</div>
-              <div className="text-xs text-neutral-700">issuedAt: {s.permit.issuedAt ?? "(unknown)"}</div>
-              <div className="text-xs text-neutral-700">recordedAt: {s.permit.recordedAt ?? "(unknown)"}</div>
-              <div className="text-xs text-neutral-700 break-all">permitSig: {s.permit.permitSig}</div>
-            </>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", fontSize: "0.75rem" }}>
+              <MetaRow label="Credential ID" value={s.permit.credentialId ?? "(desconocido)"} mono />
+              <MetaRow label="Issuer Address" value={s.permit.issuerAddress ?? "(desconocido)"} mono />
+              <MetaRow label="Emitido" value={formatTimestamp(s.permit.issuedAt)} />
+              <MetaRow label="Registrado" value={formatTimestamp(s.permit.recordedAt)} />
+              <MetaRow label="Permit Sig" value={s.permit.permitSig} mono />
+            </div>
           ) : (
-            <div className="text-sm text-neutral-600">(Sin registro de emisión)</div>
+            <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>
+              Sin registro de emisión (el permit no fue registrado en la bitácora de la REA).
+            </p>
           )}
-        </section>
+        </div>
       </div>
+
+      {/* Footer */}
+      <footer style={{ borderTop: "1px solid #e2e8f0", background: "white", padding: "1.5rem", textAlign: "center" }}>
+        <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+        </p>
+      </footer>
     </main>
+  );
+}
+
+function MetaRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+      <span style={{ color: "#94a3b8", fontWeight: 500, minWidth: "140px", flexShrink: 0 }}>{label}</span>
+      {mono ? (
+        <span className="hash-display">{value}</span>
+      ) : (
+        <span style={{ color: "#334155" }}>{value}</span>
+      )}
+    </div>
   );
 }

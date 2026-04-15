@@ -3,7 +3,7 @@ import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { ethers } from "ethers";
-import { canonicalizeJson, sha256Hex, verifySignedSnapshot } from "@blockurna/crypto";
+import { canonicalizeJson, sha256Hex, verifySignedSnapshot, verifyActaECDSASignature } from "@blockurna/crypto";
 
 import { getEnv } from "./env.js";
 import { createPool, ensureSchema } from "./db.js";
@@ -58,6 +58,10 @@ type ActRefRow = {
   contentHash: string | null;
   createdAt: Date | null;
   verificationStatus: string | null;
+  signatureScheme: string | null;
+  signerAddress: string | null;
+  signerRole: string | null;
+  signingDigest: string | null;
   hasCritical: boolean;
   hasWarning: boolean;
 };
@@ -474,6 +478,10 @@ async function main() {
           c.content_hash AS "contentHash",
            c.created_at AS "createdAt",
            c.verification_status AS "verificationStatus",
+           c.signature_scheme AS "signatureScheme",
+           c.signer_address AS "signerAddress",
+           c.signer_role AS "signerRole",
+           c.signing_digest AS "signingDigest",
            COALESCE(i.has_critical, false) AS "hasCritical",
            COALESCE(i.has_warning, false) AS "hasWarning"
         FROM acta_anchors a
@@ -517,6 +525,10 @@ async function main() {
           blockTimestamp: r.blockTimestamp?.toISOString() ?? null,
           contentHash: r.contentHash,
           createdAt: r.createdAt?.toISOString() ?? null,
+          signatureScheme: r.signatureScheme ?? null,
+          signerAddress: r.signerAddress ?? null,
+          signerRole: r.signerRole ?? null,
+          signingDigest: r.signingDigest ?? null,
         })),
       };
     } catch (err: unknown) {
@@ -678,10 +690,23 @@ async function main() {
         );
         const anchorFoundOnChain = (anchorRes.rowCount ?? 0) > 0;
 
-        const contentRes = await pool.query<{ canonicalJson: unknown; signedJson: unknown }>(
+        const contentRes = await pool.query<{ 
+          canonicalJson: unknown; 
+          signedJson: unknown;
+          signatureScheme: string;
+          signerAddress: string;
+          signingDigest: string;
+          signerRole: string;
+          expectedSignerAddress: string;
+        }>(
           `SELECT
             canonical_json AS "canonicalJson",
-            signed_json AS "signedJson"
+            signed_json AS "signedJson",
+            signature_scheme AS "signatureScheme",
+            signer_address AS "signerAddress",
+            signing_digest AS "signingDigest",
+            signer_role AS "signerRole",
+            expected_signer_address AS "expectedSignerAddress"
           FROM acta_contents
           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND act_id=$4
           ORDER BY created_at DESC
@@ -691,14 +716,76 @@ async function main() {
 
         const content = contentRes.rows[0] ?? null;
 
-        const signatureValid = content ? (await verifySignedSnapshot(content.signedJson)).ok : false;
-        const computedHash = content
-          ? sha256Hex(canonicalizeJson(content.canonicalJson)).toLowerCase()
-          : null;
+        let signatureValid = false;
+        let signatureScheme = null;
+        let recoveredSignerAddress = null;
+        let expectedSignerAddress = null;
+        let expectedSignerRole = null;
+        let signatureMatchesExpectedSigner = false;
+        let contentHash = null;
+        let signingDigest = null;
+        let verifyError = null;
+        let verifyErrorCode = null;
+        
+        let hashMatchesAnchor = false;
+        let anchoredHash = actId;
 
-        const hashMatchesAnchor = Boolean(
-          anchorFoundOnChain && computedHash && computedHash === actId,
-        );
+        if (content && typeof content.signedJson === 'object' && content.signedJson !== null && 'signature' in content.signedJson) {
+           const signedJsonObj = content.signedJson as any;
+           signatureScheme = content.signatureScheme || signedJsonObj.signature?.signatureScheme || signedJsonObj.signature?.algorithm;
+           expectedSignerAddress = content.expectedSignerAddress;
+           expectedSignerRole = content.signerRole;
+           
+           if (signatureScheme === "ECDSA_SECP256K1_ETH_V1") {
+             const verification = verifyActaECDSASignature(content.canonicalJson as any, signedJsonObj.signature, expectedSignerAddress);
+             signatureValid = verification.signatureValid;
+             recoveredSignerAddress = verification.recoveredSignerAddress;
+             signatureMatchesExpectedSigner = verification.signerMatchesRole;
+             contentHash = verification.contentHash;
+             signingDigest = verification.signingDigest;
+             if (!verification.ok) {
+               verifyError = verification.error;
+               verifyErrorCode = verification.errorCode;
+             }
+           } else {
+              // Legacy fallback
+              signatureValid = false;
+              verifyError = "UNSUPPORTED_SCHEME";
+              verifyErrorCode = "UNSUPPORTED_SCHEME";
+           }
+
+           hashMatchesAnchor = Boolean(
+             anchorFoundOnChain && (contentHash === actId)
+           );
+           
+           if (!hashMatchesAnchor && anchorFoundOnChain && !verifyErrorCode) {
+              verifyErrorCode = "ANCHORED_HASH_MISMATCH";
+              verifyError = "Hash de contenido no coincide con el anclado on-chain";
+           } else if (!anchorFoundOnChain && !verifyErrorCode) {
+              verifyErrorCode = "ANCHOR_MISSING";
+              verifyError = "No se encontró anclaje on-chain";
+           }
+        } else if (!content) {
+          verifyErrorCode = "INCOMPLETE_METADATA";
+          verifyError = "Contenido no disponible en la base de datos";
+        }
+
+        // Automatic incident generation rule
+        if (verifyErrorCode) {
+           const fingerprint = `act-verify:${actId}:${verifyErrorCode}`;
+           const code = verifyErrorCode;
+           const msg = verifyError ?? "Error de validación desconocido";
+           
+           await pool.query(
+             `INSERT INTO incident_logs (
+               chain_id, contract_address, election_id, fingerprint, code, severity,
+               message, details, related_entity_type, related_entity_id, first_seen_at, last_seen_at, active
+             ) VALUES (
+               $1, $2, $3, $4, $5, 'CRITICAL', $6, '{}'::jsonb, 'ACTA', $7, NOW(), NOW(), true
+             ) ON CONFLICT (chain_id, contract_address, election_id, fingerprint) DO UPDATE SET active=true, last_seen_at=NOW()`,
+             [chainId, contractAddress, electionId, fingerprint, code, msg, actId]
+           );
+        }
 
         const incidentsRes = await pool.query<{
           code: string;
@@ -723,7 +810,7 @@ async function main() {
            WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND fingerprint LIKE $4 AND active=true
            ORDER BY last_seen_at DESC
            LIMIT 50`,
-          [chainId, contractAddress, electionId, `%:${actId}`],
+          [chainId, contractAddress, electionId, `%:${actId}%`],
         );
 
         const severities = new Set(incidentsRes.rows.map((r) => String(r.severity ?? "")));
@@ -733,37 +820,37 @@ async function main() {
             ? "WARNING"
             : "OK";
 
-        const errorDetails =
-          signatureValid && hashMatchesAnchor && anchorFoundOnChain && consistencyStatus === "OK"
-            ? null
-            : {
-                checks: {
-                  contentAvailable: Boolean(content),
-                  anchorFoundOnChain,
-                  signatureValid,
-                  hashMatchesAnchor,
-                },
-                incidents: incidentsRes.rows.map((r) => ({
-                  code: r.code,
-                  severity: r.severity,
-                  message: r.message,
-                  details: r.details,
-                  relatedEntityType: r.relatedEntityType,
-                  relatedEntityId: r.relatedEntityId,
-                  evidencePointers: r.evidencePointers,
-                  detectedAt: r.firstSeenAt.toISOString(),
-                })),
-              };
+        // Old errorDetails block removed
+
+        const verificationStatusResolved = verifyErrorCode === "INVALID_SIGNATURE" ? "INVALID_SIGNATURE" :
+                                         verifyErrorCode === "SIGNER_ROLE_MISMATCH" ? "SIGNER_ROLE_MISMATCH" :
+                                         verifyErrorCode === "CONTENT_HASH_MISMATCH" ? "CONTENT_HASH_MISMATCH" :
+                                         verifyErrorCode === "ANCHORED_HASH_MISMATCH" ? "ANCHORED_HASH_MISMATCH" :
+                                         verifyErrorCode === "ANCHOR_MISSING" ? "ANCHOR_MISSING" :
+                                         verifyErrorCode === "INCOMPLETE_METADATA" ? "INCOMPLETE_METADATA" :
+                                         verifyErrorCode === "UNSUPPORTED_SCHEME" ? "UNSUPPORTED_SCHEME" :
+                                         "VALID";
 
         return {
           ok: true,
           electionId,
           actId,
+          actType: content?.signedJson ? (content.signedJson as any).kind || "UNKNOWN" : "UNKNOWN",
+          signerRole: expectedSignerRole,
+          signatureScheme,
           signatureValid,
+          recoveredSignerAddress,
+          expectedSignerAddress,
+          signerMatchesRole: signatureMatchesExpectedSigner,
+          contentHash,
+          signingDigest,
+          anchoredHash,
           hashMatchesAnchor,
           anchorFoundOnChain,
+          verificationStatus: verificationStatusResolved,
           consistencyStatus,
-          errorDetails,
+          warnings: incidentsRes.rows.filter(x => x.severity === "WARNING").map(x => x.message),
+          errorDetails: verifyError || null,
         };
       } catch (err: unknown) {
         reply.status(400);
@@ -1650,7 +1737,7 @@ async function main() {
           [chainId, contractAddress, electionId],
         ),
         pool.query(
-          `SELECT act_id AS "actId", act_type AS "actType", content_hash AS "contentHash", verification_status AS "verificationStatus", created_at AS "createdAt"
+          `SELECT act_id AS "actId", act_type AS "actType", content_hash AS "contentHash", verification_status AS "verificationStatus", signature_scheme AS "signatureScheme", signer_address AS "signerAddress", signer_role AS "signerRole", signing_digest AS "signingDigest", created_at AS "createdAt"
            FROM acta_contents WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at`,
           [chainId, contractAddress, electionId],
         ),

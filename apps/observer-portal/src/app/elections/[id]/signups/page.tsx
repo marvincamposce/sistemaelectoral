@@ -57,9 +57,9 @@ type SignupsListResponse = {
 
 function validityBadge(status: string): { label: string; className: string } {
   const s = String(status ?? "").toUpperCase();
-  if (s === "VALID") return { label: "VÁLIDA", className: "bg-neutral-900 text-white" };
-  if (s === "UNVERIFIED") return { label: "SIN BITÁCORA", className: "bg-neutral-200 text-neutral-900" };
-  return { label: "INVÁLIDA", className: "bg-neutral-700 text-white" };
+  if (s === "VALID") return { label: "VÁLIDA", className: "badge badge-valid" };
+  if (s === "UNVERIFIED") return { label: "SIN BITÁCORA", className: "badge badge-neutral" };
+  return { label: "INVÁLIDA", className: "badge badge-critical" };
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -76,6 +76,16 @@ async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
+}
+
+function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString("es-MX", {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  } catch { return ts; }
 }
 
 export default async function SignupsPage({
@@ -101,27 +111,17 @@ export default async function SignupsPage({
 
   if (!election || !election.ok) {
     return (
-      <main className="min-h-screen bg-white text-neutral-900">
-        <div className="mx-auto max-w-5xl p-6 space-y-6">
-          <header className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="text-2xl font-semibold break-all">Signups</h1>
-              <div className="rounded-md px-3 py-1 text-xs font-semibold bg-neutral-200 text-neutral-900">
-                NO ENCONTRADA
-              </div>
-            </div>
-            <div className="text-xs text-neutral-600">
-              Elección #{electionId} · <Link className="underline" href="/">volver</Link>
-            </div>
-            <div className="text-xs text-neutral-500 break-all">API: {apiBase}</div>
-          </header>
-
-          <section className="rounded-lg border border-neutral-200 p-4 space-y-2">
-            <div className="text-sm font-medium">No se encontró la elección</div>
-            <div className="text-sm text-neutral-700">
-              La Evidence API configurada no tiene metadatos para esta elección.
-            </div>
-          </section>
+      <main className="min-h-screen" style={{ background: "#f8fafc" }}>
+        <div className="mx-auto" style={{ maxWidth: "960px", padding: "2rem 1.5rem" }}>
+          <nav style={{ marginBottom: "1.5rem" }}>
+            <Link href="/" className="btn-subtle">← Volver al observatorio</Link>
+          </nav>
+          <div className="card" style={{ padding: "3rem", textAlign: "center" }}>
+            <h1 style={{ fontSize: "1.125rem", fontWeight: 600, color: "#0f172a" }}>Elección no encontrada</h1>
+            <p style={{ fontSize: "0.8125rem", color: "#94a3b8", marginTop: "0.5rem" }}>
+              La Evidence API no tiene metadatos para esta elección.
+            </p>
+          </div>
         </div>
       </main>
     );
@@ -140,97 +140,141 @@ export default async function SignupsPage({
 
   const page = list.page;
   const nextCursor = page?.nextCursor ?? null;
-
   const recent = (list.signups ?? []).slice(0, 10);
 
   return (
-    <main className="min-h-screen bg-white text-neutral-900">
-      <div className="mx-auto max-w-5xl p-6 space-y-6">
-        <header className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-semibold break-all">Signups · Elección #{electionId}</h1>
-            <div className="rounded-md px-3 py-1 text-xs font-semibold bg-neutral-200 text-neutral-900">
+    <main className="min-h-screen" style={{ background: "#f8fafc" }}>
+      {/* Header */}
+      <header style={{ background: "white", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0, zIndex: 50 }}>
+        <div className="mx-auto" style={{ maxWidth: "960px", padding: "1rem 1.5rem" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span style={{ fontSize: "1.5rem" }}>📝</span>
+              <div>
+                <h1 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a" }}>
+                  Registros electorales
+                </h1>
+                <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                  Elección #{electionId}
+                </p>
+              </div>
+            </div>
+            <span className="phase-pill">
+              <span className="phase-dot" />
               {election.election.phaseLabel}
-            </div>
+            </span>
           </div>
-          <div className="text-xs text-neutral-600">
-            <Link className="underline" href="/">volver</Link>
+        </div>
+      </header>
+
+      <div className="mx-auto" style={{ maxWidth: "960px", padding: "2rem 1.5rem 4rem" }}>
+        <nav style={{ marginBottom: "1.5rem" }}>
+          <Link href="/" className="btn-subtle">← Volver al observatorio</Link>
+        </nav>
+
+        {/* Summary cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.875rem", marginBottom: "2rem" }}>
+          <div className="stat-card">
+            <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Total registros
+            </span>
+            <span style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>
+              {summary.summary.total}
+            </span>
           </div>
-          <div className="text-xs text-neutral-500 break-all">API: {apiBase}</div>
-        </header>
+          <div className="stat-card">
+            <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Nullifiers únicos
+            </span>
+            <span style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>
+              {summary.summary.uniqueNullifiers}
+            </span>
+          </div>
+          <div className="stat-card">
+            <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Autoridad REA
+            </span>
+            <span className="hash-display" style={{ marginTop: "0.25rem", fontSize: "0.625rem" }}>
+              {election.election.registryAuthority}
+            </span>
+          </div>
+        </div>
 
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-1">
-          <div className="text-sm font-medium">Resumen</div>
-          <div className="text-sm text-neutral-700">total: {summary.summary.total}</div>
-          <div className="text-sm text-neutral-700">nullifiers únicos: {summary.summary.uniqueNullifiers}</div>
-          <div className="text-xs text-neutral-600 break-all">registryAuthority (REA signer): {election.election.registryAuthority}</div>
-        </section>
-
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-3">
-          <div className="text-sm font-medium">Timeline (últimos 10)</div>
-          {recent.length === 0 ? (
-            <div className="text-sm text-neutral-600">(Sin signups)</div>
-          ) : (
-            <div className="space-y-2">
-              {recent.map((s) => {
-                const badge = validityBadge(s.validity?.status);
-                return (
-                  <div key={`${s.txHash}:${s.logIndex}`} className="rounded-md border border-neutral-200 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-xs text-neutral-500">
-                        block {s.blockNumber}
-                        {s.blockTimestamp ? ` · ${s.blockTimestamp}` : ""}
+        {/* Recent signups timeline */}
+        {recent.length > 0 && (
+          <section style={{ marginBottom: "2.5rem" }}>
+            <h2 className="section-title">Últimos registros</h2>
+            <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
+                {recent.map((s) => {
+                  const badge = validityBadge(s.validity?.status);
+                  return (
+                    <div key={`${s.txHash}:${s.logIndex}`} className="timeline-item phase" style={{ paddingBottom: "1rem" }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                            Bloque {s.blockNumber} {s.blockTimestamp ? `· ${formatTimestamp(s.blockTimestamp)}` : ""}
+                          </div>
+                          <div style={{ marginTop: "0.25rem" }}>
+                            <span style={{ fontSize: "0.6875rem", color: "#64748b" }}>Nullifier: </span>
+                            <span className="hash-display">{s.registryNullifier}</span>
+                          </div>
+                          <div style={{ marginTop: "0.25rem" }}>
+                            <span className="hash-display" style={{ fontSize: "0.625rem" }}>{s.txHash}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+                          <span className={badge.className}>{badge.label}</span>
+                          <Link
+                            className="btn-subtle"
+                            href={`/elections/${encodeURIComponent(electionId)}/signups/${encodeURIComponent(s.txHash)}/${encodeURIComponent(String(s.logIndex))}`}
+                          >
+                            Ver ↗
+                          </Link>
+                        </div>
                       </div>
-                      <div className={`rounded px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}>{badge.label}</div>
                     </div>
-                    <div className="text-xs text-neutral-700 break-all">nullifier: {s.registryNullifier}</div>
-                    <div className="text-xs text-neutral-700 break-all">tx: {s.txHash}</div>
-                    <div className="mt-2">
-                      <a
-                        className="text-xs text-neutral-700 underline"
-                        href={`/elections/${encodeURIComponent(electionId)}/signups/${encodeURIComponent(s.txHash)}/${encodeURIComponent(String(s.logIndex))}`}
-                      >
-                        Ver evidencia
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-medium">Tabla (paginada)</div>
-            <div className="text-xs text-neutral-600">
-              {page ? `orden: ${page.order} · limit: ${page.limit}` : ""}
-            </div>
-          </div>
-
+        {/* Full table */}
+        <section style={{ marginBottom: "2.5rem" }}>
+          <h2 className="section-title">Tabla completa (paginada)</h2>
           {list.signups.length === 0 ? (
-            <div className="text-sm text-neutral-600">(Sin signups)</div>
+            <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
+              <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin registros.</p>
+            </div>
           ) : (
-            <div className="space-y-2">
+            <div className="card" style={{ overflow: "hidden" }}>
               {list.signups.map((s) => {
                 const badge = validityBadge(s.validity?.status);
                 const evidenceUrl = `/elections/${encodeURIComponent(electionId)}/signups/${encodeURIComponent(s.txHash)}/${encodeURIComponent(String(s.logIndex))}`;
                 return (
-                  <div key={`${s.txHash}:${s.logIndex}`} className="rounded-md border border-neutral-200 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-xs text-neutral-500">
-                        block {s.blockNumber}
-                        {s.blockTimestamp ? ` · ${s.blockTimestamp}` : ""}
+                  <div key={`${s.txHash}:${s.logIndex}`} className="incident-row" style={{ flexDirection: "column", gap: "0.5rem" }}>
+                    <div className="flex items-center justify-between" style={{ width: "100%" }}>
+                      <div className="flex items-center gap-2">
+                        <span className={badge.className}>{badge.label}</span>
+                        <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                          Bloque {s.blockNumber} · {formatTimestamp(s.blockTimestamp)}
+                        </span>
                       </div>
-                      <div className={`rounded px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}>{badge.label}</div>
+                      <Link className="btn-subtle" href={evidenceUrl}>Ver evidencia ↗</Link>
                     </div>
-                    <div className="text-xs text-neutral-700 break-all">registryNullifier: {s.registryNullifier}</div>
-                    <div className="text-xs text-neutral-700 break-all">votingPubKey: {s.votingPubKey}</div>
-                    <div className="text-xs text-neutral-700 break-all">tx: {s.txHash}</div>
-                    <div className="mt-2">
-                      <a className="text-xs text-neutral-700 underline" href={evidenceUrl}>
-                        Ver evidencia
-                      </a>
+                    <div style={{ fontSize: "0.6875rem" }}>
+                      <span style={{ color: "#94a3b8", fontWeight: 500 }}>Nullifier: </span>
+                      <span className="hash-display">{s.registryNullifier}</span>
+                    </div>
+                    <div style={{ fontSize: "0.6875rem" }}>
+                      <span style={{ color: "#94a3b8", fontWeight: 500 }}>Voting PubKey: </span>
+                      <span className="hash-display">{s.votingPubKey}</span>
+                    </div>
+                    <div style={{ fontSize: "0.6875rem" }}>
+                      <span style={{ color: "#94a3b8", fontWeight: 500 }}>Tx: </span>
+                      <span className="hash-display">{s.txHash}</span>
                     </div>
                   </div>
                 );
@@ -238,30 +282,35 @@ export default async function SignupsPage({
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-3 pt-2">
-            <div className="text-xs text-neutral-600 break-all">
-              {cursor ? `cursor: ${cursor}` : ""}
+          {/* Pagination */}
+          <div className="flex items-center justify-between" style={{ marginTop: "1rem", fontSize: "0.75rem" }}>
+            <div style={{ color: "#94a3b8" }}>
+              {cursor && <span className="hash-display" style={{ fontSize: "0.625rem" }}>cursor: {cursor}</span>}
             </div>
             <div className="flex items-center gap-3">
-              {cursor ? (
-                <a className="text-xs text-neutral-700 underline" href={`/elections/${encodeURIComponent(electionId)}/signups`}>
-                  Inicio
-                </a>
-              ) : null}
+              {cursor && (
+                <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/signups`}>
+                  ← Inicio
+                </Link>
+              )}
               {nextCursor ? (
-                <a
-                  className="text-xs text-neutral-700 underline"
-                  href={`/elections/${encodeURIComponent(electionId)}/signups?cursor=${encodeURIComponent(nextCursor)}`}
-                >
-                  Siguiente
-                </a>
+                <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/signups?cursor=${encodeURIComponent(nextCursor)}`}>
+                  Siguiente →
+                </Link>
               ) : (
-                <div className="text-xs text-neutral-600">(Fin)</div>
+                <span style={{ color: "#94a3b8" }}>(Fin)</span>
               )}
             </div>
           </div>
         </section>
       </div>
+
+      {/* Footer */}
+      <footer style={{ borderTop: "1px solid #e2e8f0", background: "white", padding: "1.5rem", textAlign: "center" }}>
+        <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+        </p>
+      </footer>
     </main>
   );
 }

@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { getPublicEnv } from "./../lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+/* ─── Type definitions (unchanged from original) ─── */
 
 type ElectionsApiResponse = {
   ok: boolean;
@@ -46,6 +49,12 @@ type ActsResponse = {
     blockTimestamp: string | null;
     contentHash: string | null;
     createdAt: string | null;
+    verificationStatus?: string | null;
+    signatureScheme?: string | null;
+    signerAddress?: string | null;
+    signerRole?: string | null;
+    signingDigest?: string | null;
+    expectedSignerAddress?: string | null;
   }>;
 };
 
@@ -155,6 +164,8 @@ type AuditBundleResponse = {
   exportStatus: string;
 };
 
+/* ─── Helpers (logic unchanged) ─── */
+
 function isCriticalSeverity(severity: string): boolean {
   const s = String(severity ?? "").toUpperCase();
   return s === "CRITICAL" || s === "ERROR";
@@ -165,17 +176,32 @@ function isWarningSeverity(severity: string): boolean {
   return s === "WARNING" || s === "WARN";
 }
 
-function severityBadgeClasses(severity: string): string {
-  if (isCriticalSeverity(severity)) return "bg-neutral-900 text-white";
-  if (isWarningSeverity(severity)) return "bg-neutral-700 text-white";
-  return "bg-neutral-200 text-neutral-900";
-}
-
 function normalizeSeverityLabel(severity: string): string {
   const s = String(severity ?? "").toUpperCase();
   if (s === "ERROR") return "CRITICAL";
   if (s === "WARN") return "WARNING";
   return s.length > 0 ? s : "UNKNOWN";
+}
+
+function severityBadgeClass(severity: string): string {
+  if (isCriticalSeverity(severity)) return "badge badge-critical";
+  if (isWarningSeverity(severity)) return "badge badge-warning";
+  return "badge badge-neutral";
+}
+
+function verificationBadgeClass(status: string | null | undefined): string {
+  if (status === "VALID") return "badge badge-valid";
+  if (
+    [
+      "INVALID_SIGNATURE",
+      "SIGNER_ROLE_MISMATCH",
+      "CONTENT_HASH_MISMATCH",
+      "ANCHORED_HASH_MISMATCH",
+      "ANCHOR_MISSING",
+    ].includes(status || "")
+  )
+    return "badge badge-critical";
+  return "badge badge-warning";
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -194,11 +220,93 @@ async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
   }
 }
 
+function fullHash(hash: string | null | undefined): string {
+  if (!hash) return "—";
+  return hash;
+}
+
+function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString("es-MX", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return ts;
+  }
+}
+
+const ACTA_TYPE_LABELS: Record<string, string> = {
+  ACTA_APERTURA: "Acta de Apertura",
+  ACTA_CIERRE: "Acta de Cierre",
+  ACTA_ESCRUTINIO: "Acta de Escrutinio",
+  ACTA_RESULTADOS: "Acta de Resultados",
+};
+
+const ACTA_TYPE_ICONS: Record<string, string> = {
+  ACTA_APERTURA: "📋",
+  ACTA_CIERRE: "🔒",
+  ACTA_ESCRUTINIO: "📊",
+  ACTA_RESULTADOS: "📜",
+};
+
+function actaLabel(type: string): string {
+  return ACTA_TYPE_LABELS[type] ?? type;
+}
+
+/* ─── SVG Icons ─── */
+
+function IconShield() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  );
+}
+
+function IconAlert() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  );
+}
+
+function IconExternalLink() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+    </svg>
+  );
+}
+
+function IconChevronDown() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  );
+}
+
+/* ─── Page Component ─── */
+
 export default async function Page() {
   const env = getPublicEnv();
-
   const apiBase = env.NEXT_PUBLIC_EVIDENCE_API_URL.replace(/\/$/, "");
-  const sourceLabel = `API: ${apiBase}`;
 
   const electionsRes = await safeFetchJson<ElectionsApiResponse | null>(
     `${apiBase}/v1/elections`,
@@ -285,429 +393,649 @@ export default async function Page() {
   );
 
   return (
-    <main className="min-h-screen bg-white text-neutral-900">
-      <div className="mx-auto max-w-5xl p-6 space-y-6">
-        <header className="space-y-2">
-          <h1 className="text-3xl font-semibold">Observación electoral (BU‑PVP‑1)</h1>
-          <p className="text-sm text-neutral-700">
-            Tablero público de evidencias: fases, actas ancladas y verificación básica.
-          </p>
-          <div className="text-xs text-neutral-500 break-all">
-            {sourceLabel}
-          </div>
-        </header>
-
-        <section className="rounded-lg border border-neutral-200 p-4">
-          <div className="text-sm font-medium">Elecciones registradas</div>
-          {electionsRes === null ? (
-            <div className="mt-2 text-sm text-neutral-700">(Evidence API no disponible)</div>
-          ) : (
-            <div className="mt-2 text-sm text-neutral-700">Total: {elections.length}</div>
-          )}
-        </section>
-
-        <div className="space-y-4">
-          {electionsDetailed.map((e) => {
-            const activeIncidents = (e.incidents ?? []).filter((i) => i.active !== false);
-            const resolvedIncidents = (e.incidents ?? []).filter((i) => i.active === false);
-
-            const globalConsistency = activeIncidents.some((i) => isCriticalSeverity(i.severity))
-              ? "CRITICAL"
-              : activeIncidents.some((i) => isWarningSeverity(i.severity))
-                ? "WARNING"
-                : "OK";
-
-            const timeline = [
-              {
-                key: `created:${e.electionId}`,
-                blockNumber: e.createdAtBlock,
-                blockTimestamp: e.createdAtTimestamp,
-                txHash: e.createdTxHash,
-                logIndex: -1,
-                label: "ElectionCreated",
-                detail: null as string | null,
-              },
-              ...e.phaseChanges.map((pc) => ({
-                key: `phase:${pc.txHash}:${pc.logIndex}`,
-                blockNumber: pc.blockNumber,
-                blockTimestamp: pc.blockTimestamp,
-                txHash: pc.txHash,
-                logIndex: pc.logIndex,
-                label: "PhaseChanged",
-                detail: `${pc.previousPhaseLabel} → ${pc.newPhaseLabel}`,
-              })),
-              ...e.anchors.map((a) => ({
-                key: `anchor:${a.txHash}:${a.logIndex}`,
-                blockNumber: a.blockNumber,
-                blockTimestamp: a.blockTimestamp,
-                txHash: a.txHash,
-                logIndex: a.logIndex,
-                label: `ActaPublished kind ${a.kind}`,
-                detail: `snapshotHash: ${a.snapshotHash}`,
-              })),
-              ...e.ballots.map((b) => ({
-                key: `ballot:${b.txHash}:${b.logIndex}`,
-                blockNumber: b.blockNumber,
-                blockTimestamp: b.blockTimestamp,
-                txHash: b.txHash,
-                logIndex: b.logIndex,
-                label: `BallotPublished idx ${b.ballotIndex}`,
-                detail: `ballotHash: ${b.ballotHash}`,
-              })),
-            ].sort((a, b) => {
-              const bnA = BigInt(a.blockNumber);
-              const bnB = BigInt(b.blockNumber);
-              if (bnA < bnB) return -1;
-              if (bnA > bnB) return 1;
-              return a.logIndex - b.logIndex;
-            });
-
-            return (
-              <section
-                key={e.electionId}
-                className="rounded-lg border border-neutral-200 p-4 space-y-3"
+    <main className="min-h-screen" style={{ background: "#f8fafc" }}>
+      {/* ─── Top Bar ─── */}
+      <header
+        style={{
+          background: "white",
+          borderBottom: "1px solid #e2e8f0",
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+        }}
+      >
+        <div className="mx-auto" style={{ maxWidth: "960px", padding: "1rem 1.5rem" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                style={{
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "10px",
+                  background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "white",
+                }}
               >
-              <div className="flex flex-col gap-1">
-                <div className="text-sm font-medium">Elección #{e.electionId}</div>
-                <div className="text-xs text-neutral-600 break-all">
-                  manifestHash: {e.manifestHash}
-                </div>
-                <div className="text-xs text-neutral-600 break-all">
-                  authority (AEA): {e.authority}
-                </div>
-                <div className="text-xs text-neutral-600 break-all">
-                  registryAuthority (REA signer): {e.registryAuthority}
-                </div>
-                <div className="text-xs text-neutral-600 break-all">
-                  coordinatorPubKey: {e.coordinatorPubKey}
-                </div>
-                <div className="text-xs text-neutral-600 break-all">
-                  createdAt: block {e.createdAtBlock}
-                  {e.createdAtTimestamp ? ` · ${e.createdAtTimestamp}` : ""}
-                  {e.createdTxHash ? ` · tx ${e.createdTxHash}` : ""}
-                </div>
+                <IconShield />
               </div>
-
-              <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-md border border-neutral-200 p-3">
-                  <div className="text-xs text-neutral-500">Fase</div>
-                  <div className="text-sm font-medium">
-                    {e.phaseLabel ?? `(${e.phase})`}
-                  </div>
-                </div>
-                <div className="rounded-md border border-neutral-200 p-3">
-                  <div className="text-xs text-neutral-500">Registros (signup)</div>
-                  <div className="text-sm font-medium">{e.counts.signups}</div>
-                  <div className="text-xs text-neutral-500">
-                    únicos: {e.signupsSummary.uniqueNullifiers}
-                  </div>
-                  <div className="mt-2">
-                    <a
-                      className="text-xs text-neutral-700 underline"
-                      href={`/elections/${encodeURIComponent(String(e.electionId))}/signups`}
-                    >
-                      Abrir signups
-                    </a>
-                  </div>
-                </div>
-                <div className="rounded-md border border-neutral-200 p-3">
-                  <div className="text-xs text-neutral-500">Boletas publicadas</div>
-                  <div className="text-sm font-medium">{e.counts.ballots}</div>
-                  <div className="text-xs text-neutral-500">
-                    índices únicos: {e.ballotsSummary.uniqueBallotIndexes}
-                  </div>
-                </div>
+              <div>
+                <h1 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", lineHeight: 1.2 }}>
+                  Observatorio Electoral
+                </h1>
+                <p style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 400 }}>
+                  BlockUrna · Protocolo BU‑PVP‑1
+                </p>
               </div>
+            </div>
+            <div
+              style={{
+                fontSize: "0.6875rem",
+                color: "#94a3b8",
+                background: "#f8fafc",
+                padding: "0.25rem 0.625rem",
+                borderRadius: "6px",
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              API: {apiBase.replace(/^https?:\/\//, "")}
+            </div>
+          </div>
+        </div>
+      </header>
 
-              {e.results && e.results.length > 0 && (() => {
-                const r = e.results[0]!;
-                return (
-                <div className="rounded-md border border-purple-200 bg-purple-50 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-purple-900">Resultados Experimentales Publicados</div>
-                    <div className="rounded bg-purple-200 px-2 py-0.5 text-xs font-semibold text-purple-800">Result Mode: {r.resultMode}</div>
+      {/* ─── Content ─── */}
+      <div className="mx-auto" style={{ maxWidth: "960px", padding: "2rem 1.5rem 4rem" }}>
+        {electionsRes === null ? (
+          <div className="card" style={{ padding: "3rem", textAlign: "center" }}>
+            <p style={{ color: "#94a3b8", fontSize: "0.875rem" }}>
+              No se pudo conectar con la Evidence API.
+            </p>
+          </div>
+        ) : electionsDetailed.length === 0 ? (
+          <div className="card" style={{ padding: "3rem", textAlign: "center" }}>
+            <p style={{ fontSize: "0.875rem", color: "#64748b" }}>
+              No hay elecciones registradas todavía.
+            </p>
+            <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.5rem" }}>
+              Crea una elección desde la Consola AEA para comenzar la observación.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "2.5rem" }}>
+            {electionsDetailed.map((e) => {
+              const activeIncidents = (e.incidents ?? []).filter((i) => i.active !== false);
+              const resolvedIncidents = (e.incidents ?? []).filter((i) => i.active === false);
+              const criticalCount = activeIncidents.filter((i) =>
+                isCriticalSeverity(i.severity),
+              ).length;
+              const warningCount = activeIncidents.filter((i) =>
+                isWarningSeverity(i.severity),
+              ).length;
+
+              const globalConsistency = criticalCount > 0
+                ? "CRITICAL"
+                : warningCount > 0
+                  ? "WARNING"
+                  : "OK";
+
+              const timeline = [
+                {
+                  key: `created:${e.electionId}`,
+                  blockNumber: e.createdAtBlock,
+                  blockTimestamp: e.createdAtTimestamp,
+                  txHash: e.createdTxHash,
+                  logIndex: -1,
+                  label: "Elección creada",
+                  detail: null as string | null,
+                  type: "creation",
+                },
+                ...e.phaseChanges.map((pc) => ({
+                  key: `phase:${pc.txHash}:${pc.logIndex}`,
+                  blockNumber: pc.blockNumber,
+                  blockTimestamp: pc.blockTimestamp,
+                  txHash: pc.txHash,
+                  logIndex: pc.logIndex,
+                  label: "Cambio de fase",
+                  detail: `${pc.previousPhaseLabel} → ${pc.newPhaseLabel}`,
+                  type: "phase",
+                })),
+                ...e.anchors.map((a) => ({
+                  key: `anchor:${a.txHash}:${a.logIndex}`,
+                  blockNumber: a.blockNumber,
+                  blockTimestamp: a.blockTimestamp,
+                  txHash: a.txHash,
+                  logIndex: a.logIndex,
+                  label: "Acta anclada",
+                  detail: `Tipo ${a.kind}`,
+                  type: "anchor",
+                })),
+                ...e.ballots.map((b) => ({
+                  key: `ballot:${b.txHash}:${b.logIndex}`,
+                  blockNumber: b.blockNumber,
+                  blockTimestamp: b.blockTimestamp,
+                  txHash: b.txHash,
+                  logIndex: b.logIndex,
+                  label: `Boleta #${b.ballotIndex}`,
+                  detail: null as string | null,
+                  type: "ballot",
+                })),
+              ].sort((a, b) => {
+                const bnA = BigInt(a.blockNumber);
+                const bnB = BigInt(b.blockNumber);
+                if (bnA < bnB) return -1;
+                if (bnA > bnB) return 1;
+                return a.logIndex - b.logIndex;
+              });
+
+              return (
+                <article key={e.electionId}>
+                  {/* ─── Election Header ─── */}
+                  <div style={{ marginBottom: "1.5rem" }}>
+                    <div className="flex items-center gap-3" style={{ marginBottom: "0.5rem" }}>
+                      <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
+                        Elección #{e.electionId}
+                      </h2>
+                      <span className="phase-pill">
+                        <span className="phase-dot" />
+                        {e.phaseLabel ?? `Fase ${e.phase}`}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3" style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                      <span>Manifiesto: <span className="hash-display" title={e.manifestHash}>{fullHash(e.manifestHash)}</span></span>
+                      <span style={{ color: "#cbd5e1" }}>·</span>
+                      <span>Creada: {formatTimestamp(e.createdAtTimestamp)}</span>
+                    </div>
                   </div>
-                  <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between border-b border-purple-200 pb-2">
-                      <span className="text-xs text-purple-700">Tally Job vinculado:</span>
-                      <span className="text-xs font-mono">{r.tallyJobId.substring(0, 16)}...</span>
+
+                  {/* ─── Stat Cards ─── */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                      gap: "0.875rem",
+                      marginBottom: "2rem",
+                    }}
+                  >
+                    <div className="stat-card">
+                      <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Fase actual
+                      </span>
+                      <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
+                        {e.phaseLabel ?? String(e.phase)}
+                      </span>
                     </div>
-                    <div className="flex flex-col border-b border-purple-200 pb-2">
-                      <span className="text-xs text-purple-700 mb-1">Payload On-Chain Hash:</span>
-                      <span className="text-xs font-mono break-all bg-white p-1 rounded border border-purple-100">{r.payloadHash}</span>
+
+                    <div className="stat-card">
+                      <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Registros
+                      </span>
+                      <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
+                        {e.counts.signups}
+                      </span>
+                      <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                        {e.signupsSummary.uniqueNullifiers} únicos
+                      </span>
+                      <a
+                        className="btn-subtle"
+                        href={`/elections/${encodeURIComponent(String(e.electionId))}/signups`}
+                        style={{ marginTop: "0.5rem", alignSelf: "flex-start" }}
+                      >
+                        Ver registros <IconExternalLink />
+                      </a>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-purple-700">Proof State:</span>
-                      <span className="text-xs font-mono">{r.proofState}</span>
+
+                    <div className="stat-card">
+                      <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Boletas
+                      </span>
+                      <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
+                        {e.counts.ballots}
+                      </span>
+                      <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                        {e.ballotsSummary.uniqueBallotIndexes} índices únicos
+                      </span>
                     </div>
-                    <div className="mt-2 border-t border-purple-200 pt-2">
-                      <div className="text-[10px] text-purple-700 bg-purple-100 p-2 rounded">
-                        <strong>Nota de honestidad:</strong> El resultSummary (conteo de votos) es estático y no proviene del descifrado real de los ciphertexts. Los anchorajes on-chain, hashes y conteos de boletas sí son reales.
+
+                    <div className="stat-card">
+                      <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Integridad
+                      </span>
+                      <div className="flex items-center gap-2" style={{ marginTop: "0.25rem" }}>
+                        {globalConsistency === "OK" ? (
+                          <span className="badge badge-valid"><IconCheck /> Consistente</span>
+                        ) : globalConsistency === "CRITICAL" ? (
+                          <span className="badge badge-critical"><IconAlert /> {criticalCount} crít.</span>
+                        ) : (
+                          <span className="badge badge-warning"><IconAlert /> {warningCount} alerta{warningCount !== 1 ? "s" : ""}</span>
+                        )}
                       </div>
+                      <span style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                        {activeIncidents.length} activo{activeIncidents.length !== 1 ? "s" : ""} · {resolvedIncidents.length} resuelto{resolvedIncidents.length !== 1 ? "s" : ""}
+                      </span>
                     </div>
-                  </div>
-                </div>
-                );
-              })()}
 
-              {e.auditWindow && (
-                <div className="rounded-md border border-neutral-700 bg-neutral-900 text-white p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-neutral-100">Ventana de Auditoría</div>
-                    <div className={`rounded px-2 py-0.5 text-xs font-bold ${e.auditWindow.status === 'OPEN' ? 'bg-green-600 text-white' : 'bg-neutral-600 text-neutral-300'}`}>{e.auditWindow.status}</div>
-                  </div>
-                  <div className="mt-3 space-y-2 text-xs text-neutral-400">
-                    <div>Abierto por: {e.auditWindow.openedBy}</div>
-                    <div>Fecha Apertura: {e.auditWindow.openedAt}</div>
-                    {e.auditWindow.closesAt && <div>Fecha Cierre: {e.auditWindow.closesAt}</div>}
-                    {e.bundleHash && (
-                      <div className="flex flex-col border-t border-neutral-700 pt-2 mt-2">
-                        <span className="text-neutral-500 mb-1">Bundle Hash:</span>
-                        <span className="font-mono text-neutral-300 break-all bg-neutral-800 p-1 rounded">{e.bundleHash}</span>
-                        <span className="text-neutral-500 mt-1">Estado: {e.bundleExportStatus}</span>
+                    {e.auditWindow && (
+                      <div className="stat-card" style={{ borderColor: e.auditWindow.status === "OPEN" ? "#d1fae5" : "#e2e8f0" }}>
+                        <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Auditoría
+                        </span>
+                        <span className={`badge ${e.auditWindow.status === "OPEN" ? "badge-valid" : "badge-neutral"}`} style={{ alignSelf: "flex-start", marginTop: "0.25rem" }}>
+                          {e.auditWindow.status === "OPEN" ? "Ventana abierta" : e.auditWindow.status}
+                        </span>
+                        {e.auditWindow.openedAt && (
+                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                            Desde: {formatTimestamp(e.auditWindow.openedAt)}
+                          </span>
+                        )}
                       </div>
                     )}
-                    <div className="mt-2 text-yellow-400 font-bold border border-yellow-700 bg-yellow-900/30 p-2 rounded">
-                      ADVERTENCIA: Resultados basados en pruebas SIMULADAS (ZK SNARK pendiente).
-                    </div>
                   </div>
-                </div>
-              )}
 
-              <div>
-                <div className="text-sm font-medium">Timeline (eventos)</div>
-                <div className="mt-2 space-y-2">
-                  {timeline.length === 0 ? (
-                    <div className="text-sm text-neutral-600">
-                      (Sin eventos indexados)
-                    </div>
-                  ) : (
-                    timeline.map((ev) => (
-                      <div
-                        key={ev.key}
-                        className="rounded-md border border-neutral-200 p-3"
-                      >
-                        <div className="text-xs text-neutral-500">
-                          block {ev.blockNumber}
-                          {ev.blockTimestamp ? ` · ${ev.blockTimestamp}` : ""}
+                  {/* ─── Results (if available) ─── */}
+                  {e.results && e.results.length > 0 && (() => {
+                    const r = e.results[0]!;
+                    return (
+                      <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "2rem", borderLeft: "3px solid #6366f1" }}>
+                        <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
+                          <h3 style={{ fontSize: "0.875rem", fontWeight: 600, color: "#0f172a" }}>
+                            Resultados experimentales publicados
+                          </h3>
+                          <span className="badge badge-info">{r.resultMode}</span>
                         </div>
-                        <div className="text-xs text-neutral-700">{ev.label}</div>
-                        {ev.detail ? (
-                          <div className="text-xs text-neutral-700 break-all">
-                            {ev.detail}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", fontSize: "0.75rem" }}>
+                          <div>
+                            <span style={{ color: "#94a3b8" }}>Tally Job:</span>{" "}
+                            <span className="hash-display" title={r.tallyJobId}>{fullHash(r.tallyJobId)}</span>
                           </div>
-                        ) : null}
-                        {ev.txHash ? (
-                          <div className="text-xs text-neutral-700 break-all">tx: {ev.txHash}</div>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">Actas (referencias ancladas)</div>
-                <div className="mt-2 space-y-2">
-                  {e.acts.length === 0 ? (
-                    <div className="text-sm text-neutral-600">(Sin actas publicadas)</div>
-                  ) : (
-                    e.acts.map((a) => (
-                      <div
-                        key={`${a.actId}-${a.anchorTxHash}`}
-                        className="rounded-md border border-neutral-200 p-3"
-                      >
-                        <div className="text-xs text-neutral-500">
-                          {a.actType} · block {a.blockNumber}
-                          {a.blockTimestamp ? ` · ${a.blockTimestamp}` : ""}
-                        </div>
-                        <div className="text-xs text-neutral-700 break-all">
-                          actId (snapshotHash): {a.actId}
-                        </div>
-                        {a.contentHash ? (
-                          <div className="text-xs text-neutral-700 break-all">
-                            contentHash: {a.contentHash}
+                          <div>
+                            <span style={{ color: "#94a3b8" }}>Proof State:</span>{" "}
+                            <span style={{ color: "#475569", fontWeight: 500 }}>{r.proofState}</span>
                           </div>
-                        ) : null}
-                        <div className="text-xs text-neutral-700 break-all">
-                          anchor tx: {a.anchorTxHash}
-                        </div>
-                        <div className="mt-2">
-                          <a
-                            className="text-xs text-neutral-700 underline"
-                            href={`/elections/${encodeURIComponent(String(e.electionId))}/acts/${encodeURIComponent(String(a.actId))}`}
-                          >
-                            Abrir acta
-                          </a>
+                          <div style={{ gridColumn: "1 / -1" }}>
+                            <span style={{ color: "#94a3b8" }}>Payload Hash:</span>{" "}
+                            <span className="hash-display" title={r.payloadHash} style={{ maxWidth: "100%" }}>{fullHash(r.payloadHash)}</span>
+                          </div>
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
+                    );
+                  })()}
 
-              <div>
-                <div className="text-sm font-medium">Anclajes (eventos on-chain)</div>
-                <div className="mt-2 space-y-2">
-                  {e.anchors.length === 0 ? (
-                    <div className="text-sm text-neutral-600">(Sin anclajes)</div>
-                  ) : (
-                    e.anchors.map((a) => (
-                      <div
-                        key={`${a.txHash}:${a.logIndex}`}
-                        className="rounded-md border border-neutral-200 p-3"
-                      >
-                        <div className="text-xs text-neutral-500">
-                          kind {a.kind} · block {a.blockNumber}
-                          {a.blockTimestamp ? ` · ${a.blockTimestamp}` : ""}
+                  {/* ─── Audit Bundle ─── */}
+                  {e.bundleHash && (
+                    <div className="card" style={{ padding: "1rem 1.5rem", marginBottom: "2rem" }}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span style={{ fontSize: "0.75rem", fontWeight: 600, color: "#475569" }}>Bundle de auditoría</span>
+                          <div style={{ marginTop: "0.25rem" }}>
+                            <span className="hash-display" title={e.bundleHash}>{fullHash(e.bundleHash)}</span>
+                          </div>
                         </div>
-                        <div className="text-xs text-neutral-700 break-all">
-                          snapshotHash: {a.snapshotHash}
-                        </div>
-                        <div className="text-xs text-neutral-700 break-all">tx: {a.txHash}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">Consistencia</div>
-                <div className="mt-2 rounded-md border border-neutral-200 p-3">
-                  {e.consistency ? (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs text-neutral-500">estado global</div>
-                        <div className={`rounded px-2 py-0.5 text-[10px] font-semibold ${severityBadgeClasses(globalConsistency)}`}>
-                          {globalConsistency}
-                        </div>
-                      </div>
-                      <div className="text-xs text-neutral-500">computedAt: {e.consistency.computedAt}</div>
-                      <div className="text-xs text-neutral-500">dataVersion: {e.consistency.dataVersion}</div>
-                      <div className="text-xs text-neutral-700">
-                        ok: <span className="font-medium">{String(e.consistency.ok)}</span>
-                      </div>
-                      {Array.isArray(e.consistency.report?.incidents) ? (
-                        <div className="text-xs text-neutral-700">
-                          incidentes (reporte): {e.consistency.report.incidents.length}
-                        </div>
-                      ) : null}
-                      <div className="text-xs text-neutral-700">
-                        activos: {activeIncidents.length} · resueltos: {resolvedIncidents.length}
+                        <span className="badge badge-neutral">{e.bundleExportStatus}</span>
                       </div>
                     </div>
-                  ) : (
-                    <div className="text-sm text-neutral-600">(Sin reporte de consistencia)</div>
                   )}
-                </div>
-              </div>
 
-              <div>
-                <div className="text-sm font-medium">Incidentes / Alertas</div>
-                <div className="mt-2 space-y-2">
-                  {e.incidents.length === 0 ? (
-                    <div className="text-sm text-neutral-600">(Sin incidentes)</div>
-                  ) : (
-                    <>
-                      <div className="text-xs text-neutral-600">Activos ({activeIncidents.length})</div>
-                      {activeIncidents.length === 0 ? (
-                        <div className="text-sm text-neutral-600">(Sin incidentes activos)</div>
-                      ) : (
-                        activeIncidents.map((i) => (
-                          <div
-                            key={i.fingerprint}
-                            className="rounded-md border border-neutral-200 p-3"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs text-neutral-500">
-                                <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold ${severityBadgeClasses(i.severity)}`}>
-                                  {normalizeSeverityLabel(i.severity)}
-                                </span>
-                                <span className="ml-2">{i.code} · occ {i.occurrences}</span>
+                  {/* ─── Timeline ─── */}
+                  <section style={{ marginBottom: "2.5rem" }}>
+                    <h3 className="section-title">Línea de tiempo</h3>
+                    {timeline.length === 0 ? (
+                      <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin eventos indexados.</p>
+                    ) : (
+                      <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
+                          {timeline.map((ev) => (
+                            <div key={ev.key} className={`timeline-item ${ev.type}`} style={{ paddingBottom: "1rem" }}>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div style={{ fontSize: "0.8125rem", fontWeight: 500, color: "#1e293b" }}>
+                                    {ev.label}
+                                  </div>
+                                  {ev.detail && (
+                                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.125rem" }}>
+                                      {ev.detail}
+                                    </div>
+                                  )}
+                                </div>
+                                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                                  <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                                    Bloque {ev.blockNumber}
+                                  </div>
+                                  {ev.blockTimestamp && (
+                                    <div style={{ fontSize: "0.6875rem", color: "#cbd5e1" }}>
+                                      {formatTimestamp(ev.blockTimestamp)}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-xs text-neutral-500">activo</div>
+                              {ev.txHash && (
+                                <div style={{ marginTop: "0.25rem" }}>
+                                  <span className="hash-display" title={ev.txHash}>{fullHash(ev.txHash)}</span>
+                                </div>
+                              )}
                             </div>
-                            <div className="text-xs text-neutral-700">{i.message}</div>
-                            <div className="text-xs text-neutral-600">
-                              lastSeen: {i.lastSeenAt}
-                              {i.relatedBlockNumber ? ` · block ${i.relatedBlockNumber}` : ""}
-                              {i.relatedBlockTimestamp ? ` · ${i.relatedBlockTimestamp}` : ""}
-                            </div>
-                            {i.relatedTxHash ? (
-                              <div className="text-xs text-neutral-700 break-all">tx: {i.relatedTxHash}</div>
-                            ) : null}
-                          </div>
-                        ))
-                      )}
-
-                      <div className="text-xs text-neutral-600 mt-3">Resueltos ({resolvedIncidents.length})</div>
-                      {resolvedIncidents.length === 0 ? (
-                        <div className="text-sm text-neutral-600">(Sin incidentes resueltos)</div>
-                      ) : (
-                        resolvedIncidents.map((i) => (
-                          <div
-                            key={i.fingerprint}
-                            className="rounded-md border border-neutral-200 p-3"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs text-neutral-500">
-                                <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold ${severityBadgeClasses(i.severity)}`}>
-                                  {normalizeSeverityLabel(i.severity)}
-                                </span>
-                                <span className="ml-2">{i.code} · occ {i.occurrences}</span>
-                              </div>
-                              <div className="text-xs text-neutral-500">resuelto</div>
-                            </div>
-                            <div className="text-xs text-neutral-700">{i.message}</div>
-                            <div className="text-xs text-neutral-600">
-                              resolvedAt: {i.resolvedAt ?? "(desconocido)"}
-                              {i.relatedBlockNumber ? ` · block ${i.relatedBlockNumber}` : ""}
-                              {i.relatedTxHash ? ` · tx ${i.relatedTxHash}` : ""}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">Boletas (tabla)</div>
-                <div className="mt-2 space-y-2">
-                  {e.ballots.length === 0 ? (
-                    <div className="text-sm text-neutral-600">(Sin boletas)</div>
-                  ) : (
-                    e.ballots.map((b) => (
-                      <div
-                        key={`${b.txHash}:${b.logIndex}`}
-                        className="rounded-md border border-neutral-200 p-3"
-                      >
-                        <div className="text-xs text-neutral-500">
-                          idx {b.ballotIndex} · block {b.blockNumber}
-                          {b.blockTimestamp ? ` · ${b.blockTimestamp}` : ""}
+                          ))}
                         </div>
-                        <div className="text-xs text-neutral-700 break-all">ballotHash: {b.ballotHash}</div>
-                        <div className="text-xs text-neutral-700 break-all">ciphertext: {b.ciphertext}</div>
-                        <div className="text-xs text-neutral-700 break-all">tx: {b.txHash}</div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-              </section>
-            );
-          })}
+                    )}
+                  </section>
 
-          {electionsDetailed.length === 0 ? (
-            <section className="rounded-lg border border-neutral-200 p-4">
-              <div className="text-sm text-neutral-700">
-                No hay elecciones todavía. Crea una elección con el contrato BU_PVP_1_ElectionRegistry.
-              </div>
-            </section>
-          ) : null}
-        </div>
+                  {/* ─── Actas (Evidence Cards) ─── */}
+                  <section style={{ marginBottom: "2.5rem" }}>
+                    <h3 className="section-title">Actas electorales</h3>
+                    {e.acts.length === 0 ? (
+                      <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin actas publicadas.</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+                        {e.acts.map((a) => (
+                          <div key={`${a.actId}-${a.anchorTxHash}`} className="acta-card">
+                            <div className="acta-card-header">
+                              <div className="flex items-center gap-3">
+                                <span style={{ fontSize: "1.25rem" }}>
+                                  {ACTA_TYPE_ICONS[a.actType] ?? "📄"}
+                                </span>
+                                <div>
+                                  <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#0f172a" }}>
+                                    {actaLabel(a.actType)}
+                                  </div>
+                                  <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+                                    {formatTimestamp(a.blockTimestamp)} · Bloque {a.blockNumber}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={verificationBadgeClass(a.verificationStatus)}>
+                                  {a.verificationStatus === "VALID" && <IconCheck />}
+                                  {a.verificationStatus || "PENDIENTE"}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div style={{ padding: "1rem 1.25rem" }}>
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "1fr 1fr",
+                                  gap: "0.75rem 1.5rem",
+                                  fontSize: "0.75rem",
+                                }}
+                              >
+                                <div>
+                                  <span style={{ color: "#94a3b8", fontWeight: 500 }}>Firmante</span>
+                                  <div style={{ marginTop: "0.125rem" }}>
+                                    <span className="badge badge-info" style={{ fontSize: "0.625rem" }}>
+                                      {a.signerRole || "—"}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div>
+                                  <span style={{ color: "#94a3b8", fontWeight: 500 }}>Esquema</span>
+                                  <div style={{ color: "#475569", marginTop: "0.125rem" }}>
+                                    {a.signatureScheme || "—"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span style={{ color: "#94a3b8", fontWeight: 500 }}>Dirección esperada</span>
+                                  <div style={{ marginTop: "0.125rem" }}>
+                                    <span className="hash-display" title={a.expectedSignerAddress ?? ""}>
+                                      {fullHash(a.expectedSignerAddress)}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div>
+                                  <span style={{ color: "#94a3b8", fontWeight: 500 }}>Dirección recuperada</span>
+                                  <div style={{ marginTop: "0.125rem" }}>
+                                    <span className="hash-display" title={a.signerAddress ?? ""}>
+                                      {fullHash(a.signerAddress)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Expandable technical details */}
+                              <details style={{ marginTop: "1rem" }}>
+                                <summary className="details-trigger">
+                                  <IconChevronDown /> Detalles técnicos (hashes)
+                                </summary>
+                                <div
+                                  style={{
+                                    marginTop: "0.75rem",
+                                    padding: "0.75rem",
+                                    background: "#f8fafc",
+                                    borderRadius: "8px",
+                                    border: "1px solid #f1f5f9",
+                                    fontSize: "0.6875rem",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.5rem",
+                                  }}
+                                >
+                                  <div className="flex justify-between items-center">
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Content Hash</span>
+                                    <span className="hash-display" title={a.contentHash ?? ""}>{fullHash(a.contentHash)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Signing Digest</span>
+                                    <span className="hash-display" title={a.signingDigest ?? ""}>{fullHash(a.signingDigest)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Anchored Hash</span>
+                                    <span className="hash-display" title={a.actId}>{fullHash(a.actId)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Anchor Tx</span>
+                                    <span className="hash-display" title={a.anchorTxHash}>{fullHash(a.anchorTxHash)}</span>
+                                  </div>
+                                </div>
+                              </details>
+
+                              <div style={{ marginTop: "1rem", display: "flex", justifyContent: "flex-end" }}>
+                                <Link
+                                  className="btn-subtle"
+                                  href={`/elections/${encodeURIComponent(String(e.electionId))}/acts/${encodeURIComponent(String(a.actId))}`}
+                                >
+                                  Ver acta firmada <IconExternalLink />
+                                </Link>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* ─── Consistency & Incidents ─── */}
+                  <section style={{ marginBottom: "2.5rem" }}>
+                    <h3 className="section-title">Consistencia e incidentes</h3>
+
+                    {/* Consistency summary */}
+                    {e.consistency && (
+                      <div className="card" style={{ padding: "1rem 1.25rem", marginBottom: "1rem" }}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a" }}>
+                              Verificación de consistencia
+                            </span>
+                            <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.125rem" }}>
+                              {formatTimestamp(e.consistency.computedAt)} · v{e.consistency.dataVersion}
+                            </div>
+                          </div>
+                          <span className={`badge ${globalConsistency === "OK" ? "badge-valid" : globalConsistency === "CRITICAL" ? "badge-critical" : "badge-warning"}`}>
+                            {globalConsistency === "OK" ? <><IconCheck /> Consistente</> : <><IconAlert /> {globalConsistency}</>}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Incidents */}
+                    {e.incidents.length === 0 ? (
+                      <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
+                        <div className="flex items-center gap-2" style={{ color: "#94a3b8", fontSize: "0.8125rem" }}>
+                          <IconCheck /> Sin incidentes registrados
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+                        {/* Active incidents */}
+                        {activeIncidents.length > 0 && (
+                          <div className="card" style={{ overflow: "hidden" }}>
+                            <div style={{ padding: "0.75rem 1.25rem", borderBottom: "1px solid #f1f5f9", background: "#fffbeb" }}>
+                              <span style={{ fontSize: "0.75rem", fontWeight: 600, color: "#92400e" }}>
+                                Activos ({activeIncidents.length})
+                              </span>
+                            </div>
+                            {activeIncidents.map((i) => (
+                              <div key={i.fingerprint} className="incident-row">
+                                <span className={severityBadgeClass(i.severity)} style={{ flexShrink: 0 }}>
+                                  {normalizeSeverityLabel(i.severity)}
+                                </span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: "0.8125rem", fontWeight: 500, color: "#1e293b" }}>
+                                    {i.code}
+                                  </div>
+                                  <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.125rem" }}>
+                                    {i.message}
+                                  </div>
+                                  <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                                    {i.occurrences} ocurrencia{Number(i.occurrences) !== 1 ? "s" : ""} · Último: {formatTimestamp(i.lastSeenAt)}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Resolved incidents */}
+                        {resolvedIncidents.length > 0 && (
+                          <details>
+                            <summary className="details-trigger" style={{ marginBottom: "0.5rem" }}>
+                              <IconChevronDown /> Resueltos ({resolvedIncidents.length})
+                            </summary>
+                            <div className="card" style={{ overflow: "hidden" }}>
+                              {resolvedIncidents.map((i) => (
+                                <div key={i.fingerprint} className="incident-row" style={{ opacity: 0.7 }}>
+                                  <span className={severityBadgeClass(i.severity)} style={{ flexShrink: 0 }}>
+                                    {normalizeSeverityLabel(i.severity)}
+                                  </span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: "0.8125rem", fontWeight: 500, color: "#1e293b" }}>
+                                      {i.code}
+                                    </div>
+                                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.125rem" }}>
+                                      {i.message}
+                                    </div>
+                                    <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                                      Resuelto: {formatTimestamp(i.resolvedAt)}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* ─── Ballots Table ─── */}
+                  {e.ballots.length > 0 && (
+                    <section style={{ marginBottom: "2.5rem" }}>
+                      <h3 className="section-title">Boletas publicadas</h3>
+                      <div className="card" style={{ overflow: "hidden" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                          <thead>
+                            <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                              <th style={{ padding: "0.75rem 1rem", textAlign: "left", color: "#94a3b8", fontWeight: 500, fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                #
+                              </th>
+                              <th style={{ padding: "0.75rem 1rem", textAlign: "left", color: "#94a3b8", fontWeight: 500, fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                Ballot Hash
+                              </th>
+                              <th style={{ padding: "0.75rem 1rem", textAlign: "left", color: "#94a3b8", fontWeight: 500, fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                Bloque
+                              </th>
+                              <th style={{ padding: "0.75rem 1rem", textAlign: "left", color: "#94a3b8", fontWeight: 500, fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                Tx
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {e.ballots.map((b) => (
+                              <tr
+                                key={`${b.txHash}:${b.logIndex}`}
+                                style={{ borderBottom: "1px solid #f8fafc" }}
+                              >
+                                <td style={{ padding: "0.625rem 1rem", color: "#475569", fontWeight: 500 }}>
+                                  {b.ballotIndex}
+                                </td>
+                                <td style={{ padding: "0.625rem 1rem" }}>
+                                  <span className="hash-display" title={b.ballotHash}>
+                                    {fullHash(b.ballotHash)}
+                                  </span>
+                                </td>
+                                <td style={{ padding: "0.625rem 1rem", color: "#64748b" }}>
+                                  {b.blockNumber}
+                                </td>
+                                <td style={{ padding: "0.625rem 1rem" }}>
+                                  <span className="hash-display" title={b.txHash}>
+                                    {fullHash(b.txHash)}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  )}
+
+                  {/* ─── Technical notes (discreet accordion) ─── */}
+                  <section style={{ marginBottom: "2rem" }}>
+                    <details>
+                      <summary className="details-trigger" style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>
+                        <IconChevronDown /> Notas técnicas sobre validación
+                      </summary>
+                      <div className="info-note" style={{ marginTop: "0.5rem" }}>
+                        <p style={{ fontWeight: 600, color: "#475569", marginBottom: "0.5rem" }}>
+                          Estado de validación criptográfica
+                        </p>
+                        <ul style={{ paddingLeft: "1.25rem", listStyle: "disc", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                          <li><strong>Firma ECDSA del acta:</strong> REAL — verificable end-to-end con SECP256K1.</li>
+                          <li><strong>Prueba interactiva ZK (JED):</strong> SIMULADA — el kernel ZK aún no está integrado.</li>
+                          <li><strong>canonicalJson:</strong> Estructura canónica del contenido del acta.</li>
+                          <li><strong>contentHash:</strong> Keccak256 sobre canonicalJson.</li>
+                          <li><strong>signingDigest:</strong> Keccak256 sobre el signingPayload (contentHash prefijado).</li>
+                          <li><strong>anchoredHash:</strong> Hash anclado públicamente en la blockchain.</li>
+                        </ul>
+                        <p style={{ marginTop: "0.75rem", color: "#94a3b8", fontStyle: "italic" }}>
+                          Autoridad AEA: <span className="hash-display" title={e.authority}>{fullHash(e.authority)}</span>{" · "}
+                          REA: <span className="hash-display" title={e.registryAuthority}>{fullHash(e.registryAuthority)}</span>
+                        </p>
+                      </div>
+                    </details>
+                  </section>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {/* ─── Footer ─── */}
+      <footer
+        style={{
+          borderTop: "1px solid #e2e8f0",
+          background: "white",
+          padding: "1.5rem",
+          textAlign: "center",
+        }}
+      >
+        <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+        </p>
+      </footer>
     </main>
   );
 }

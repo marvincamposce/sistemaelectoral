@@ -1,0 +1,24 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-15T17:24:42.655Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "Eleccion Experimental",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Es la mejor eleccion que existe"
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0xf71d16360bd49bdc3dcb79e3e522be9ac4688da3644b620a833fce55eecd86c05efbad00f8182542ab8f98260822b1187c9cb2e3655af0638768df3fd60b1505",
+    "manifestHashHex": "0x75e37af2b6eca628e211d6cb1372b7e0866ed606e45fe8d33088d07a450f6e50"
+  }
+}

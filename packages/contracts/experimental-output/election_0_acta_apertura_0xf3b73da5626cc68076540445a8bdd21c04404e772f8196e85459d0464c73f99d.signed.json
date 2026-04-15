@@ -1,0 +1,27 @@
+{
+  "snapshot": {
+    "snapshotVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "electionId": "0",
+    "kind": "ACTA_APERTURA",
+    "generatedAt": "2026-04-15T17:30:38.271Z",
+    "chainId": "31337",
+    "blockRange": {
+      "fromBlock": 2,
+      "toBlock": 5
+    },
+    "commitments": {
+      "manifestHash": "0x75e37af2b6eca628e211d6cb1372b7e0866ed606e45fe8d33088d07a450f6e50"
+    },
+    "counts": {
+      "signups": 0,
+      "ballots": 0
+    }
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x4fe8ae66d74363565b67188d4133edac101c6f62d6d8887b7c3130c6de2baa1cb46a5a21bd5abd72a72354da8b242812d1a10ab9a83e582476de926cc14c5c00",
+    "snapshotHashHex": "0xf3b73da5626cc68076540445a8bdd21c04404e772f8196e85459d0464c73f99d"
+  }
+}

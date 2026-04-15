@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ethers } from "ethers";
 import {
@@ -171,9 +172,12 @@ async function createElectionAction(formData: FormData) {
   });
 
   if (electionId === null) {
+    revalidatePath("/");
     redirect("/");
   }
 
+  revalidatePath("/");
+  revalidatePath(`/elections/${electionId}`);
   redirect(`/elections/${electionId}`);
 }
 
