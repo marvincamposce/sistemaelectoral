@@ -145,6 +145,25 @@ function isWarningSeverity(severity: string): boolean {
   return s === "WARNING" || s === "WARN";
 }
 
+function mapProofStateToResultMode(proofState: string | null | undefined): string {
+  const state = String(proofState ?? "").toUpperCase();
+  if (state === "VERIFIED") return "VERIFIED";
+  if (state === "TRANSCRIPT_VERIFIED") return "TRANSCRIPT_VERIFIED";
+  if (state === "SIMULATED") return "SIMULATED";
+  if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
+  return state;
+}
+
+function honestyNoteForProofState(proofState: string | null | undefined): string {
+  const state = String(proofState ?? "").toUpperCase();
+  if (state === "VERIFIED") return "Resultado y prueba verificados.";
+  if (state === "TRANSCRIPT_VERIFIED") {
+    return "Descifrado y conteo reales con transcript verificable; ZK completa pendiente.";
+  }
+  if (state === "SIMULATED") return "Resultado marcado como simulado.";
+  return "Resultado aún no verificado.";
+}
+
 type ElectionRow = {
   electionId: string;
   manifestHash: string;
@@ -1598,7 +1617,7 @@ async function main() {
         electionId: electionId.toString(),
         results: res.rows.map((r) => ({
           ...r,
-          resultMode: r.proofState === "VERIFIED" ? "VERIFIED" : "SIMULATED",
+          resultMode: mapProofStateToResultMode(r.proofState),
           createdAt: r.createdAt.toISOString(),
           publishedAt: r.publishedAt?.toISOString() ?? null,
         })),
@@ -1694,7 +1713,7 @@ async function main() {
           electionId: electionId.toString(),
           result: {
             ...r,
-            resultMode: r.proofState === "VERIFIED" ? "VERIFIED" : "SIMULATED",
+            resultMode: mapProofStateToResultMode(r.proofState),
             createdAt: r.createdAt.toISOString(),
             publishedAt: r.publishedAt?.toISOString() ?? null,
           },
@@ -1797,7 +1816,7 @@ async function main() {
         })),
         resultPayloads: resultsRes.rows.map((r: any) => ({
           ...r,
-          resultMode: r.proofState === "VERIFIED" ? "VERIFIED" : "SIMULATED",
+          resultMode: mapProofStateToResultMode(r.proofState),
           createdAt: r.createdAt?.toISOString() ?? null,
           publishedAt: r.publishedAt?.toISOString() ?? null,
         })),
@@ -1820,11 +1839,14 @@ async function main() {
           firstSeenAt: r.firstSeenAt?.toISOString() ?? null,
           lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
         })),
-        honesty: {
-          resultMode: "SIMULATED",
-          proofState: "SIMULATED",
-          note: "El resultSummary es estático. Los anchorajes on-chain son reales. ZK SNARK pendiente.",
-        },
+        honesty: (() => {
+          const latestProofState = String(resultsRes.rows[0]?.proofState ?? "NOT_IMPLEMENTED");
+          return {
+            resultMode: mapProofStateToResultMode(latestProofState),
+            proofState: latestProofState,
+            note: honestyNoteForProofState(latestProofState),
+          };
+        })(),
       };
     } catch (err: unknown) {
       reply.status(400);

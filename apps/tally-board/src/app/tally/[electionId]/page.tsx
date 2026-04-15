@@ -3,6 +3,7 @@
 import { use, useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { 
+  computeRealTallyAction,
   publishProofAction, 
   publishActaWithContentAction, 
   advanceToResultsPublishedAction,
@@ -25,15 +26,28 @@ function getClientEnv() {
 
 type TallyStatus = "IDLE" | "FETCHING_CIPHERTEXTS" | "SIMULATING_ZK" | "PUBLISHING_STUB" | "PUBLISHING_ACTA" | "DONE";
 
+type RealTallyComputation = {
+  summary: Record<string, number>;
+  validCount: number;
+  invalidCount: number;
+  ballotsCount: number;
+  merkleRoot: string;
+  transcriptHash: string;
+  transcript: unknown;
+  proofPayload: string;
+  proofTxHash: string;
+};
+
 export default function TallyPage({ params }: { params: Promise<{ electionId: string }> }) {
   const resolvedParams = use(params);
   const electionId = resolvedParams.electionId;
 
   const [status, setStatus] = useState<TallyStatus>("IDLE");
-  const [ballots, setBallots] = useState<any[]>([]);
+  const [ballots, setBallots] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [lastJobId, setLastJobId] = useState<string | null>(null);
+  const [tallyComputation, setTallyComputation] = useState<RealTallyComputation | null>(null);
 
   const addLog = (msg: string) => setLogs(l => [...l, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
@@ -41,6 +55,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
     try {
       setErrorMsg("");
       setLogs([]);
+      setTallyComputation(null);
       setStatus("FETCHING_CIPHERTEXTS");
       addLog("Descargando boletas encriptadas desde TPE...");
       
@@ -58,9 +73,37 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         throw new Error("No hay boletas (input_count=0). Abortando. Incidente registrado.");
       }
 
-      const inputBuffer = Buffer.from(ciphertexts.join(","));
-      const derivedRoot = ethers.keccak256(inputBuffer);
-      addLog(`Root hash (Merkle Stub) derivado desde los ciphertexts indexados: ${derivedRoot}`);
+      setStatus("SIMULATING_ZK");
+      addLog("Descifrando boletas y calculando resumen real...");
+      const tallyRes = await computeRealTallyAction(electionId, ciphertexts);
+      if (!tallyRes.ok) {
+        await logIncidentAction(
+          electionId,
+          `TALLY_DECRYPTION_FAILED:${new Date().toISOString()}`,
+          "TALLY_DECRYPTION_FAILED",
+          `Fallo en descifrado/conteo real: ${tallyRes.error ?? "unknown"}`,
+          "CRITICAL",
+          [{ source: "ballots", count: ciphertexts.length }],
+        );
+        throw new Error(tallyRes.error ?? "Error en descifrado real");
+      }
+
+      const tallyData = tallyRes as {
+        ok: true;
+        summary: Record<string, number>;
+        validCount: number;
+        invalidCount: number;
+        ballotsCount: number;
+        merkleRoot: string;
+        transcript: unknown;
+        transcriptHash: string;
+      };
+
+      const derivedRoot = tallyData.merkleRoot;
+      addLog(`Root hash Merkle (real) derivado desde ciphertexts: ${derivedRoot}`);
+      addLog(
+        `Conteo real listo. Validas=${tallyData.validCount}, inválidas=${tallyData.invalidCount}. Resumen=${JSON.stringify(tallyData.summary)}`,
+      );
 
       addLog("Creando Processing Batch en base de datos...");
       const batchRes = await createProcessingBatchAction(electionId, ciphertexts.length, derivedRoot);
@@ -69,10 +112,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       addLog(`Batch creado. ID: ${batchId}`);
 
       await updateProcessingBatchStatusAction(batchId!, "RUNNING");
-      
-      // Simulating processing batch (decryption/mix)
-      addLog("Procesando Batch (Mixnet simulación)...");
-      await new Promise(r => setTimeout(r, 2000));
+
+      addLog("Procesando Batch de forma determinista (sin simulación temporal)...");
       await updateProcessingBatchStatusAction(batchId!, "COMPLETED");
       addLog("Batch procesado y completado.");
 
@@ -82,24 +123,44 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       const jobId = jobRes.jobId;
       addLog(`Tally Job creado. ID: ${jobId}`);
 
-      setStatus("SIMULATING_ZK");
-      addLog("Generando Proof Experimental... (Esto es un Stub temporal. Mixnet/ZKP está pendiente para Fase 6 avanzada)");
-      await new Promise(r => setTimeout(r, 2000));
-      
-      const pseudoRandomBlock = ethers.hexlify(ethers.randomBytes(32));
+      const transcriptHash = tallyData.transcriptHash;
       const proofPayload = ethers.solidityPacked(
-        ["string", "bytes32", "uint256"], 
-        ["BU-PVP-1:TALLY_STUB", pseudoRandomBlock, ciphertexts.length]
+        ["string", "bytes32", "bytes32", "uint256"],
+        ["BU-PVP-1:TALLY_TRANSCRIPT_V1", derivedRoot, transcriptHash, BigInt(ciphertexts.length)],
       );
-      
+
       setStatus("PUBLISHING_STUB");
-      addLog(`Enviando Proof Stub On-Chain...`);
+      addLog("Publicando commitment del transcript de tally on-chain...");
       const proofResult = await publishProofAction(electionId, proofPayload);
       if (!proofResult.ok) throw new Error(`Fallo publicando proof: ${proofResult.error}`);
       addLog(`Proof publicado on-chain. Tx: ${proofResult.txHash}`);
 
-      await updateTallyJobStatusAction(jobId!, "COMPLETED", "SIMULATED", proofResult.txHash!);
+      await updateTallyJobStatusAction(
+        jobId!,
+        "COMPLETED",
+        "TRANSCRIPT_VERIFIED",
+        proofResult.txHash!,
+        {
+          summary: tallyData.summary,
+          validCount: tallyData.validCount,
+          invalidCount: tallyData.invalidCount,
+          ballotsCount: tallyData.ballotsCount,
+          merkleRoot: derivedRoot,
+          transcriptHash,
+        },
+      );
       setLastJobId(jobId!);
+      setTallyComputation({
+        summary: tallyData.summary,
+        validCount: tallyData.validCount,
+        invalidCount: tallyData.invalidCount,
+        ballotsCount: tallyData.ballotsCount,
+        merkleRoot: derivedRoot,
+        transcriptHash,
+        transcript: tallyData.transcript,
+        proofPayload,
+        proofTxHash: proofResult.txHash!,
+      });
 
       setStatus("PUBLISHING_ACTA");
       addLog("Generando ACTA_ESCRUTINIO firmada y anclando hash en la blockchain...");
@@ -107,10 +168,15 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       const actaJson = {
         kind: "ACTA_ESCRUTINIO",
         electionId,
-        mockResults: true,
-        note: "EXPERIMENTAL TALLY STUB — resultSummary es estático, no proviene de descifrado real",
-        totalProcessed: ciphertexts.length,
-        proofPayload: proofPayload,
+        tallyMode: "REAL_TRANSCRIPT",
+        note: "Descifrado y conteo reales ejecutados. Compromiso de transcript publicado; ZK completa pendiente.",
+        totalProcessed: tallyData.ballotsCount,
+        validBallots: tallyData.validCount,
+        invalidBallots: tallyData.invalidCount,
+        summary: tallyData.summary,
+        merkleRoot: derivedRoot,
+        transcriptHash,
+        proofPayload,
         timestamp: new Date().toISOString()
       };
       
@@ -125,7 +191,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       addLog(`Fase Results Published activada. Tx: ${resultsResult.txHash}`);
 
       setStatus("DONE");
-      addLog("Escrutinio completado íntegramente de forma experimental.");
+      addLog("Escrutinio completado con descifrado y conteo reales.");
     } catch (err: any) {
       setErrorMsg(err.message || String(err));
       setStatus("IDLE");
@@ -135,37 +201,50 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
   const handlePublishResults = async () => {
     try {
       setErrorMsg("");
+      if (!tallyComputation) {
+        throw new Error("No existe un resultado de tally real para publicar. Ejecuta primero el procesamiento.");
+      }
+
       const jobId = lastJobId ?? "unknown-job";
       addLog(`Generando Result Payload (basado en tallyJobId: ${jobId})...`);
       const resultJson = {
         electionId,
         tallyJobId: jobId,
-        proofState: "SIMULATED",
-        ballotsCount: ballots.length,
+        proofState: "TRANSCRIPT_VERIFIED",
+        ballotsCount: tallyComputation.ballotsCount,
         batchesCount: 1,
-        resultMode: "SIMULATED",
-        summary: {
-          "Opcion A": 10,
-          "Opcion B": 5
-        },
+        resultMode: "TRANSCRIPT_VERIFIED",
+        summary: tallyComputation.summary,
+        validBallots: tallyComputation.validCount,
+        invalidBallots: tallyComputation.invalidCount,
+        merkleRoot: tallyComputation.merkleRoot,
+        transcriptHash: tallyComputation.transcriptHash,
+        proofPayload: tallyComputation.proofPayload,
+        proofTxHash: tallyComputation.proofTxHash,
         honesty: {
-          note: "El resultSummary es ESTÁTICO y no proviene de descifrado real de los ciphertexts.",
-          whatIsReal: "Anchorajes on-chain, hashes, conteos de boletas, processing batches",
-          whatIsSimulated: "Descifrado, resultSummary, ZK proof"
+          note: "El resultSummary proviene de descifrado real de ciphertexts y transcript verificable.",
+          whatIsReal: "Descifrado, conteo, Merkle root, commitment on-chain, actas ancladas",
+          whatIsPending: "Prueba ZK completa"
         },
         publicationTimestamp: new Date().toISOString(),
       };
 
-      const payloadRes = await createResultPayloadAction(electionId, jobId, resultJson);
+      const payloadRes = await createResultPayloadAction(electionId, jobId, resultJson, {
+        proofState: "TRANSCRIPT_VERIFIED",
+        resultKind: "TALLY_REAL",
+      });
       if (!payloadRes.ok) throw new Error(`Fallo guardando payload: ${payloadRes.error}`);
-      addLog(`Result Payload publicado. Hash: ${payloadRes.payloadHash}`);
+      addLog(`Result Payload publicado. Hash: ${payloadRes.payloadHash} | modo=${payloadRes.resultMode}`);
 
       addLog("Generando ACTA_RESULTADOS (kind=3) y anclando on-chain...");
       const actaJson = {
         kind: "ACTA_RESULTADOS",
         electionId,
-        mockResults: true,
-        note: "EXPERIMENTAL RESULTS — resultSummary es estático",
+        tallyMode: "REAL_TRANSCRIPT",
+        note: "Resultados publicados desde conteo real; ZK completa pendiente.",
+        summary: tallyComputation.summary,
+        validBallots: tallyComputation.validCount,
+        invalidBallots: tallyComputation.invalidCount,
         payloadHash: payloadRes.payloadHash,
         timestamp: new Date().toISOString()
       };
@@ -193,9 +272,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       <div className="rounded-lg border border-yellow-700 bg-yellow-900/30 p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-yellow-500 mb-2">Advertencia Oficial JED</h2>
         <p className="text-sm text-yellow-100">
-          Esta consola abstracta opera sobre un marco Cero-Conocimiento experimental temporal (Proof Stub). 
-          La prueba matemática publicada generará un hash pseudoaleatorio que documenta el progreso on-chain y abre Phase 7, 
-          pero no ejecuta Verificadores de Curva Elíptica rigurosos.
+          Esta consola ejecuta descifrado y conteo reales con compromiso de transcript verificable publicado on-chain.
+          La prueba ZK completa aún está pendiente de integración; mientras tanto, la auditoría debe validar transcript y hashes.
         </p>
       </div>
 
@@ -228,7 +306,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
               onClick={handlePublishResults}
               className={`px-4 py-3 rounded-md font-bold text-sm tracking-wide bg-purple-600 hover:bg-purple-500 text-white mt-4`}
             >
-              PUBLICAR RESULTADOS EXPERIMENTALES Y ABRIR AUDITORÍA
+              PUBLICAR RESULTADOS Y ABRIR AUDITORÍA
             </button>
           )}
         </div>

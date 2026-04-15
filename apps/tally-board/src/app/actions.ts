@@ -3,13 +3,119 @@
 import { ethers } from "ethers";
 import { getEnv } from "@/lib/env";
 import { BU_PVP_1_ELECTION_REGISTRY_ABI } from "@blockurna/sdk";
-import { signActaECDSA } from "@blockurna/crypto";
+import {
+  decryptBallotPayload,
+  deriveBallotMerkleRoot,
+  signActaECDSA,
+} from "@blockurna/crypto";
 
 function getContract() {
   const env = getEnv();
   const provider = new ethers.JsonRpcProvider(env.RPC_URL);
   const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
   return new ethers.Contract(env.ELECTION_REGISTRY_ADDRESS, BU_PVP_1_ELECTION_REGISTRY_ABI, wallet);
+}
+
+function mapProofStateToResultMode(proofState: string): string {
+  const state = String(proofState ?? "").toUpperCase();
+  if (state === "VERIFIED") return "VERIFIED";
+  if (state === "TRANSCRIPT_VERIFIED") return "TRANSCRIPT_VERIFIED";
+  if (state === "SIMULATED") return "SIMULATED";
+  if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
+  return state;
+}
+
+function decodeLegacyBallot(ciphertext: string): unknown {
+  const text = ethers.toUtf8String(ciphertext);
+  return JSON.parse(text) as unknown;
+}
+
+export async function computeRealTallyAction(electionId: string, ciphertexts: string[]) {
+  try {
+    const env = getEnv();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(env.COORDINATOR_PRIVATE_KEY)) {
+      return {
+        ok: false,
+        error: "COORDINATOR_PRIVATE_KEY ausente o inválida (se requiere 0x + 32 bytes)",
+      };
+    }
+
+    const summary: Record<string, number> = {};
+    const transcriptEntries: Array<{
+      ballotIndex: number;
+      ballotHash: string;
+      selection: string;
+      format: "X25519_XCHACHA20" | "LEGACY_RAW_HEX";
+    }> = [];
+    const errors: Array<{ ballotIndex: number; error: string }> = [];
+
+    for (let i = 0; i < ciphertexts.length; i += 1) {
+      const ciphertext = String(ciphertexts[i]);
+      const ballotHash = ethers.keccak256(ciphertext);
+
+      try {
+        let decrypted: unknown;
+        let format: "X25519_XCHACHA20" | "LEGACY_RAW_HEX" = "X25519_XCHACHA20";
+        try {
+          decrypted = decryptBallotPayload(ciphertext, env.COORDINATOR_PRIVATE_KEY);
+        } catch {
+          // Transitional compatibility while old ballots are drained from the system.
+          decrypted = decodeLegacyBallot(ciphertext);
+          format = "LEGACY_RAW_HEX";
+        }
+
+        const selectionRaw =
+          typeof decrypted === "object" && decrypted !== null && "selection" in decrypted
+            ? (decrypted as any).selection
+            : null;
+
+        if (typeof selectionRaw !== "string" || selectionRaw.trim().length === 0) {
+          throw new Error("selection_missing_or_invalid");
+        }
+
+        const selection = selectionRaw.trim();
+        summary[selection] = (summary[selection] ?? 0) + 1;
+        transcriptEntries.push({
+          ballotIndex: i,
+          ballotHash,
+          selection,
+          format,
+        });
+      } catch (err: unknown) {
+        errors.push({ ballotIndex: i, error: (err as Error).message });
+      }
+    }
+
+    const merkleRoot = deriveBallotMerkleRoot(ciphertexts);
+    const transcript = {
+      protocolVersion: "BU-PVP-1",
+      transcriptVersion: "TALLY_TRANSCRIPT_V1",
+      electionId: String(electionId),
+      computedAt: new Date().toISOString(),
+      ballotsCount: ciphertexts.length,
+      decryptedValidCount: transcriptEntries.length,
+      invalidCount: errors.length,
+      merkleRoot,
+      summary,
+      ballots: transcriptEntries,
+      errors,
+    };
+
+    const transcriptHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(transcript)));
+
+    return {
+      ok: true,
+      summary,
+      validCount: transcriptEntries.length,
+      invalidCount: errors.length,
+      ballotsCount: ciphertexts.length,
+      merkleRoot,
+      transcript,
+      transcriptHash,
+    };
+  } catch (err: any) {
+    return { ok: false, error: err.message || String(err) };
+  }
 }
 
 export async function publishProofAction(electionId: string, proofPayload: string) {
@@ -177,12 +283,27 @@ export async function createTallyJobAction(electionId: string, basedOnBatchSet: 
   }
 }
 
-export async function updateTallyJobStatusAction(jobId: string, status: string, proofState: string, commitment: string) {
+export async function updateTallyJobStatusAction(
+  jobId: string,
+  status: string,
+  proofState: string,
+  commitment: string,
+  resultSummary?: unknown,
+) {
   try {
-    await pool.query(
-      `UPDATE tally_jobs SET status=$1, proof_state=$2, tally_commitment=$3, completed_at=NOW() WHERE tally_job_id=$4`,
-      [status, proofState, commitment, jobId]
-    );
+    if (resultSummary !== undefined) {
+      await pool.query(
+        `UPDATE tally_jobs
+         SET status=$1, proof_state=$2, tally_commitment=$3, result_summary=$5, completed_at=NOW()
+         WHERE tally_job_id=$4`,
+        [status, proofState, commitment, jobId, JSON.stringify(resultSummary)],
+      );
+    } else {
+      await pool.query(
+        `UPDATE tally_jobs SET status=$1, proof_state=$2, tally_commitment=$3, completed_at=NOW() WHERE tally_job_id=$4`,
+        [status, proofState, commitment, jobId],
+      );
+    }
     return { ok: true };
   } catch (err: any) {
     return { ok: false, error: err.message || String(err) };
@@ -208,7 +329,12 @@ export async function logIncidentAction(electionId: string, fingerprint: string,
   }
 }
 
-export async function createResultPayloadAction(electionId: string, tallyJobId: string, payloadJson: any) {
+export async function createResultPayloadAction(
+  electionId: string,
+  tallyJobId: string,
+  payloadJson: any,
+  options?: { proofState?: string; resultKind?: string; publicationStatus?: string },
+) {
   try {
     const payloadId = crypto.randomUUID();
     const chainId = "31337";
@@ -216,14 +342,28 @@ export async function createResultPayloadAction(electionId: string, tallyJobId: 
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
     const payloadHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(payloadJson)));
+    const proofState = options?.proofState ?? "SIMULATED";
+    const resultKind = options?.resultKind ?? "EXPERIMENTAL";
+    const publicationStatus = options?.publicationStatus ?? "PUBLISHED";
 
     await pool.query(
       `INSERT INTO result_payloads (
         id, chain_id, contract_address, election_id, tally_job_id, result_kind, payload_json, payload_hash, publication_status, proof_state, published_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())`,
-      [payloadId, chainId, contractAddress, electionId, tallyJobId, "EXPERIMENTAL", JSON.stringify(payloadJson), payloadHash, "PUBLISHED", "SIMULATED"]
+      [
+        payloadId,
+        chainId,
+        contractAddress,
+        electionId,
+        tallyJobId,
+        resultKind,
+        JSON.stringify(payloadJson),
+        payloadHash,
+        publicationStatus,
+        proofState,
+      ]
     );
-    return { ok: true, payloadId, payloadHash };
+    return { ok: true, payloadId, payloadHash, proofState, resultMode: mapProofStateToResultMode(proofState) };
   } catch (err: any) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -266,7 +406,7 @@ export async function persistAuditBundleAction(electionId: string) {
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
     // Collect counts for manifest
-    const [ballotsR, batchesR, jobsR, resultsR, actsR, anchorsR, incidentsR] = await Promise.all([
+    const [ballotsR, batchesR, jobsR, resultsR, actsR, anchorsR, incidentsR, latestResultR] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS c FROM ballot_records WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM processing_batches WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM tally_jobs WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
@@ -274,7 +414,11 @@ export async function persistAuditBundleAction(electionId: string) {
       pool.query(`SELECT COUNT(*)::int AS c FROM acta_contents WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM acta_anchors WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM incident_logs WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
+      pool.query(`SELECT proof_state AS "proofState" FROM result_payloads WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at DESC LIMIT 1`, [chainId, contractAddress, electionId]),
     ]);
+
+    const latestProofState = String(latestResultR.rows[0]?.proofState ?? "NOT_IMPLEMENTED");
+    const derivedResultMode = mapProofStateToResultMode(latestProofState);
 
     const manifest = {
       electionId,
@@ -291,9 +435,16 @@ export async function persistAuditBundleAction(electionId: string) {
         incidents: incidentsR.rows[0]?.c ?? 0,
       },
       honesty: {
-        resultMode: "SIMULATED",
-        proofState: "SIMULATED",
-        note: "El resultSummary es estático y no proviene de descifrado real. Los anchorajes on-chain son reales.",
+        resultMode: derivedResultMode,
+        proofState: latestProofState,
+        note:
+          latestProofState === "VERIFIED"
+            ? "Resultado y prueba verificados."
+            : latestProofState === "TRANSCRIPT_VERIFIED"
+              ? "Descifrado y conteo reales con transcript verificable; ZK completa pendiente."
+              : latestProofState === "SIMULATED"
+                ? "Resultado marcado como simulado."
+                : "Resultado aún no verificado.",
       },
     };
 
