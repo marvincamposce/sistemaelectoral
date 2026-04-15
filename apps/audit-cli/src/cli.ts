@@ -9,6 +9,16 @@ import { verifyActaAnchoredOnChain, verifyActaFile } from "@blockurna/sdk";
 
 const program = new Command();
 
+function isCriticalSeverity(severity: string): boolean {
+  const s = String(severity ?? "").toUpperCase();
+  return s === "CRITICAL" || s === "ERROR";
+}
+
+function isWarningSeverity(severity: string): boolean {
+  const s = String(severity ?? "").toUpperCase();
+  return s === "WARNING" || s === "WARN";
+}
+
 function normalizeApiBase(url: string): string {
   return url.replace(/\/$/, "");
 }
@@ -110,7 +120,7 @@ program
 
     type IncidentsResponse = {
       ok: boolean;
-      incidents: Array<{ fingerprint: string; severity: string }>;
+      incidents: Array<{ fingerprint: string; severity: string; active?: boolean }>;
     };
 
     const meta = await fetchJson<ActMetaResponse>(
@@ -140,13 +150,15 @@ program
     );
     const actIncidentSeverities = new Set(
       (incidents.incidents ?? [])
+        .filter((i) => i.active !== false)
         .filter((i) => typeof i.fingerprint === "string" && i.fingerprint.endsWith(`:${actIdLower}`))
         .map((i) => i.severity),
     );
-    const consistencyStatus = actIncidentSeverities.has("ERROR")
-      ? "ERROR"
-      : actIncidentSeverities.has("WARN")
-        ? "WARN"
+
+    const consistencyStatus = Array.from(actIncidentSeverities.values()).some(isCriticalSeverity)
+      ? "CRITICAL"
+      : Array.from(actIncidentSeverities.values()).some(isWarningSeverity)
+        ? "WARNING"
         : "OK";
 
     const out = {

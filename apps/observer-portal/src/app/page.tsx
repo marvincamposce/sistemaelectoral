@@ -117,14 +117,43 @@ type IncidentsResponse = {
     severity: string;
     message: string;
     details: any;
+    relatedEntityType?: string | null;
+    relatedEntityId?: string | null;
+    evidencePointers?: any;
     firstSeenAt: string;
+    detectedAt?: string;
     lastSeenAt: string;
     occurrences: string;
     relatedTxHash: string | null;
     relatedBlockNumber: string | null;
     relatedBlockTimestamp: string | null;
+    active?: boolean;
+    resolvedAt?: string | null;
   }>;
 };
+
+function isCriticalSeverity(severity: string): boolean {
+  const s = String(severity ?? "").toUpperCase();
+  return s === "CRITICAL" || s === "ERROR";
+}
+
+function isWarningSeverity(severity: string): boolean {
+  const s = String(severity ?? "").toUpperCase();
+  return s === "WARNING" || s === "WARN";
+}
+
+function severityBadgeClasses(severity: string): string {
+  if (isCriticalSeverity(severity)) return "bg-neutral-900 text-white";
+  if (isWarningSeverity(severity)) return "bg-neutral-700 text-white";
+  return "bg-neutral-200 text-neutral-900";
+}
+
+function normalizeSeverityLabel(severity: string): string {
+  const s = String(severity ?? "").toUpperCase();
+  if (s === "ERROR") return "CRITICAL";
+  if (s === "WARN") return "WARNING";
+  return s.length > 0 ? s : "UNKNOWN";
+}
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
@@ -235,6 +264,15 @@ export default async function Page() {
 
         <div className="space-y-4">
           {electionsDetailed.map((e) => {
+            const activeIncidents = (e.incidents ?? []).filter((i) => i.active !== false);
+            const resolvedIncidents = (e.incidents ?? []).filter((i) => i.active === false);
+
+            const globalConsistency = activeIncidents.some((i) => isCriticalSeverity(i.severity))
+              ? "CRITICAL"
+              : activeIncidents.some((i) => isWarningSeverity(i.severity))
+                ? "WARNING"
+                : "OK";
+
             const timeline = [
               {
                 key: `created:${e.electionId}`,
@@ -440,6 +478,12 @@ export default async function Page() {
                 <div className="mt-2 rounded-md border border-neutral-200 p-3">
                   {e.consistency ? (
                     <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-neutral-500">estado global</div>
+                        <div className={`rounded px-2 py-0.5 text-[10px] font-semibold ${severityBadgeClasses(globalConsistency)}`}>
+                          {globalConsistency}
+                        </div>
+                      </div>
                       <div className="text-xs text-neutral-500">computedAt: {e.consistency.computedAt}</div>
                       <div className="text-xs text-neutral-500">dataVersion: {e.consistency.dataVersion}</div>
                       <div className="text-xs text-neutral-700">
@@ -450,6 +494,9 @@ export default async function Page() {
                           incidentes (reporte): {e.consistency.report.incidents.length}
                         </div>
                       ) : null}
+                      <div className="text-xs text-neutral-700">
+                        activos: {activeIncidents.length} · resueltos: {resolvedIncidents.length}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-sm text-neutral-600">(Sin reporte de consistencia)</div>
@@ -463,25 +510,66 @@ export default async function Page() {
                   {e.incidents.length === 0 ? (
                     <div className="text-sm text-neutral-600">(Sin incidentes)</div>
                   ) : (
-                    e.incidents.map((i) => (
-                      <div
-                        key={i.fingerprint}
-                        className="rounded-md border border-neutral-200 p-3"
-                      >
-                        <div className="text-xs text-neutral-500">
-                          {i.severity} · {i.code} · occ {i.occurrences}
-                        </div>
-                        <div className="text-xs text-neutral-700">{i.message}</div>
-                        <div className="text-xs text-neutral-600">
-                          lastSeen: {i.lastSeenAt}
-                          {i.relatedBlockNumber ? ` · block ${i.relatedBlockNumber}` : ""}
-                          {i.relatedBlockTimestamp ? ` · ${i.relatedBlockTimestamp}` : ""}
-                        </div>
-                        {i.relatedTxHash ? (
-                          <div className="text-xs text-neutral-700 break-all">tx: {i.relatedTxHash}</div>
-                        ) : null}
-                      </div>
-                    ))
+                    <>
+                      <div className="text-xs text-neutral-600">Activos ({activeIncidents.length})</div>
+                      {activeIncidents.length === 0 ? (
+                        <div className="text-sm text-neutral-600">(Sin incidentes activos)</div>
+                      ) : (
+                        activeIncidents.map((i) => (
+                          <div
+                            key={i.fingerprint}
+                            className="rounded-md border border-neutral-200 p-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs text-neutral-500">
+                                <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold ${severityBadgeClasses(i.severity)}`}>
+                                  {normalizeSeverityLabel(i.severity)}
+                                </span>
+                                <span className="ml-2">{i.code} · occ {i.occurrences}</span>
+                              </div>
+                              <div className="text-xs text-neutral-500">activo</div>
+                            </div>
+                            <div className="text-xs text-neutral-700">{i.message}</div>
+                            <div className="text-xs text-neutral-600">
+                              lastSeen: {i.lastSeenAt}
+                              {i.relatedBlockNumber ? ` · block ${i.relatedBlockNumber}` : ""}
+                              {i.relatedBlockTimestamp ? ` · ${i.relatedBlockTimestamp}` : ""}
+                            </div>
+                            {i.relatedTxHash ? (
+                              <div className="text-xs text-neutral-700 break-all">tx: {i.relatedTxHash}</div>
+                            ) : null}
+                          </div>
+                        ))
+                      )}
+
+                      <div className="text-xs text-neutral-600 mt-3">Resueltos ({resolvedIncidents.length})</div>
+                      {resolvedIncidents.length === 0 ? (
+                        <div className="text-sm text-neutral-600">(Sin incidentes resueltos)</div>
+                      ) : (
+                        resolvedIncidents.map((i) => (
+                          <div
+                            key={i.fingerprint}
+                            className="rounded-md border border-neutral-200 p-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs text-neutral-500">
+                                <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold ${severityBadgeClasses(i.severity)}`}>
+                                  {normalizeSeverityLabel(i.severity)}
+                                </span>
+                                <span className="ml-2">{i.code} · occ {i.occurrences}</span>
+                              </div>
+                              <div className="text-xs text-neutral-500">resuelto</div>
+                            </div>
+                            <div className="text-xs text-neutral-700">{i.message}</div>
+                            <div className="text-xs text-neutral-600">
+                              resolvedAt: {i.resolvedAt ?? "(desconocido)"}
+                              {i.relatedBlockNumber ? ` · block ${i.relatedBlockNumber}` : ""}
+                              {i.relatedTxHash ? ` · tx ${i.relatedTxHash}` : ""}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </>
                   )}
                 </div>
               </div>

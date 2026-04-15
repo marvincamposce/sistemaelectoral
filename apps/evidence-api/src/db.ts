@@ -19,6 +19,12 @@ ALTER TABLE indexer_state
 ALTER TABLE indexer_state
   ADD COLUMN IF NOT EXISTS last_indexed_block_hash TEXT;
 
+ALTER TABLE indexer_state
+  ADD COLUMN IF NOT EXISTS last_reset_at TIMESTAMPTZ;
+
+ALTER TABLE indexer_state
+  ADD COLUMN IF NOT EXISTS last_reset_reason TEXT;
+
 CREATE TABLE IF NOT EXISTS elections (
   chain_id TEXT NOT NULL,
   contract_address TEXT NOT NULL,
@@ -180,8 +186,27 @@ CREATE TABLE IF NOT EXISTS incident_logs (
   related_block_timestamp TIMESTAMPTZ,
   PRIMARY KEY (chain_id, contract_address, election_id, fingerprint)
 );
+
+ALTER TABLE incident_logs
+  ADD COLUMN IF NOT EXISTS related_entity_type TEXT;
+
+ALTER TABLE incident_logs
+  ADD COLUMN IF NOT EXISTS related_entity_id TEXT;
+
+ALTER TABLE incident_logs
+  ADD COLUMN IF NOT EXISTS evidence_pointers JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE incident_logs
+  ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE incident_logs
+  ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS incident_logs_election_idx
   ON incident_logs(chain_id, contract_address, election_id, last_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS incident_logs_election_active_idx
+  ON incident_logs(chain_id, contract_address, election_id, active, last_seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS consistency_report_runs (
   run_id BIGSERIAL PRIMARY KEY,

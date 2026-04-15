@@ -96,8 +96,8 @@ async function ensureEvidenceNotStale(params: {
     );
     await resetEvidenceForContract({ pool, chainId, contractAddress });
     await pool.query(
-      "UPDATE indexer_state SET next_block=$3, genesis_block_hash=$4, last_indexed_block=NULL, last_indexed_block_hash=NULL, updated_at=NOW() WHERE chain_id=$1 AND contract_address=$2",
-      [chainId, contractAddress, startBlock, genesisBlockHash],
+      "UPDATE indexer_state SET next_block=$3, genesis_block_hash=$4, last_indexed_block=NULL, last_indexed_block_hash=NULL, last_reset_at=NOW(), last_reset_reason=$5, updated_at=NOW() WHERE chain_id=$1 AND contract_address=$2",
+      [chainId, contractAddress, startBlock, genesisBlockHash, reason],
     );
     return startBlock;
   };
@@ -189,7 +189,7 @@ function actTypeFromKind(kind: number): string {
   return ACTA_KIND_LABELS[kind] ?? String(kind);
 }
 
-type Severity = "INFO" | "WARN" | "ERROR";
+type Severity = "INFO" | "WARNING" | "CRITICAL";
 
 type LoadedActaFromDisk = {
   filePath: string;
@@ -353,13 +353,17 @@ async function refreshActaCustodyIncidents(params: {
 
   await pool.query(
     electionFilter
-      ? `DELETE FROM incident_logs
+      ? `UPDATE incident_logs
+         SET active=false, resolved_at=NOW()
          WHERE chain_id=$1 AND contract_address=$2
            AND election_id = ANY($3::bigint[])
-           AND code = ANY($4::text[])`
-      : `DELETE FROM incident_logs
+           AND code = ANY($4::text[])
+           AND active=true`
+      : `UPDATE incident_logs
+         SET active=false, resolved_at=NOW()
          WHERE chain_id=$1 AND contract_address=$2
-           AND code = ANY($3::text[])`,
+           AND code = ANY($3::text[])
+           AND active=true`,
     electionFilter
       ? [chainId, contractAddress, electionIdsHint, custodyCodes]
       : [chainId, contractAddress, custodyCodes],
@@ -414,21 +418,34 @@ async function refreshActaCustodyIncidents(params: {
   for (const a of anchoredActsRes.rows) {
     const key = `${a.election_id}:${a.act_id.toLowerCase()}`;
     if (!contentKeySet.has(key)) {
+      const actId = a.act_id.toLowerCase();
       await upsertIncident({
         pool,
         chainId,
         contractAddress,
         electionId: a.election_id,
         incident: {
-          fingerprint: `ACTA_CONTENT_MISSING:${a.act_id.toLowerCase()}`,
+          fingerprint: `ACTA_CONTENT_MISSING:${actId}`,
           code: "ACTA_CONTENT_MISSING",
-          severity: "ERROR",
+          severity: "CRITICAL",
           message: "Anchored acta is missing full signed content (acta_contents)",
           details: {
-            actId: a.act_id.toLowerCase(),
+            actId,
             actType: actTypeFromKind(a.kind),
             sourceDir,
           },
+          relatedEntityType: "ACTA",
+          relatedEntityId: actId,
+          evidencePointers: [
+            { type: "acta", actId, electionId: a.election_id },
+            {
+              type: "anchor",
+              kind: a.kind,
+              txHash: a.tx_hash,
+              blockNumber: Number(a.block_number),
+              blockTimestamp: a.block_timestamp?.toISOString() ?? null,
+            },
+          ],
           relatedTxHash: a.tx_hash,
           relatedBlockNumber: Number(a.block_number),
           relatedBlockTimestamp: a.block_timestamp,
@@ -484,9 +501,12 @@ async function refreshActaCustodyIncidents(params: {
         incident: {
           fingerprint: `ACTA_ANCHOR_MISSING:${actId}`,
           code: "ACTA_ANCHOR_MISSING",
-          severity: "ERROR",
+          severity: "CRITICAL",
           message: "Signed acta content exists but no on-chain anchor was indexed for actId",
           details: { actId, actType: row.act_type },
+          relatedEntityType: "ACTA",
+          relatedEntityId: actId,
+          evidencePointers: [{ type: "acta", actId, electionId: row.election_id }],
         },
       });
     }
@@ -501,13 +521,16 @@ async function refreshActaCustodyIncidents(params: {
         incident: {
           fingerprint: `ACTA_SIGNATURE_INVALID:${actId}`,
           code: "ACTA_SIGNATURE_INVALID",
-          severity: "ERROR",
+          severity: "CRITICAL",
           message: "Signed acta failed local verification (signature/hash)",
           details: {
             actId,
             actType: row.act_type,
             error: verified.error ?? "verification_failed",
           },
+          relatedEntityType: "ACTA",
+          relatedEntityId: actId,
+          evidencePointers: [{ type: "acta", actId, electionId: row.election_id }],
         },
       });
     }
@@ -522,7 +545,7 @@ async function refreshActaCustodyIncidents(params: {
         incident: {
           fingerprint: `ACTA_HASH_MISMATCH:${actId}`,
           code: "ACTA_HASH_MISMATCH",
-          severity: "ERROR",
+          severity: "CRITICAL",
           message: "Acta content hash does not match actId (anchor snapshot hash)",
           details: {
             actId,
@@ -530,6 +553,9 @@ async function refreshActaCustodyIncidents(params: {
             computedContentHash: computedHash,
             storedContentHash: String(row.content_hash ?? ""),
           },
+          relatedEntityType: "ACTA",
+          relatedEntityId: actId,
+          evidencePointers: [{ type: "acta", actId, electionId: row.election_id }],
         },
       });
     }
@@ -673,15 +699,26 @@ async function upsertIncident(params: {
     relatedTxHash?: string;
     relatedBlockNumber?: number;
     relatedBlockTimestamp?: Date | null;
+    relatedEntityType?: string;
+    relatedEntityId?: string;
+    evidencePointers?: unknown[];
+    active?: boolean;
+    resolvedAt?: Date | null;
   };
 }): Promise<void> {
   const { pool, chainId, contractAddress, electionId, incident } = params;
+
+  const active = incident.active ?? true;
+  const resolvedAt = active ? null : (incident.resolvedAt ?? new Date());
+
   await pool.query(
     `INSERT INTO incident_logs(
       chain_id, contract_address, election_id,
       fingerprint, code, severity, message, details,
-      related_tx_hash, related_block_number, related_block_timestamp
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      related_tx_hash, related_block_number, related_block_timestamp,
+      related_entity_type, related_entity_id, evidence_pointers,
+      active, resolved_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
     ON CONFLICT (chain_id, contract_address, election_id, fingerprint) DO UPDATE SET
       last_seen_at=NOW(),
       occurrences=incident_logs.occurrences + 1,
@@ -691,7 +728,12 @@ async function upsertIncident(params: {
       details=EXCLUDED.details,
       related_tx_hash=COALESCE(EXCLUDED.related_tx_hash, incident_logs.related_tx_hash),
       related_block_number=COALESCE(EXCLUDED.related_block_number, incident_logs.related_block_number),
-      related_block_timestamp=COALESCE(EXCLUDED.related_block_timestamp, incident_logs.related_block_timestamp)`,
+      related_block_timestamp=COALESCE(EXCLUDED.related_block_timestamp, incident_logs.related_block_timestamp),
+      related_entity_type=COALESCE(EXCLUDED.related_entity_type, incident_logs.related_entity_type),
+      related_entity_id=COALESCE(EXCLUDED.related_entity_id, incident_logs.related_entity_id),
+      evidence_pointers=EXCLUDED.evidence_pointers,
+      active=EXCLUDED.active,
+      resolved_at=EXCLUDED.resolved_at`,
     [
       chainId,
       contractAddress,
@@ -704,6 +746,11 @@ async function upsertIncident(params: {
       incident.relatedTxHash ?? null,
       incident.relatedBlockNumber ?? null,
       incident.relatedBlockTimestamp ?? null,
+      incident.relatedEntityType ?? null,
+      incident.relatedEntityId ?? null,
+      incident.evidencePointers ?? [],
+      active,
+      resolvedAt,
     ],
   );
 }
@@ -808,6 +855,46 @@ async function computeAndStoreConsistencyReport(params: {
     return;
   }
 
+  const managedCodes = [
+    "DUP_REGISTRY_NULLIFIER",
+    "DUP_BALLOT_INDEX",
+    "PHASE_PREVIOUS_MISMATCH",
+    "PHASE_NON_SEQUENTIAL",
+    "PHASE_CURRENT_MISMATCH",
+    "BLOCK_TIMESTAMP_MISSING",
+    "BLOCK_TIMESTAMP_NON_MONOTONIC",
+    "SIGNUP_OUT_OF_PHASE",
+    "BALLOT_OUT_OF_PHASE",
+  ];
+
+  await pool.query(
+    `UPDATE incident_logs
+     SET active=false, resolved_at=NOW()
+     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+       AND code = ANY($4::text[])
+       AND active=true`,
+    [chainId, contractAddress, electionId, managedCodes],
+  );
+
+  const missingTimestampsRes = await pool.query<{ table_name: string; n: number }>(
+    `SELECT 'phase_changes' AS table_name, COUNT(*)::int AS n
+     FROM phase_changes
+     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND block_timestamp IS NULL
+     UNION ALL
+     SELECT 'acta_anchors' AS table_name, COUNT(*)::int AS n
+     FROM acta_anchors
+     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND block_timestamp IS NULL
+     UNION ALL
+     SELECT 'signup_records' AS table_name, COUNT(*)::int AS n
+     FROM signup_records
+     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND block_timestamp IS NULL
+     UNION ALL
+     SELECT 'ballot_records' AS table_name, COUNT(*)::int AS n
+     FROM ballot_records
+     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND block_timestamp IS NULL`,
+    [chainId, contractAddress, electionId],
+  );
+
   const duplicateNullifiersRes = await pool.query<{
     registry_nullifier: string;
     n: number;
@@ -882,18 +969,47 @@ async function computeAndStoreConsistencyReport(params: {
     relatedTxHash?: string;
     relatedBlockNumber?: number;
     relatedBlockTimestamp?: Date | null;
+    relatedEntityType?: string;
+    relatedEntityId?: string;
+    evidencePointers?: unknown[];
   }> = [];
+
+  const missingTimestampTables = missingTimestampsRes.rows.filter((r) => (r.n ?? 0) > 0);
+  if (missingTimestampTables.length > 0) {
+    incidents.push({
+      fingerprint: `BLOCK_TIMESTAMP_MISSING`,
+      code: "BLOCK_TIMESTAMP_MISSING",
+      severity: "WARNING",
+      message: "Some indexed events are missing block_timestamp (backfill incomplete)",
+      details: {
+        tables: missingTimestampTables.map((r) => ({ table: r.table_name, missing: r.n })),
+      },
+      relatedEntityType: "ELECTION",
+      relatedEntityId: electionId,
+      evidencePointers: [{ type: "election", electionId }],
+    });
+  }
 
   for (const row of duplicateNullifiersRes.rows) {
     incidents.push({
       fingerprint: `DUP_REGISTRY_NULLIFIER:${row.registry_nullifier}`,
       code: "DUP_REGISTRY_NULLIFIER",
-      severity: "ERROR",
+      severity: "CRITICAL",
       message: "Duplicate registry nullifier detected in signup_records",
       details: {
         registryNullifier: row.registry_nullifier,
         occurrences: row.n,
       },
+      relatedEntityType: "REGISTRY_NULLIFIER",
+      relatedEntityId: row.registry_nullifier,
+      evidencePointers: [
+        {
+          type: "tx",
+          txHash: row.tx_hash,
+          blockNumber: Number(row.block_number),
+          blockTimestamp: row.block_timestamp?.toISOString() ?? null,
+        },
+      ],
       relatedTxHash: row.tx_hash,
       relatedBlockNumber: Number(row.block_number),
       relatedBlockTimestamp: row.block_timestamp,
@@ -904,12 +1020,22 @@ async function computeAndStoreConsistencyReport(params: {
     incidents.push({
       fingerprint: `DUP_BALLOT_INDEX:${row.ballot_index}`,
       code: "DUP_BALLOT_INDEX",
-      severity: "ERROR",
+      severity: "CRITICAL",
       message: "Duplicate ballot index detected in ballot_records",
       details: {
         ballotIndex: row.ballot_index,
         occurrences: row.n,
       },
+      relatedEntityType: "BALLOT_INDEX",
+      relatedEntityId: row.ballot_index,
+      evidencePointers: [
+        {
+          type: "tx",
+          txHash: row.tx_hash,
+          blockNumber: Number(row.block_number),
+          blockTimestamp: row.block_timestamp?.toISOString() ?? null,
+        },
+      ],
       relatedTxHash: row.tx_hash,
       relatedBlockNumber: Number(row.block_number),
       relatedBlockTimestamp: row.block_timestamp,
@@ -923,13 +1049,24 @@ async function computeAndStoreConsistencyReport(params: {
         incidents.push({
           fingerprint: `PHASE_PREVIOUS_MISMATCH:${row.tx_hash}:${row.log_index}`,
           code: "PHASE_PREVIOUS_MISMATCH",
-          severity: "ERROR",
+          severity: "CRITICAL",
           message: "PhaseChanged.previousPhase does not match the expected previous phase",
           details: {
             expectedPreviousPhase: expectedPrevious,
             observedPreviousPhase: row.previous_phase,
             newPhase: row.new_phase,
           },
+          relatedEntityType: "PHASE_CHANGE",
+          relatedEntityId: `${row.tx_hash}:${row.log_index}`,
+          evidencePointers: [
+            {
+              type: "tx",
+              txHash: row.tx_hash,
+              blockNumber: Number(row.block_number),
+              blockTimestamp: row.block_timestamp?.toISOString() ?? null,
+              logIndex: row.log_index,
+            },
+          ],
           relatedTxHash: row.tx_hash,
           relatedBlockNumber: Number(row.block_number),
           relatedBlockTimestamp: row.block_timestamp,
@@ -941,13 +1078,24 @@ async function computeAndStoreConsistencyReport(params: {
         incidents.push({
           fingerprint: `PHASE_NON_SEQUENTIAL:${row.tx_hash}:${row.log_index}`,
           code: "PHASE_NON_SEQUENTIAL",
-          severity: "WARN",
+          severity: "WARNING",
           message: "Phase transition is non-sequential (expected previous+1)",
           details: {
             previousPhase: row.previous_phase,
             newPhase: row.new_phase,
             expectedNewPhase: expectedNext,
           },
+          relatedEntityType: "PHASE_CHANGE",
+          relatedEntityId: `${row.tx_hash}:${row.log_index}`,
+          evidencePointers: [
+            {
+              type: "tx",
+              txHash: row.tx_hash,
+              blockNumber: Number(row.block_number),
+              blockTimestamp: row.block_timestamp?.toISOString() ?? null,
+              logIndex: row.log_index,
+            },
+          ],
           relatedTxHash: row.tx_hash,
           relatedBlockNumber: Number(row.block_number),
           relatedBlockTimestamp: row.block_timestamp,
@@ -962,12 +1110,237 @@ async function computeAndStoreConsistencyReport(params: {
       incidents.push({
         fingerprint: `PHASE_CURRENT_MISMATCH:${election.phase}:${lastPhase}`,
         code: "PHASE_CURRENT_MISMATCH",
-        severity: "ERROR",
+        severity: "CRITICAL",
         message: "elections.phase does not match the last PhaseChanged.newPhase",
         details: {
           electionPhase: election.phase,
           lastPhaseChangedNewPhase: lastPhase,
         },
+        relatedEntityType: "ELECTION",
+        relatedEntityId: electionId,
+        evidencePointers: [{ type: "election", electionId }],
+      });
+    }
+  }
+
+  {
+    const timelineRes = await pool.query<{
+      kind: string;
+      tx_hash: string;
+      log_index: number;
+      block_number: string;
+      block_timestamp: Date | null;
+    }>(
+      `SELECT kind, tx_hash, log_index, block_number::text AS block_number, block_timestamp
+       FROM (
+         SELECT 'PhaseChanged' AS kind, tx_hash, log_index, block_number, block_timestamp
+         FROM phase_changes
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+         UNION ALL
+         SELECT 'ActaPublished' AS kind, tx_hash, log_index, block_number, block_timestamp
+         FROM acta_anchors
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+         UNION ALL
+         SELECT 'SignupRecorded' AS kind, tx_hash, log_index, block_number, block_timestamp
+         FROM signup_records
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+         UNION ALL
+         SELECT 'BallotPublished' AS kind, tx_hash, log_index, block_number, block_timestamp
+         FROM ballot_records
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+       ) t
+       ORDER BY block_number ASC, log_index ASC
+       LIMIT 5000`,
+      [chainId, contractAddress, electionId],
+    );
+
+    let prevTs: Date | null = null;
+    let prevEvent: (typeof timelineRes.rows)[number] | null = null;
+    for (const ev of timelineRes.rows) {
+      if (prevTs && ev.block_timestamp && ev.block_timestamp.getTime() < prevTs.getTime()) {
+        incidents.push({
+          fingerprint: `BLOCK_TIMESTAMP_NON_MONOTONIC`,
+          code: "BLOCK_TIMESTAMP_NON_MONOTONIC",
+          severity: "WARNING",
+          message: "Non-monotonic block_timestamp detected across indexed events",
+          details: {
+            previous: prevEvent
+              ? {
+                  kind: prevEvent.kind,
+                  txHash: prevEvent.tx_hash,
+                  logIndex: prevEvent.log_index,
+                  blockNumber: Number(prevEvent.block_number),
+                  blockTimestamp: prevEvent.block_timestamp?.toISOString() ?? null,
+                }
+              : null,
+            current: {
+              kind: ev.kind,
+              txHash: ev.tx_hash,
+              logIndex: ev.log_index,
+              blockNumber: Number(ev.block_number),
+              blockTimestamp: ev.block_timestamp?.toISOString() ?? null,
+            },
+          },
+          relatedEntityType: "ELECTION",
+          relatedEntityId: electionId,
+          evidencePointers: [
+            prevEvent
+              ? {
+                  type: "tx",
+                  txHash: prevEvent.tx_hash,
+                  blockNumber: Number(prevEvent.block_number),
+                  logIndex: prevEvent.log_index,
+                }
+              : null,
+            {
+              type: "tx",
+              txHash: ev.tx_hash,
+              blockNumber: Number(ev.block_number),
+              logIndex: ev.log_index,
+            },
+          ].filter(Boolean) as unknown[],
+        });
+        break;
+      }
+
+      if (ev.block_timestamp) {
+        prevTs = ev.block_timestamp;
+        prevEvent = ev;
+      }
+    }
+  }
+
+  {
+    type EventRow = {
+      tx_hash: string;
+      log_index: number;
+      block_number: string;
+      block_timestamp: Date | null;
+    };
+
+    const signupsRes = await pool.query<EventRow>(
+      `SELECT tx_hash, log_index, block_number::text AS block_number, block_timestamp
+       FROM signup_records
+       WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+       ORDER BY block_number ASC, log_index ASC
+       LIMIT 5000`,
+      [chainId, contractAddress, electionId],
+    );
+
+    const ballotsRes = await pool.query<EventRow>(
+      `SELECT tx_hash, log_index, block_number::text AS block_number, block_timestamp
+       FROM ballot_records
+       WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+       ORDER BY block_number ASC, log_index ASC
+       LIMIT 5000`,
+      [chainId, contractAddress, electionId],
+    );
+
+    const phasePoints = phaseHistoryRes.rows.map((r) => ({
+      blockNumber: Number(r.block_number),
+      logIndex: r.log_index,
+      newPhase: r.new_phase,
+    }));
+
+    const phaseAt = (events: EventRow[]) => {
+      let currentPhase = 0;
+      let idx = 0;
+      const out = [] as Array<{ ev: EventRow; phase: number }>;
+      for (const ev of events) {
+        const bn = Number(ev.block_number);
+        while (idx < phasePoints.length) {
+          const p = phasePoints[idx]!;
+          if (p.blockNumber < bn || (p.blockNumber === bn && p.logIndex < ev.log_index)) {
+            currentPhase = p.newPhase;
+            idx++;
+            continue;
+          }
+          break;
+        }
+        out.push({ ev, phase: currentPhase });
+      }
+      return out;
+    };
+
+    const signupOut = phaseAt(signupsRes.rows).filter((x) => x.phase !== 1);
+    if (signupOut.length > 0) {
+      const samples = signupOut.slice(0, 5);
+      incidents.push({
+        fingerprint: `SIGNUP_OUT_OF_PHASE`,
+        code: "SIGNUP_OUT_OF_PHASE",
+        severity: "CRITICAL",
+        message: "SignupRecorded events detected outside REGISTRY_OPEN phase",
+        details: {
+          total: signupOut.length,
+          phases: Object.fromEntries(
+            Object.entries(
+              signupOut.reduce<Record<string, number>>((acc, x) => {
+                const k = String(x.phase);
+                acc[k] = (acc[k] ?? 0) + 1;
+                return acc;
+              }, {}),
+            ).sort(([a], [b]) => Number(a) - Number(b)),
+          ),
+          samples: samples.map((s) => ({
+            txHash: s.ev.tx_hash,
+            logIndex: s.ev.log_index,
+            blockNumber: Number(s.ev.block_number),
+            blockTimestamp: s.ev.block_timestamp?.toISOString() ?? null,
+            phaseAtEvent: s.phase,
+            phaseLabel: PHASE_LABELS[s.phase] ?? String(s.phase),
+          })),
+          expectedPhase: 1,
+          expectedPhaseLabel: PHASE_LABELS[1] ?? "1",
+        },
+        relatedEntityType: "ELECTION",
+        relatedEntityId: electionId,
+        evidencePointers: samples.map((s) => ({
+          type: "tx",
+          txHash: s.ev.tx_hash,
+          blockNumber: Number(s.ev.block_number),
+          logIndex: s.ev.log_index,
+        })),
+      });
+    }
+
+    const ballotOut = phaseAt(ballotsRes.rows).filter((x) => x.phase !== 3);
+    if (ballotOut.length > 0) {
+      const samples = ballotOut.slice(0, 5);
+      incidents.push({
+        fingerprint: `BALLOT_OUT_OF_PHASE`,
+        code: "BALLOT_OUT_OF_PHASE",
+        severity: "CRITICAL",
+        message: "BallotPublished events detected outside VOTING_OPEN phase",
+        details: {
+          total: ballotOut.length,
+          phases: Object.fromEntries(
+            Object.entries(
+              ballotOut.reduce<Record<string, number>>((acc, x) => {
+                const k = String(x.phase);
+                acc[k] = (acc[k] ?? 0) + 1;
+                return acc;
+              }, {}),
+            ).sort(([a], [b]) => Number(a) - Number(b)),
+          ),
+          samples: samples.map((s) => ({
+            txHash: s.ev.tx_hash,
+            logIndex: s.ev.log_index,
+            blockNumber: Number(s.ev.block_number),
+            blockTimestamp: s.ev.block_timestamp?.toISOString() ?? null,
+            phaseAtEvent: s.phase,
+            phaseLabel: PHASE_LABELS[s.phase] ?? String(s.phase),
+          })),
+          expectedPhase: 3,
+          expectedPhaseLabel: PHASE_LABELS[3] ?? "3",
+        },
+        relatedEntityType: "ELECTION",
+        relatedEntityId: electionId,
+        evidencePointers: samples.map((s) => ({
+          type: "tx",
+          txHash: s.ev.tx_hash,
+          blockNumber: Number(s.ev.block_number),
+          logIndex: s.ev.log_index,
+        })),
       });
     }
   }
@@ -976,7 +1349,7 @@ async function computeAndStoreConsistencyReport(params: {
     await upsertIncident({ pool, chainId, contractAddress, electionId, incident });
   }
 
-  const ok = !incidents.some((i) => i.severity === "ERROR");
+  const ok = !incidents.some((i) => i.severity === "CRITICAL");
 
   const report = {
     chainId,
@@ -1048,6 +1421,71 @@ async function refreshConsistencyForAllElections(params: {
   });
 }
 
+async function materializePendingIndexerResetIncidents(params: {
+  pool: ReturnType<typeof createPool>;
+  chainId: string;
+  contractAddress: string;
+}): Promise<void> {
+  const { pool, chainId, contractAddress } = params;
+  const stateRes = await pool.query<{ last_reset_at: Date | null; last_reset_reason: string | null }>(
+    `SELECT last_reset_at, last_reset_reason
+     FROM indexer_state
+     WHERE chain_id=$1 AND contract_address=$2`,
+    [chainId, contractAddress],
+  );
+
+  const state = stateRes.rows[0];
+  if (!state?.last_reset_reason) return;
+
+  const electionsRes = await pool.query<{ election_id: string }>(
+    `SELECT election_id::text AS election_id
+     FROM elections
+     WHERE chain_id=$1 AND contract_address=$2
+     ORDER BY election_id ASC
+     LIMIT 500`,
+    [chainId, contractAddress],
+  );
+
+  if (electionsRes.rows.length === 0) return;
+
+  const resetAt = state.last_reset_at ?? new Date();
+  for (const row of electionsRes.rows) {
+    await upsertIncident({
+      pool,
+      chainId,
+      contractAddress,
+      electionId: row.election_id,
+      incident: {
+        fingerprint: "INDEXER_EVIDENCE_RESET",
+        code: "INDEXER_EVIDENCE_RESET",
+        severity: "WARNING",
+        message: "Evidence was reset due to detected divergence between DB and chain",
+        details: {
+          resetAt: resetAt.toISOString(),
+          reason: state.last_reset_reason,
+        },
+        relatedEntityType: "INDEXER_STATE",
+        relatedEntityId: contractAddress,
+        evidencePointers: [
+          {
+            type: "indexer_state",
+            chainId,
+            contractAddress,
+            resetAt: resetAt.toISOString(),
+          },
+        ],
+        active: false,
+        resolvedAt: resetAt,
+      },
+    });
+  }
+
+  await pool.query(
+    "UPDATE indexer_state SET last_reset_at=NULL, last_reset_reason=NULL, updated_at=NOW() WHERE chain_id=$1 AND contract_address=$2",
+    [chainId, contractAddress],
+  );
+}
+
 async function main() {
   const env = getEnv();
 
@@ -1094,6 +1532,7 @@ async function main() {
     electionIdsHint: diskRefresh.electionIdsTouched,
   });
   await refreshConsistencyForAllElections({ pool, chainId, contractAddress });
+  await materializePendingIndexerResetIncidents({ pool, chainId, contractAddress });
 
   const iface = new ethers.Interface(BU_PVP_1_ELECTION_REGISTRY_ABI);
 
@@ -1369,6 +1808,8 @@ async function main() {
         contractAddress,
         electionIds: Array.from(touchedElectionIds.values()).sort((a, b) => Number(a) - Number(b)),
       });
+
+      await materializePendingIndexerResetIncidents({ pool, chainId, contractAddress });
     }
   }
 }

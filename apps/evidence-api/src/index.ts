@@ -58,8 +58,8 @@ type ActRefRow = {
   contentHash: string | null;
   createdAt: Date | null;
   verificationStatus: string | null;
-  hasError: boolean;
-  hasWarn: boolean;
+  hasCritical: boolean;
+  hasWarning: boolean;
 };
 
 type ActMetaRow = {
@@ -116,7 +116,22 @@ type IncidentRow = {
   relatedTxHash: string | null;
   relatedBlockNumber: string | null;
   relatedBlockTimestamp: Date | null;
+  relatedEntityType: string | null;
+  relatedEntityId: string | null;
+  evidencePointers: unknown;
+  active: boolean;
+  resolvedAt: Date | null;
 };
+
+function isCriticalSeverity(severity: string): boolean {
+  const s = String(severity ?? "").toUpperCase();
+  return s === "CRITICAL" || s === "ERROR";
+}
+
+function isWarningSeverity(severity: string): boolean {
+  const s = String(severity ?? "").toUpperCase();
+  return s === "WARNING" || s === "WARN";
+}
 
 type ElectionRow = {
   electionId: string;
@@ -413,18 +428,18 @@ async function main() {
           c.content_hash AS "contentHash",
            c.created_at AS "createdAt",
            c.verification_status AS "verificationStatus",
-           COALESCE(i.has_error, false) AS "hasError",
-           COALESCE(i.has_warn, false) AS "hasWarn"
+           COALESCE(i.has_critical, false) AS "hasCritical",
+           COALESCE(i.has_warning, false) AS "hasWarning"
         FROM acta_anchors a
         LEFT JOIN acta_contents c
           ON c.chain_id=a.chain_id AND c.contract_address=a.contract_address AND c.election_id=a.election_id AND c.act_id=a.snapshot_hash
           LEFT JOIN (
             SELECT
               regexp_replace(fingerprint, '^.*:', '') AS act_id,
-              BOOL_OR(severity='ERROR') AS has_error,
-              BOOL_OR(severity='WARN') AS has_warn
+              BOOL_OR(severity IN ('CRITICAL','ERROR')) AS has_critical,
+              BOOL_OR(severity IN ('WARNING','WARN')) AS has_warning
             FROM incident_logs
-            WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+            WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND active=true
             GROUP BY act_id
           ) i ON i.act_id = a.snapshot_hash
         WHERE a.chain_id=$1 AND a.contract_address=$2 AND a.election_id=$3
@@ -439,15 +454,15 @@ async function main() {
         electionId,
         acts: res.rows.map((r) => ({
           contentAvailable: Boolean(r.contentHash),
-          consistencyStatus: r.hasError ? 'ERROR' : r.hasWarn ? 'WARN' : 'OK',
+          consistencyStatus: r.hasCritical ? 'CRITICAL' : r.hasWarning ? 'WARNING' : 'OK',
           verificationStatus: !r.contentHash
             ? 'INCOMPLETE'
             : r.verificationStatus && r.verificationStatus !== 'UNKNOWN'
               ? r.verificationStatus
-              : r.hasError
+              : r.hasCritical
                 ? 'ERROR'
-                : r.hasWarn
-                  ? 'WARN'
+                : r.hasWarning
+                  ? 'WARNING'
                   : 'OK',
           actId: r.actId,
           actType: r.actType && r.actType.length > 0 ? r.actType : actTypeFromKind(r.kind),
@@ -644,20 +659,32 @@ async function main() {
           severity: string;
           message: string;
           details: unknown;
+          relatedEntityType: string | null;
+          relatedEntityId: string | null;
+          evidencePointers: unknown;
+          firstSeenAt: Date;
         }>(
-          `SELECT code, severity, message, details
+          `SELECT
+             code,
+             severity,
+             message,
+             details,
+             related_entity_type AS "relatedEntityType",
+             related_entity_id AS "relatedEntityId",
+             evidence_pointers AS "evidencePointers",
+             first_seen_at AS "firstSeenAt"
            FROM incident_logs
-           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND fingerprint LIKE $4
+           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND fingerprint LIKE $4 AND active=true
            ORDER BY last_seen_at DESC
            LIMIT 50`,
           [chainId, contractAddress, electionId, `%:${actId}`],
         );
 
-        const severities = new Set(incidentsRes.rows.map((r) => r.severity));
-        const consistencyStatus = severities.has("ERROR")
-          ? "ERROR"
-          : severities.has("WARN")
-            ? "WARN"
+        const severities = new Set(incidentsRes.rows.map((r) => String(r.severity ?? "")));
+        const consistencyStatus = Array.from(severities.values()).some(isCriticalSeverity)
+          ? "CRITICAL"
+          : Array.from(severities.values()).some(isWarningSeverity)
+            ? "WARNING"
             : "OK";
 
         const errorDetails =
@@ -675,6 +702,10 @@ async function main() {
                   severity: r.severity,
                   message: r.message,
                   details: r.details,
+                  relatedEntityType: r.relatedEntityType,
+                  relatedEntityId: r.relatedEntityId,
+                  evidencePointers: r.evidencePointers,
+                  detectedAt: r.firstSeenAt.toISOString(),
                 })),
               };
 
@@ -919,10 +950,15 @@ async function main() {
           occurrences::text AS "occurrences",
           related_tx_hash AS "relatedTxHash",
           related_block_number::text AS "relatedBlockNumber",
-          related_block_timestamp AS "relatedBlockTimestamp"
+          related_block_timestamp AS "relatedBlockTimestamp",
+          related_entity_type AS "relatedEntityType",
+          related_entity_id AS "relatedEntityId",
+          evidence_pointers AS "evidencePointers",
+          active AS "active",
+          resolved_at AS "resolvedAt"
         FROM incident_logs
         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
-        ORDER BY last_seen_at DESC
+        ORDER BY active DESC, last_seen_at DESC
         LIMIT 200`,
         [chainId, contractAddress, electionId],
       );
@@ -935,8 +971,10 @@ async function main() {
         incidents: res.rows.map((r) => ({
           ...r,
           firstSeenAt: r.firstSeenAt.toISOString(),
+          detectedAt: r.firstSeenAt.toISOString(),
           lastSeenAt: r.lastSeenAt.toISOString(),
           relatedBlockTimestamp: r.relatedBlockTimestamp?.toISOString() ?? null,
+          resolvedAt: r.resolvedAt?.toISOString() ?? null,
         })),
       };
     } catch (err: unknown) {
