@@ -16,7 +16,7 @@ await registry.waitForDeployment();
 
 const registryAddress = await registry.getAddress();
 
-// Deterministic demo constants (research scaffold only)
+// Deterministic constants (research scaffold only)
 const manifestHash = ("0x" + "11".repeat(32)) as `0x${string}`;
 const coordinatorPubKey = ("0x" + "22".repeat(32)) as `0x${string}`;
 
@@ -44,7 +44,7 @@ const snapshotBody = {
     signups: 0,
     ballots: 0,
   },
-  notes: "Demo seed generado por scripts/demo.ts",
+  notes: "Seed experimental generado para pruebas reproducibles",
 } as const;
 
 const ed25519PrivateKeyHex =
@@ -52,7 +52,7 @@ const ed25519PrivateKeyHex =
 
 const signed = await signSnapshot(snapshotBody as any, ed25519PrivateKeyHex);
 
-const outDir = path.join("demo-output");
+const outDir = path.join("experimental-output");
 await fs.mkdir(outDir, { recursive: true });
 
 const outFile = path.join(outDir, "acta_apertura.signed.json");

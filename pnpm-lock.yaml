@@ -36,6 +36,9 @@ importers:
 
   apps/evidence-api:
     dependencies:
+      '@blockurna/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@fastify/cors':
         specifier: ^11.1.0
         version: 11.2.0
@@ -70,9 +73,15 @@ importers:
 
   apps/evidence-indexer:
     dependencies:
+      '@blockurna/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@blockurna/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@blockurna/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       dotenv:
         specifier: ^16.6.1
         version: 16.6.1

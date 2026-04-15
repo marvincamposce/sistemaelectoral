@@ -1,111 +1,219 @@
-import { ethers } from "ethers";
-
-import {
-  fetchActaAnchors,
-  fetchElection,
-  fetchElectionCount,
-  fetchElectionCounters,
-} from "@blockurna/sdk";
-
 import { getPublicEnv } from "./../lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PHASE_LABELS = [
-  "SETUP",
-  "REGISTRY_OPEN",
-  "REGISTRY_CLOSED",
-  "VOTING_OPEN",
-  "VOTING_CLOSED",
-  "PROCESSING",
-  "TALLYING",
-  "RESULTS_PUBLISHED",
-  "AUDIT_WINDOW",
-  "ARCHIVED",
-] as const;
+type ElectionsApiResponse = {
+  ok: boolean;
+  chainId: string;
+  contractAddress: string;
+  elections: Array<{
+    electionId: string;
+    manifestHash: string;
+    authority: string;
+    registryAuthority: string;
+    coordinatorPubKey: string;
+    phase: number;
+    phaseLabel?: string;
+    createdAtBlock: string;
+    createdAtTimestamp: string | null;
+    createdTxHash: string;
+    counts: { signups: number; ballots: number };
+  }>;
+};
+
+type PhaseChangesResponse = {
+  ok: boolean;
+  phaseChanges: Array<{
+    txHash: string;
+    logIndex: number;
+    blockNumber: string;
+    blockTimestamp: string | null;
+    previousPhase: number;
+    newPhase: number;
+    previousPhaseLabel: string;
+    newPhaseLabel: string;
+  }>;
+};
+
+type ActsResponse = {
+  ok: boolean;
+  acts: Array<{
+    actId: string;
+    actType: string;
+    anchorTxHash: string;
+    blockNumber: string;
+    blockTimestamp: string | null;
+    contentHash: string | null;
+    createdAt: string | null;
+  }>;
+};
+
+type AnchorsResponse = {
+  ok: boolean;
+  anchors: Array<{
+    kind: number;
+    snapshotHash: string;
+    blockNumber: string;
+    blockTimestamp: string | null;
+    txHash: string;
+    logIndex: number;
+  }>;
+};
+
+type SignupsSummaryResponse = {
+  ok: boolean;
+  summary: { total: number; uniqueNullifiers: number };
+};
+
+type SignupsResponse = {
+  ok: boolean;
+  signups: Array<{
+    registryNullifier: string;
+    votingPubKey: string;
+    blockNumber: string;
+    blockTimestamp: string | null;
+    txHash: string;
+    logIndex: number;
+  }>;
+};
+
+type BallotsSummaryResponse = {
+  ok: boolean;
+  summary: { total: number; uniqueBallotIndexes: number };
+};
+
+type BallotsResponse = {
+  ok: boolean;
+  ballots: Array<{
+    ballotIndex: string;
+    ballotHash: string;
+    ciphertext: string;
+    blockNumber: string;
+    blockTimestamp: string | null;
+    txHash: string;
+    logIndex: number;
+  }>;
+};
+
+type ConsistencyResponse = {
+  ok: boolean;
+  consistency:
+    | null
+    | {
+        runId: string;
+        dataVersion: string;
+        computedAt: string;
+        ok: boolean;
+        report: any;
+      };
+};
+
+type IncidentsResponse = {
+  ok: boolean;
+  incidents: Array<{
+    fingerprint: string;
+    code: string;
+    severity: string;
+    message: string;
+    details: any;
+    firstSeenAt: string;
+    lastSeenAt: string;
+    occurrences: string;
+    relatedTxHash: string | null;
+    relatedBlockNumber: string | null;
+    relatedBlockTimestamp: string | null;
+  }>;
+};
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Evidence API error: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
+async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+  try {
+    return await fetchJson<T>(url);
+  } catch {
+    return fallback;
+  }
+}
 
 export default async function Page() {
   const env = getPublicEnv();
 
-  let sourceLabel = "";
-  let count = 0;
-  let elections: Array<{
-    id: string;
-    election: {
-      manifestHash: string;
-      authority: string;
-      registryAuthority: string;
-      coordinatorPubKey: string;
-      phase: bigint;
-      createdAtBlock: bigint;
-    };
-    counters: { signups: bigint; ballots: bigint };
-    actas: Array<{ kind: number; snapshotHash: string; blockNumber: number; txHash: string }>;
-  }> = [];
+  const apiBase = env.NEXT_PUBLIC_EVIDENCE_API_URL.replace(/\/$/, "");
+  const sourceLabel = `API: ${apiBase}`;
 
-  if (env.mode === "api") {
-    sourceLabel = `API: ${env.NEXT_PUBLIC_EVIDENCE_API_URL}`;
-    const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/elections`, {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      throw new Error(`Evidence API error: ${res.status} ${res.statusText}`);
-    }
-    const data = (await res.json()) as any;
-    const rows = (data?.elections ?? []) as any[];
-    elections = rows.map((r) => ({
-      id: String(r.electionId),
-      election: {
-        manifestHash: String(r.manifestHash),
-        authority: String(r.authority),
-        registryAuthority: String(r.registryAuthority),
-        coordinatorPubKey: String(r.coordinatorPubKey),
-        phase: BigInt(r.phase ?? 0),
-        createdAtBlock: BigInt(r.createdAtBlock ?? 0),
-      },
-      counters: {
-        signups: BigInt(r.counts?.signups ?? 0),
-        ballots: BigInt(r.counts?.ballots ?? 0),
-      },
-      actas: ((r.actas ?? []) as any[]).map((a) => ({
-        kind: Number(a.kind ?? 0),
-        snapshotHash: String(a.snapshotHash),
-        blockNumber: Number(a.blockNumber ?? 0),
-        txHash: String(a.txHash),
-      })),
-    }));
-    count = elections.length;
-  } else {
-    sourceLabel = `RPC: ${env.NEXT_PUBLIC_RPC_URL} · TPE: ${env.NEXT_PUBLIC_ELECTION_REGISTRY_ADDRESS}`;
-    const provider = new ethers.JsonRpcProvider(env.NEXT_PUBLIC_RPC_URL);
+  const electionsRes = await fetchJson<ElectionsApiResponse>(`${apiBase}/v1/elections`);
+  const elections = electionsRes.elections ?? [];
 
-    count = await fetchElectionCount(
-      env.NEXT_PUBLIC_ELECTION_REGISTRY_ADDRESS,
-      provider,
-    );
+  const electionsDetailed = await Promise.all(
+    elections.map(async (e) => {
+      const id = String(e.electionId);
+      const [
+        phaseChangesRes,
+        actsRes,
+        anchorsRes,
+        signupsSummaryRes,
+        signupsRes,
+        ballotsSummaryRes,
+        ballotsRes,
+        consistencyRes,
+        incidentsRes,
+      ] = await Promise.all([
+        safeFetchJson<PhaseChangesResponse>(
+          `${apiBase}/v1/elections/${id}/phase-changes`,
+          { ok: true, phaseChanges: [] },
+        ),
+        safeFetchJson<ActsResponse>(`${apiBase}/v1/elections/${id}/acts`, { ok: true, acts: [] }),
+        safeFetchJson<AnchorsResponse>(
+          `${apiBase}/v1/elections/${id}/anchors`,
+          { ok: true, anchors: [] },
+        ),
+        safeFetchJson<SignupsSummaryResponse>(
+          `${apiBase}/v1/elections/${id}/signups/summary`,
+          { ok: true, summary: { total: 0, uniqueNullifiers: 0 } },
+        ),
+        safeFetchJson<SignupsResponse>(`${apiBase}/v1/elections/${id}/signups`, {
+          ok: true,
+          signups: [],
+        }),
+        safeFetchJson<BallotsSummaryResponse>(
+          `${apiBase}/v1/elections/${id}/ballots/summary`,
+          { ok: true, summary: { total: 0, uniqueBallotIndexes: 0 } },
+        ),
+        safeFetchJson<BallotsResponse>(`${apiBase}/v1/elections/${id}/ballots`, {
+          ok: true,
+          ballots: [],
+        }),
+        safeFetchJson<ConsistencyResponse>(
+          `${apiBase}/v1/elections/${id}/consistency`,
+          { ok: true, consistency: null },
+        ),
+        safeFetchJson<IncidentsResponse>(`${apiBase}/v1/elections/${id}/incidents`, {
+          ok: true,
+          incidents: [],
+        }),
+      ]);
 
-    elections = await Promise.all(
-      Array.from({ length: count }).map(async (_, idx) => {
-        const election = await fetchElection(
-          env.NEXT_PUBLIC_ELECTION_REGISTRY_ADDRESS,
-          provider,
-          idx,
-        );
-        const counters = await fetchElectionCounters(
-          env.NEXT_PUBLIC_ELECTION_REGISTRY_ADDRESS,
-          provider,
-          idx,
-        );
-        const actas = await fetchActaAnchors(
-          env.NEXT_PUBLIC_ELECTION_REGISTRY_ADDRESS,
-          provider,
-          idx,
-        );
-        return { id: String(idx), election, counters, actas };
-      }),
-    );
-  }
+      return {
+        ...e,
+        phaseChanges: phaseChangesRes.phaseChanges,
+        acts: actsRes.acts,
+        anchors: anchorsRes.anchors,
+        signupsSummary: signupsSummaryRes.summary,
+        signups: signupsRes.signups,
+        ballotsSummary: ballotsSummaryRes.summary,
+        ballots: ballotsRes.ballots,
+        consistency: consistencyRes.consistency,
+        incidents: incidentsRes.incidents,
+      };
+    }),
+  );
 
   return (
     <main className="min-h-screen bg-white text-neutral-900">
@@ -122,25 +230,88 @@ export default async function Page() {
 
         <section className="rounded-lg border border-neutral-200 p-4">
           <div className="text-sm font-medium">Elecciones registradas</div>
-          <div className="mt-2 text-sm text-neutral-700">Total: {count}</div>
+          <div className="mt-2 text-sm text-neutral-700">Total: {elections.length}</div>
         </section>
 
         <div className="space-y-4">
-          {elections.map(({ id, election, counters, actas }) => (
-            <section
-              key={id}
-              className="rounded-lg border border-neutral-200 p-4 space-y-3"
-            >
+          {electionsDetailed.map((e) => {
+            const timeline = [
+              {
+                key: `created:${e.electionId}`,
+                blockNumber: e.createdAtBlock,
+                blockTimestamp: e.createdAtTimestamp,
+                txHash: e.createdTxHash,
+                logIndex: -1,
+                label: "ElectionCreated",
+                detail: null as string | null,
+              },
+              ...e.phaseChanges.map((pc) => ({
+                key: `phase:${pc.txHash}:${pc.logIndex}`,
+                blockNumber: pc.blockNumber,
+                blockTimestamp: pc.blockTimestamp,
+                txHash: pc.txHash,
+                logIndex: pc.logIndex,
+                label: "PhaseChanged",
+                detail: `${pc.previousPhaseLabel} → ${pc.newPhaseLabel}`,
+              })),
+              ...e.anchors.map((a) => ({
+                key: `anchor:${a.txHash}:${a.logIndex}`,
+                blockNumber: a.blockNumber,
+                blockTimestamp: a.blockTimestamp,
+                txHash: a.txHash,
+                logIndex: a.logIndex,
+                label: `ActaPublished kind ${a.kind}`,
+                detail: `snapshotHash: ${a.snapshotHash}`,
+              })),
+              ...e.signups.map((s) => ({
+                key: `signup:${s.txHash}:${s.logIndex}`,
+                blockNumber: s.blockNumber,
+                blockTimestamp: s.blockTimestamp,
+                txHash: s.txHash,
+                logIndex: s.logIndex,
+                label: "SignupRecorded",
+                detail: `nullifier: ${s.registryNullifier}`,
+              })),
+              ...e.ballots.map((b) => ({
+                key: `ballot:${b.txHash}:${b.logIndex}`,
+                blockNumber: b.blockNumber,
+                blockTimestamp: b.blockTimestamp,
+                txHash: b.txHash,
+                logIndex: b.logIndex,
+                label: `BallotPublished idx ${b.ballotIndex}`,
+                detail: `ballotHash: ${b.ballotHash}`,
+              })),
+            ].sort((a, b) => {
+              const bnA = BigInt(a.blockNumber);
+              const bnB = BigInt(b.blockNumber);
+              if (bnA < bnB) return -1;
+              if (bnA > bnB) return 1;
+              return a.logIndex - b.logIndex;
+            });
+
+            return (
+              <section
+                key={e.electionId}
+                className="rounded-lg border border-neutral-200 p-4 space-y-3"
+              >
               <div className="flex flex-col gap-1">
-                <div className="text-sm font-medium">Elección #{id}</div>
+                <div className="text-sm font-medium">Elección #{e.electionId}</div>
                 <div className="text-xs text-neutral-600 break-all">
-                  manifestHash: {election.manifestHash}
+                  manifestHash: {e.manifestHash}
                 </div>
                 <div className="text-xs text-neutral-600 break-all">
-                  authority (AEA): {election.authority}
+                  authority (AEA): {e.authority}
                 </div>
                 <div className="text-xs text-neutral-600 break-all">
-                  registryAuthority (REA signer): {election.registryAuthority}
+                  registryAuthority (REA signer): {e.registryAuthority}
+                </div>
+                <div className="text-xs text-neutral-600 break-all">
+                  coordinatorPubKey: {e.coordinatorPubKey}
+                </div>
+                <div className="text-xs text-neutral-600 break-all">
+                  createdAt: block {e.createdAtBlock}
+                  {e.createdAtTimestamp ? ` · ${e.createdAtTimestamp}` : ""}
+                  {e.createdTxHash ? ` · tx ${e.createdTxHash}` : ""}
                 </div>
               </div>
 
@@ -148,48 +319,229 @@ export default async function Page() {
                 <div className="rounded-md border border-neutral-200 p-3">
                   <div className="text-xs text-neutral-500">Fase</div>
                   <div className="text-sm font-medium">
-                    {PHASE_LABELS[Number(election.phase)] ?? `(${election.phase.toString()})`}
+                    {e.phaseLabel ?? `(${e.phase})`}
                   </div>
                 </div>
                 <div className="rounded-md border border-neutral-200 p-3">
                   <div className="text-xs text-neutral-500">Registros (signup)</div>
-                  <div className="text-sm font-medium">{counters.signups.toString()}</div>
+                  <div className="text-sm font-medium">{e.counts.signups}</div>
+                  <div className="text-xs text-neutral-500">
+                    únicos: {e.signupsSummary.uniqueNullifiers}
+                  </div>
                 </div>
                 <div className="rounded-md border border-neutral-200 p-3">
                   <div className="text-xs text-neutral-500">Boletas publicadas</div>
-                  <div className="text-sm font-medium">{counters.ballots.toString()}</div>
+                  <div className="text-sm font-medium">{e.counts.ballots}</div>
+                  <div className="text-xs text-neutral-500">
+                    índices únicos: {e.ballotsSummary.uniqueBallotIndexes}
+                  </div>
                 </div>
               </div>
 
               <div>
-                <div className="text-sm font-medium">Actas ancladas (hashes)</div>
+                <div className="text-sm font-medium">Timeline (eventos)</div>
                 <div className="mt-2 space-y-2">
-                  {actas.length === 0 ? (
-                    <div className="text-sm text-neutral-600">(Sin actas publicadas)</div>
+                  {timeline.length === 0 ? (
+                    <div className="text-sm text-neutral-600">
+                      (Sin eventos indexados)
+                    </div>
                   ) : (
-                    actas.map((a) => (
+                    timeline.map((ev) => (
                       <div
-                        key={`${a.kind}-${a.snapshotHash}-${a.txHash}`}
+                        key={ev.key}
                         className="rounded-md border border-neutral-200 p-3"
                       >
                         <div className="text-xs text-neutral-500">
-                          kind {a.kind} · block {a.blockNumber}
+                          block {ev.blockNumber}
+                          {ev.blockTimestamp ? ` · ${ev.blockTimestamp}` : ""}
+                        </div>
+                        <div className="text-xs text-neutral-700">{ev.label}</div>
+                        {ev.detail ? (
+                          <div className="text-xs text-neutral-700 break-all">
+                            {ev.detail}
+                          </div>
+                        ) : null}
+                        {ev.txHash ? (
+                          <div className="text-xs text-neutral-700 break-all">tx: {ev.txHash}</div>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium">Actas (referencias ancladas)</div>
+                <div className="mt-2 space-y-2">
+                  {e.acts.length === 0 ? (
+                    <div className="text-sm text-neutral-600">(Sin actas publicadas)</div>
+                  ) : (
+                    e.acts.map((a) => (
+                      <div
+                        key={`${a.actId}-${a.anchorTxHash}`}
+                        className="rounded-md border border-neutral-200 p-3"
+                      >
+                        <div className="text-xs text-neutral-500">
+                          {a.actType} · block {a.blockNumber}
+                          {a.blockTimestamp ? ` · ${a.blockTimestamp}` : ""}
                         </div>
                         <div className="text-xs text-neutral-700 break-all">
-                          snapshotHash: {a.snapshotHash}
+                          actId (snapshotHash): {a.actId}
                         </div>
+                        {a.contentHash ? (
+                          <div className="text-xs text-neutral-700 break-all">
+                            contentHash: {a.contentHash}
+                          </div>
+                        ) : null}
                         <div className="text-xs text-neutral-700 break-all">
-                          tx: {a.txHash}
+                          anchor tx: {a.anchorTxHash}
+                        </div>
+                        <div className="mt-2">
+                          <a
+                            className="text-xs text-neutral-700 underline"
+                            href={`/elections/${encodeURIComponent(String(e.electionId))}/acts/${encodeURIComponent(String(a.actId))}`}
+                          >
+                            Abrir acta
+                          </a>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
               </div>
-            </section>
-          ))}
 
-          {elections.length === 0 ? (
+              <div>
+                <div className="text-sm font-medium">Anclajes (eventos on-chain)</div>
+                <div className="mt-2 space-y-2">
+                  {e.anchors.length === 0 ? (
+                    <div className="text-sm text-neutral-600">(Sin anclajes)</div>
+                  ) : (
+                    e.anchors.map((a) => (
+                      <div
+                        key={`${a.txHash}:${a.logIndex}`}
+                        className="rounded-md border border-neutral-200 p-3"
+                      >
+                        <div className="text-xs text-neutral-500">
+                          kind {a.kind} · block {a.blockNumber}
+                          {a.blockTimestamp ? ` · ${a.blockTimestamp}` : ""}
+                        </div>
+                        <div className="text-xs text-neutral-700 break-all">
+                          snapshotHash: {a.snapshotHash}
+                        </div>
+                        <div className="text-xs text-neutral-700 break-all">tx: {a.txHash}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium">Consistencia</div>
+                <div className="mt-2 rounded-md border border-neutral-200 p-3">
+                  {e.consistency ? (
+                    <div className="space-y-1">
+                      <div className="text-xs text-neutral-500">computedAt: {e.consistency.computedAt}</div>
+                      <div className="text-xs text-neutral-500">dataVersion: {e.consistency.dataVersion}</div>
+                      <div className="text-xs text-neutral-700">
+                        ok: <span className="font-medium">{String(e.consistency.ok)}</span>
+                      </div>
+                      {Array.isArray(e.consistency.report?.incidents) ? (
+                        <div className="text-xs text-neutral-700">
+                          incidentes (reporte): {e.consistency.report.incidents.length}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-neutral-600">(Sin reporte de consistencia)</div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium">Incidentes / Alertas</div>
+                <div className="mt-2 space-y-2">
+                  {e.incidents.length === 0 ? (
+                    <div className="text-sm text-neutral-600">(Sin incidentes)</div>
+                  ) : (
+                    e.incidents.map((i) => (
+                      <div
+                        key={i.fingerprint}
+                        className="rounded-md border border-neutral-200 p-3"
+                      >
+                        <div className="text-xs text-neutral-500">
+                          {i.severity} · {i.code} · occ {i.occurrences}
+                        </div>
+                        <div className="text-xs text-neutral-700">{i.message}</div>
+                        <div className="text-xs text-neutral-600">
+                          lastSeen: {i.lastSeenAt}
+                          {i.relatedBlockNumber ? ` · block ${i.relatedBlockNumber}` : ""}
+                          {i.relatedBlockTimestamp ? ` · ${i.relatedBlockTimestamp}` : ""}
+                        </div>
+                        {i.relatedTxHash ? (
+                          <div className="text-xs text-neutral-700 break-all">tx: {i.relatedTxHash}</div>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium">Signups (tabla)</div>
+                <div className="mt-2 space-y-2">
+                  {e.signups.length === 0 ? (
+                    <div className="text-sm text-neutral-600">(Sin signups)</div>
+                  ) : (
+                    e.signups.map((s) => (
+                      <div
+                        key={`${s.txHash}:${s.logIndex}`}
+                        className="rounded-md border border-neutral-200 p-3"
+                      >
+                        <div className="text-xs text-neutral-500">
+                          block {s.blockNumber}
+                          {s.blockTimestamp ? ` · ${s.blockTimestamp}` : ""}
+                        </div>
+                        <div className="text-xs text-neutral-700 break-all">
+                          registryNullifier: {s.registryNullifier}
+                        </div>
+                        <div className="text-xs text-neutral-700 break-all">
+                          votingPubKey: {s.votingPubKey}
+                        </div>
+                        <div className="text-xs text-neutral-700 break-all">tx: {s.txHash}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium">Boletas (tabla)</div>
+                <div className="mt-2 space-y-2">
+                  {e.ballots.length === 0 ? (
+                    <div className="text-sm text-neutral-600">(Sin boletas)</div>
+                  ) : (
+                    e.ballots.map((b) => (
+                      <div
+                        key={`${b.txHash}:${b.logIndex}`}
+                        className="rounded-md border border-neutral-200 p-3"
+                      >
+                        <div className="text-xs text-neutral-500">
+                          idx {b.ballotIndex} · block {b.blockNumber}
+                          {b.blockTimestamp ? ` · ${b.blockTimestamp}` : ""}
+                        </div>
+                        <div className="text-xs text-neutral-700 break-all">ballotHash: {b.ballotHash}</div>
+                        <div className="text-xs text-neutral-700 break-all">ciphertext: {b.ciphertext}</div>
+                        <div className="text-xs text-neutral-700 break-all">tx: {b.txHash}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              </section>
+            );
+          })}
+
+          {electionsDetailed.length === 0 ? (
             <section className="rounded-lg border border-neutral-200 p-4">
               <div className="text-sm text-neutral-700">
                 No hay elecciones todavía. Crea una elección con el contrato BU_PVP_1_ElectionRegistry.

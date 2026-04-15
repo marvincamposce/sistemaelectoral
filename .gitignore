@@ -14,8 +14,6 @@ coverage/
 # Hardhat
 packages/contracts/artifacts/
 packages/contracts/cache/
-packages/contracts/demo-output/
-
 # Logs
 npm-debug.log*
 yarn-debug.log*

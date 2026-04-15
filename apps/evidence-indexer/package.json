@@ -12,7 +12,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@blockurna/crypto": "workspace:*",
     "@blockurna/sdk": "workspace:*",
+    "@blockurna/shared": "workspace:*",
     "dotenv": "^16.6.1",
     "ethers": "^6.16.0",
     "pg": "^8.16.3",

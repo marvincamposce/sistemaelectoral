@@ -5,6 +5,11 @@ const EnvSchema = z
     DATABASE_URL: z.string().min(1),
     RPC_URL: z.string().url(),
     ELECTION_REGISTRY_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    ACTA_SOURCE_DIR: z
+      .string()
+      .min(1)
+      .optional()
+      .default("packages/contracts/experimental-output"),
     START_BLOCK: z.coerce.number().int().nonnegative().optional().default(0),
     CONFIRMATIONS: z.coerce.number().int().nonnegative().optional().default(0),
     BATCH_SIZE: z.coerce.number().int().positive().optional().default(2000),
