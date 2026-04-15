@@ -85,6 +85,90 @@ async function insertReaSignupPermit(params: {
   }
 }
 
+async function upsertIncidentLog(params: {
+  databaseUrl: string;
+  chainId: string;
+  contractAddress: string;
+  electionId: string;
+  incident: {
+    fingerprint: string;
+    code: string;
+    severity: string;
+    message: string;
+    details: unknown;
+    relatedTxHash?: string | null;
+    relatedBlockNumber?: number | null;
+    relatedBlockTimestampIso?: string | null;
+    relatedEntityType?: string | null;
+    relatedEntityId?: string | null;
+    evidencePointers?: unknown[];
+    active?: boolean;
+    resolvedAtIso?: string | null;
+  };
+}): Promise<{ ok: boolean; error?: string; pgCode?: string }> {
+  const pool = new Pool({ connectionString: params.databaseUrl });
+  try {
+    const active = params.incident.active ?? true;
+    const resolvedAtIso = active ? null : (params.incident.resolvedAtIso ?? new Date().toISOString());
+
+    await pool.query(
+      `INSERT INTO incident_logs(
+        chain_id, contract_address, election_id,
+        fingerprint, code, severity, message, details,
+        related_tx_hash, related_block_number, related_block_timestamp,
+        related_entity_type, related_entity_id, evidence_pointers,
+        active, resolved_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      ON CONFLICT (chain_id, contract_address, election_id, fingerprint) DO UPDATE SET
+        last_seen_at=NOW(),
+        occurrences=incident_logs.occurrences + 1,
+        code=EXCLUDED.code,
+        severity=EXCLUDED.severity,
+        message=EXCLUDED.message,
+        details=EXCLUDED.details,
+        related_tx_hash=COALESCE(EXCLUDED.related_tx_hash, incident_logs.related_tx_hash),
+        related_block_number=COALESCE(EXCLUDED.related_block_number, incident_logs.related_block_number),
+        related_block_timestamp=COALESCE(EXCLUDED.related_block_timestamp, incident_logs.related_block_timestamp),
+        related_entity_type=COALESCE(EXCLUDED.related_entity_type, incident_logs.related_entity_type),
+        related_entity_id=COALESCE(EXCLUDED.related_entity_id, incident_logs.related_entity_id),
+        evidence_pointers=EXCLUDED.evidence_pointers,
+        active=EXCLUDED.active,
+        resolved_at=EXCLUDED.resolved_at`,
+      [
+        params.chainId,
+        params.contractAddress,
+        params.electionId,
+        params.incident.fingerprint,
+        params.incident.code,
+        params.incident.severity,
+        params.incident.message,
+        JSON.stringify(params.incident.details ?? {}),
+        params.incident.relatedTxHash ?? null,
+        params.incident.relatedBlockNumber ?? null,
+        params.incident.relatedBlockTimestampIso ?? null,
+        params.incident.relatedEntityType ?? null,
+        params.incident.relatedEntityId ?? null,
+        JSON.stringify(params.incident.evidencePointers ?? []),
+        active,
+        resolvedAtIso,
+      ],
+    );
+    return { ok: true };
+  } catch (err: any) {
+    const pgCode = typeof err?.code === "string" ? err.code : undefined;
+    return { ok: false, error: (err as Error).message, pgCode };
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
+function tamperHexByte(hex: string): string {
+  const bytes = ethers.getBytes(hex);
+  if (bytes.length === 0) throw new Error("Empty hex bytes");
+  bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 0x01;
+  return ethers.hexlify(bytes);
+}
+
 program
   .name("blockurna-audit")
   .description("Audit CLI (BU-PVP-1): verificación de actas digitales y anclajes on-chain")
@@ -146,20 +230,7 @@ program
       ok: boolean;
       electionId: string;
       actId: string;
-      act: {
-        actId: string;
-        electionId: string;
-        actType: string;
-        canonicalJson: any | null;
-        signature: string | null;
-        signerKeyId: string | null;
-        signerPublicKey: string | null;
-        contentHash: string | null;
-        anchorTxHash: string | null;
-        blockNumber: string | null;
-        blockTimestamp: string | null;
-        createdAt: string | null;
-      };
+      act: any;
     };
 
     type ActContentResponse = {
@@ -426,6 +497,10 @@ program
   .requiredOption("--voter-key <hex>", "Private key del votante (0x...)")
   .option("--voting-pub-key <hex>", "Voting public key (bytes). Si no se provee, se genera aleatoria")
   .option("--attempt-twice", "Intenta registrar 2 veces (debería revertir por nullifier reuse)")
+  .option("--tamper-permit", "Cambia 1 byte del permitSig antes de enviar (debe fallar)")
+  .option("--force-send", "Envía tx aún si se espera revert (by-pass estimateGas)")
+  .option("--gas-limit <n>", "Gas limit para force-send", "500000")
+  .option("--db <url>", "DATABASE_URL Postgres para registrar incidentes (opcional)")
   .action(async (opts) => {
     const raw = await fs.readFile(opts.permit, "utf8");
     const json = JSON.parse(raw) as unknown;
@@ -445,7 +520,8 @@ program
     }
 
     const provider = new ethers.JsonRpcProvider(String(opts.rpc));
-    const voter = new ethers.Wallet(String(opts.voterKey), provider);
+    const voterWallet = new ethers.Wallet(String(opts.voterKey), provider);
+    const voter = new ethers.NonceManager(voterWallet);
 
     const votingPubKey =
       typeof opts.votingPubKey === "string" && String(opts.votingPubKey).length > 0
@@ -454,30 +530,261 @@ program
 
     const abi = [
       "function signup(uint256 electionId, bytes32 registryNullifier, bytes votingPubKey, bytes permitSig)",
+      "function registryNullifierUsed(uint256 electionId, bytes32 registryNullifier) view returns (bool)",
+      "event SignupRecorded(uint256 indexed electionId, bytes32 indexed registryNullifier, bytes votingPubKey)",
     ];
     const registry = new ethers.Contract(contractAddress, abi, voter) as any;
 
-    const attemptOnce = async () => {
-      const tx = await registry.signup(
-        BigInt(permit.electionId),
-        permit.registryNullifier,
-        votingPubKey,
-        permit.permitSig,
-      );
-      const receipt = await tx.wait();
-      return { txHash: tx.hash, blockNumber: receipt?.blockNumber ?? null };
+    const dbUrl = typeof opts.db === "string" ? String(opts.db) : null;
+    const chainId = String(permit.chainId);
+    const electionId = String(permit.electionId);
+
+    const gasLimit = (() => {
+      const n = Number(opts.gasLimit);
+      if (!Number.isFinite(n) || n <= 0) return 500000;
+      return Math.floor(n);
+    })();
+
+    const iface = new ethers.Interface(abi);
+
+    const trySendSignupTx = async (params: {
+      permitSig: string;
+      mode: "safe" | "force";
+    }): Promise<{ ok: boolean; txHash?: string; blockNumber?: number | null; status?: number | null; signupLogIndex?: number | null; error?: string }> => {
+      try {
+        if (params.mode === "force") {
+          const data = iface.encodeFunctionData("signup", [
+            BigInt(permit.electionId),
+            permit.registryNullifier,
+            votingPubKey,
+            params.permitSig,
+          ]);
+          let txHash: string | null = null;
+          try {
+            const tx = await voter.sendTransaction({ to: contractAddress, data, gasLimit });
+            txHash = tx.hash;
+          } catch (err: any) {
+            const maybe =
+              (typeof err?.info?.error?.data?.txHash === "string" && err.info.error.data.txHash) ||
+              (typeof err?.error?.data?.txHash === "string" && err.error.data.txHash) ||
+              (typeof err?.data?.txHash === "string" && err.data.txHash) ||
+              (typeof err?.txHash === "string" && err.txHash) ||
+              null;
+
+            if (maybe && /^0x[0-9a-fA-F]{64}$/.test(maybe)) {
+              txHash = maybe;
+            } else {
+              throw err;
+            }
+          }
+
+          const receipt = txHash ? await provider.waitForTransaction(txHash) : null;
+          if (!receipt) {
+            return { ok: false, txHash: txHash ?? undefined, blockNumber: null, status: null, signupLogIndex: null, error: "tx_not_mined" };
+          }
+
+          const signupLog = receipt.logs.find((l) => {
+            try {
+              const parsed = iface.parseLog(l);
+              return parsed?.name === "SignupRecorded";
+            } catch {
+              return false;
+            }
+          });
+
+          const signupLogIndex = signupLog
+            ? (typeof (signupLog as any).logIndex === "number"
+                ? (signupLog as any).logIndex
+                : typeof (signupLog as any).index === "number"
+                  ? (signupLog as any).index
+                  : null)
+            : null;
+
+          return {
+            ok: receipt.status === 1,
+            txHash: txHash ?? undefined,
+            blockNumber: receipt.blockNumber ?? null,
+            status: receipt.status ?? null,
+            signupLogIndex,
+            error: receipt.status === 1 ? undefined : "execution_reverted",
+          };
+        }
+
+        const tx = await registry.signup(
+          BigInt(permit.electionId),
+          permit.registryNullifier,
+          votingPubKey,
+          params.permitSig,
+        );
+        const receipt = await tx.wait();
+
+        const signupLog = receipt?.logs?.find((l: any) => {
+          try {
+            const parsed = iface.parseLog(l);
+            return parsed?.name === "SignupRecorded";
+          } catch {
+            return false;
+          }
+        });
+
+        return {
+          ok: Boolean(receipt?.status === 1),
+          txHash: tx.hash,
+          blockNumber: receipt?.blockNumber ?? null,
+          status: receipt?.status ?? null,
+          signupLogIndex: signupLog
+            ? (typeof (signupLog as any).logIndex === "number"
+                ? (signupLog as any).logIndex
+                : typeof (signupLog as any).index === "number"
+                  ? (signupLog as any).index
+                  : null)
+            : null,
+        };
+      } catch (err: unknown) {
+        return { ok: false, error: (err as Error).message };
+      }
     };
 
+    const recordIncident = async (incident: {
+      code: string;
+      severity: string;
+      message: string;
+      details: unknown;
+      txHash?: string | null;
+      blockNumber?: number | null;
+      blockTimestampIso?: string | null;
+    }) => {
+      if (!dbUrl) return null;
+      const txHashLower = incident.txHash ? String(incident.txHash).toLowerCase() : null;
+      const fingerprint = txHashLower
+        ? `${incident.code}:${txHashLower}`
+        : `${incident.code}:no_tx:${new Date().toISOString()}`;
+
+      return await upsertIncidentLog({
+        databaseUrl: dbUrl,
+        chainId,
+        contractAddress,
+        electionId,
+        incident: {
+          fingerprint,
+          code: incident.code,
+          severity: incident.severity,
+          message: incident.message,
+          details: incident.details,
+          relatedTxHash: txHashLower,
+          relatedBlockNumber: incident.blockNumber ?? null,
+          relatedBlockTimestampIso: incident.blockTimestampIso ?? null,
+          relatedEntityType: "SIGNUP_ATTEMPT",
+          relatedEntityId: txHashLower,
+          evidencePointers: txHashLower
+            ? [
+                {
+                  type: "tx",
+                  txHash: txHashLower,
+                  blockNumber: incident.blockNumber ?? null,
+                  blockTimestamp: incident.blockTimestampIso ?? null,
+                },
+              ]
+            : [],
+          active: true,
+        },
+      });
+    };
+
+    const permitSigOriginal = String(permit.permitSig);
+    const permitSigTampered = opts.tamperPermit ? tamperHexByte(permitSigOriginal) : permitSigOriginal;
+
+    const nullifierUsedBefore = await registry.registryNullifierUsed(
+      BigInt(permit.electionId),
+      permit.registryNullifier,
+    );
+
+    const firstMode: "safe" | "force" = opts.forceSend || opts.tamperPermit ? "force" : "safe";
+    const secondMode: "safe" | "force" = opts.forceSend || opts.attemptTwice ? "force" : "safe";
+
     try {
-      const first = await attemptOnce();
-      const out: any = { ok: true, first, electionId: permit.electionId, contractAddress, votingPubKey };
+      const first = await trySendSignupTx({ permitSig: permitSigTampered, mode: firstMode });
+
+      if (!first.ok) {
+        let blockTimestampIso: string | null = null;
+        if (first.blockNumber != null && first.blockNumber !== null) {
+          const block = await provider.getBlock(first.blockNumber);
+          blockTimestampIso = block ? new Date(Number(block.timestamp) * 1000).toISOString() : null;
+        }
+
+        const code = opts.tamperPermit
+          ? "SIGNUP_INVALID_PERMIT"
+          : nullifierUsedBefore === true
+            ? "SIGNUP_DUP_NULLIFIER"
+            : "SIGNUP_TX_REVERTED";
+        await recordIncident({
+          code,
+          severity: "WARNING",
+          message: opts.tamperPermit
+            ? "Signup attempt reverted due to invalid/tampered REA permit"
+            : nullifierUsedBefore === true
+              ? "Signup attempt reverted due to registry nullifier reuse"
+              : "Signup attempt failed/reverted",
+          details: {
+            attempt: "first",
+            mode: firstMode,
+            electionId,
+            registryNullifier: permit.registryNullifier,
+            nullifierUsedBefore,
+            tampered: Boolean(opts.tamperPermit),
+            status: first.status ?? null,
+            error: first.error ?? null,
+          },
+          txHash: first.txHash ?? null,
+          blockNumber: first.blockNumber ?? null,
+          blockTimestampIso,
+        });
+
+        console.error(JSON.stringify({ ok: false, error: first.error ?? "signup_failed", first }, null, 2));
+        process.exitCode = 1;
+        return;
+      }
+
+      const out: any = {
+        ok: true,
+        first,
+        electionId,
+        chainId,
+        contractAddress,
+        votingPubKey,
+        tampered: Boolean(opts.tamperPermit),
+      };
 
       if (opts.attemptTwice) {
-        try {
-          await attemptOnce();
-          out.second = { ok: true, unexpected: true };
-        } catch (err: unknown) {
-          out.second = { ok: false, error: (err as Error).message };
+        const second = await trySendSignupTx({ permitSig: permitSigOriginal, mode: secondMode });
+
+        if (second.ok) {
+          out.second = { ...second, unexpected: true };
+        } else {
+          let blockTimestampIso: string | null = null;
+          if (second.blockNumber != null && second.blockNumber !== null) {
+            const block = await provider.getBlock(second.blockNumber);
+            blockTimestampIso = block ? new Date(Number(block.timestamp) * 1000).toISOString() : null;
+          }
+
+          await recordIncident({
+            code: "SIGNUP_DUP_NULLIFIER",
+            severity: "WARNING",
+            message: "Second signup attempt reverted (expected nullifier reuse protection)",
+            details: {
+              attempt: "second",
+              mode: secondMode,
+              electionId,
+              registryNullifier: permit.registryNullifier,
+              status: second.status ?? null,
+              error: second.error ?? null,
+            },
+            txHash: second.txHash ?? null,
+            blockNumber: second.blockNumber ?? null,
+            blockTimestampIso,
+          });
+
+          out.second = second;
         }
       }
 
