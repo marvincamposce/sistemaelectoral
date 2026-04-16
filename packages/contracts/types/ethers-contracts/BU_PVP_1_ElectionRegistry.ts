@@ -13,11 +13,12 @@ export declare namespace BU_PVP_1_ElectionRegistry {
     }
 
   export interface BU_PVP_1_ElectionRegistryInterface extends Interface {
-    getFunction(nameOrSignature: "archiveElection" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyProof" | "registryNullifierUsed" | "renounceOwnership" | "signup" | "signupCount" | "startProcessing" | "transferOwnership"): FunctionFragment;
+    getFunction(nameOrSignature: "archiveElection" | "ballotCastByVotingAddress" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyProof" | "registryNullifierUsed" | "renounceOwnership" | "signup" | "signupCount" | "startProcessing" | "transferOwnership" | "votingAddressRegistered"): FunctionFragment;
 
     getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded" | "TallyProofPublished"): EventFragment;
 
     encodeFunctionData(functionFragment: 'archiveElection', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'ballotCastByVotingAddress', values: [BigNumberish, AddressLike]): string;
 encodeFunctionData(functionFragment: 'ballotCount', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'closeRegistry', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'closeVoting', values: [BigNumberish]): string;
@@ -30,7 +31,7 @@ encodeFunctionData(functionFragment: 'openRegistry', values: [BigNumberish]): st
 encodeFunctionData(functionFragment: 'openVoting', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'owner', values?: undefined): string;
 encodeFunctionData(functionFragment: 'publishActa', values: [BigNumberish, BigNumberish, BytesLike]): string;
-encodeFunctionData(functionFragment: 'publishBallot', values: [BigNumberish, BytesLike]): string;
+encodeFunctionData(functionFragment: 'publishBallot', values: [BigNumberish, BytesLike, BytesLike, BytesLike]): string;
 encodeFunctionData(functionFragment: 'publishResults', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'publishTallyProof', values: [BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'registryNullifierUsed', values: [BigNumberish, BytesLike]): string;
@@ -39,8 +40,10 @@ encodeFunctionData(functionFragment: 'signup', values: [BigNumberish, BytesLike,
 encodeFunctionData(functionFragment: 'signupCount', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'startProcessing', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'transferOwnership', values: [AddressLike]): string;
+encodeFunctionData(functionFragment: 'votingAddressRegistered', values: [BigNumberish, AddressLike]): string;
 
     decodeFunctionResult(functionFragment: 'archiveElection', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'ballotCastByVotingAddress', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'ballotCount', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'closeRegistry', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'closeVoting', data: BytesLike): Result;
@@ -62,6 +65,7 @@ decodeFunctionResult(functionFragment: 'signup', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'signupCount', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'startProcessing', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLike): Result;
   }
 
   
@@ -191,6 +195,14 @@ decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Re
     
 
     
+    ballotCastByVotingAddress: TypedContractMethod<
+      [arg0: BigNumberish, arg1: AddressLike, ],
+      [boolean],
+      'view'
+    >
+    
+
+    
     ballotCount: TypedContractMethod<
       [arg0: BigNumberish, ],
       [bigint],
@@ -288,7 +300,7 @@ decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Re
 
     
     publishBallot: TypedContractMethod<
-      [electionId: BigNumberish, ciphertext: BytesLike, ],
+      [electionId: BigNumberish, votingPubKey: BytesLike, ciphertext: BytesLike, ballotSig: BytesLike, ],
       [void],
       'nonpayable'
     >
@@ -358,6 +370,14 @@ decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Re
     >
     
 
+    
+    votingAddressRegistered: TypedContractMethod<
+      [arg0: BigNumberish, arg1: AddressLike, ],
+      [boolean],
+      'view'
+    >
+    
+
 
     getFunction<T extends ContractMethod = ContractMethod>(key: string | FunctionFragment): T;
 
@@ -365,6 +385,11 @@ decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Re
       [electionId: BigNumberish, ],
       [void],
       'nonpayable'
+    >;
+getFunction(nameOrSignature: 'ballotCastByVotingAddress'): TypedContractMethod<
+      [arg0: BigNumberish, arg1: AddressLike, ],
+      [boolean],
+      'view'
     >;
 getFunction(nameOrSignature: 'ballotCount'): TypedContractMethod<
       [arg0: BigNumberish, ],
@@ -427,7 +452,7 @@ getFunction(nameOrSignature: 'publishActa'): TypedContractMethod<
       'nonpayable'
     >;
 getFunction(nameOrSignature: 'publishBallot'): TypedContractMethod<
-      [electionId: BigNumberish, ciphertext: BytesLike, ],
+      [electionId: BigNumberish, votingPubKey: BytesLike, ciphertext: BytesLike, ballotSig: BytesLike, ],
       [void],
       'nonpayable'
     >;
@@ -470,6 +495,11 @@ getFunction(nameOrSignature: 'transferOwnership'): TypedContractMethod<
       [newOwner: AddressLike, ],
       [void],
       'nonpayable'
+    >;
+getFunction(nameOrSignature: 'votingAddressRegistered'): TypedContractMethod<
+      [arg0: BigNumberish, arg1: AddressLike, ],
+      [boolean],
+      'view'
     >;
 
     getEvent(key: 'ActaPublished'): TypedContractEvent<ActaPublishedEvent.InputTuple, ActaPublishedEvent.OutputTuple, ActaPublishedEvent.OutputObject>;

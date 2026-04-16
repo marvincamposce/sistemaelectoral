@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-16T23:09:51.637Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "Elección Experimental 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "cand-1",
+        "candidateCode": "CAND_1",
+        "displayName": "Mariana Soto",
+        "shortName": "M. Soto",
+        "partyName": "Alianza Cívica",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "cand-2",
+        "candidateCode": "CAND_2",
+        "displayName": "Tomás Rivas",
+        "shortName": "T. Rivas",
+        "partyName": "Movimiento Federal",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      },
+      {
+        "id": "cand-3",
+        "candidateCode": "CAND_3",
+        "displayName": "Lucía Peña",
+        "shortName": "L. Peña",
+        "partyName": "Pacto Social",
+        "ballotOrder": 3,
+        "status": "ACTIVE",
+        "colorHex": "#B45309",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x442deb4a36bf764f4b856cdb99005402ac6c870ee0b0aa220dd1999875ffdc06c801ef2060c9987b50cf2d72cdb93f2c32873f988366a7ded61309b5c915d108",
+    "manifestHashHex": "0xdbdc1436dbb699392a907ea1a031d2f6c119b47c3b04e7abbc453347ae8779a4"
+  }
+}

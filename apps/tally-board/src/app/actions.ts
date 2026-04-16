@@ -85,6 +85,14 @@ type ResultSummaryItem = {
   unresolved: boolean;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function coerceVotes(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
@@ -94,10 +102,14 @@ function coerceVotes(value: unknown): number {
 
 function extractSummaryMap(payloadJson: unknown): Map<string, number> {
   const map = new Map<string, number>();
-  const payload = payloadJson as any;
+  if (!isRecord(payloadJson)) {
+    return map;
+  }
 
-  if (payload && typeof payload.summary === "object" && payload.summary !== null) {
-    for (const [key, votesRaw] of Object.entries(payload.summary as Record<string, unknown>)) {
+  const payload = payloadJson;
+
+  if (isRecord(payload.summary)) {
+    for (const [key, votesRaw] of Object.entries(payload.summary)) {
       const cleanedKey = String(key ?? "").trim();
       if (!cleanedKey) continue;
       const votes = coerceVotes(votesRaw);
@@ -107,11 +119,12 @@ function extractSummaryMap(payloadJson: unknown): Map<string, number> {
     return map;
   }
 
-  if (Array.isArray(payload?.summaryItems)) {
+  if (Array.isArray(payload.summaryItems)) {
     for (const item of payload.summaryItems) {
-      const key = String(item?.candidateId ?? item?.candidateCode ?? item?.displayName ?? "").trim();
+      if (!isRecord(item)) continue;
+      const key = String(item.candidateId ?? item.candidateCode ?? item.displayName ?? "").trim();
       if (!key) continue;
-      const votes = coerceVotes(item?.votes);
+      const votes = coerceVotes(item.votes);
       if (votes <= 0) continue;
       map.set(key, votes);
     }
@@ -228,6 +241,18 @@ function buildShareSubmissionSigningMessage(params: {
     sharePayload: String(params.normalizedSharePayload),
   };
   return JSON.stringify(payload);
+}
+
+function resolveAllowedTrusteeSignerAddress(trusteeId: string): string {
+  const env = getEnv();
+  const normalizedTrusteeId = sanitizeTrusteeId(trusteeId);
+  const allowed = env.REMOTE_TRUSTEE_ALLOWLIST[normalizedTrusteeId];
+  if (!allowed) {
+    throw new Error(
+      `No existe una dirección autorizada para ${normalizedTrusteeId}. Configura REMOTE_TRUSTEE_ALLOWLIST.`,
+    );
+  }
+  return allowed;
 }
 
 async function resolveRuntimeContext() {
@@ -409,14 +434,16 @@ export async function getDecryptionCeremonyStateAction(
       ceremonyId,
     });
     return { ok: true, ceremony };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err), ceremony: null };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err), ceremony: null };
   }
 }
 
 export async function createDecryptionCeremonyAction(electionId: string) {
   try {
     const { chainId, contractAddress } = await resolveRuntimeContext();
+    const env = getEnv();
+    const allowlistCount = Object.keys(env.REMOTE_TRUSTEE_ALLOWLIST).length;
     const existing = await loadLatestCeremonyState({
       chainId,
       contractAddress,
@@ -434,7 +461,7 @@ export async function createDecryptionCeremonyAction(electionId: string) {
         ceremony_id, chain_id, contract_address, election_id,
         threshold_required, trustee_count, status, opened_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,
-      [ceremonyId, chainId, contractAddress, electionId, 2, 3, "OPEN"],
+      [ceremonyId, chainId, contractAddress, electionId, 2, allowlistCount > 0 ? allowlistCount : 3, "OPEN"],
     );
 
     const ceremony = await loadLatestCeremonyState({
@@ -445,8 +472,8 @@ export async function createDecryptionCeremonyAction(electionId: string) {
     });
 
     return { ok: true, created: true, ceremony };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err), ceremony: null };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err), ceremony: null };
   }
 }
 
@@ -503,8 +530,8 @@ export async function closeDecryptionCeremonyAction(params: {
     });
 
     return { ok: true, closed: true, ceremony: finalState };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err), ceremony: null };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err), ceremony: null };
   }
 }
 
@@ -562,8 +589,8 @@ export async function getDecryptionShareSigningMessageAction(params: {
       chainId,
       contractAddress,
     };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err), signingMessage: null };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err), signingMessage: null };
   }
 }
 
@@ -631,6 +658,7 @@ export async function submitDecryptionShareAction(params: {
 
       signerAddress = sanitizeSignerAddress(params.signerAddress);
       signature = sanitizeSignatureHex(params.signature);
+      const allowedSignerAddress = resolveAllowedTrusteeSignerAddress(trusteeId);
 
       const signingMessage = buildShareSubmissionSigningMessage({
         chainId,
@@ -651,8 +679,14 @@ export async function submitDecryptionShareAction(params: {
       if (recoveredAddress !== signerAddress) {
         throw new Error("La firma no corresponde al signerAddress provisto");
       }
+      if (recoveredAddress !== allowedSignerAddress) {
+        throw new Error(
+          `La firma corresponde a ${recoveredAddress}, pero ${trusteeId} está asignado a ${allowedSignerAddress}`,
+        );
+      }
 
       metadata.signingMessage = signingMessage;
+      metadata.allowedSignerAddress = allowedSignerAddress;
       metadata.recoveredSignerAddress = recoveredAddress;
       metadata.signatureVerifiedAt = new Date().toISOString();
     }
@@ -726,8 +760,8 @@ export async function submitDecryptionShareAction(params: {
       ceremony: finalState,
       ready: Boolean(finalState && finalState.shareCount >= finalState.thresholdRequired),
     };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err), ceremony: null, ready: false };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err), ceremony: null, ready: false };
   }
 }
 
@@ -744,14 +778,39 @@ export async function generateCoordinatorSharesAction() {
 
     const shares = splitCoordinatorKey2of3(env.COORDINATOR_PRIVATE_KEY);
     return { ok: true, shares };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err), shares: [] as string[] };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err), shares: [] as string[] };
   }
 }
 
-export async function computeRealTallyAction(electionId: string, ciphertexts: string[]) {
+export async function computeRealTallyAction(electionId: string) {
   try {
     const runtime = await resolveRuntimeContext();
+    const candidates = await loadElectionCandidates({
+      chainId: runtime.chainId,
+      contractAddress: runtime.contractAddress,
+      electionId,
+    });
+    const activeCandidateIds = new Set(
+      candidates
+        .filter((candidate) => String(candidate.status).toUpperCase() === "ACTIVE")
+        .map((candidate) => candidate.id.trim().toLowerCase()),
+    );
+
+    if (activeCandidateIds.size === 0) {
+      return { ok: false, error: "No active candidates found for this election." };
+    }
+
+    // Fetch ciphertexts directly from DB on server side to avoid payload limits
+    const ballotsRes = await pool.query<{ ciphertext: string }>(
+      "SELECT ciphertext FROM ballots WHERE chain_id = $1 AND contract_address = $2 AND election_id = $3 ORDER BY ballot_index ASC",
+      [runtime.chainId, runtime.contractAddress, BigInt(electionId)],
+    );
+    const ciphertexts = ballotsRes.rows.map((r) => r.ciphertext);
+
+    if (ciphertexts.length === 0) {
+      return { ok: false, error: "No ballots found in database for this election." };
+    }
     const keyResolution = await resolveCoordinatorPrivateKeyForTally({
       chainId: runtime.chainId,
       contractAddress: runtime.contractAddress,
@@ -802,7 +861,7 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
 
         const selectionRaw =
           typeof decrypted === "object" && decrypted !== null && "selection" in decrypted
-            ? (decrypted as any).selection
+            ? (decrypted as { selection?: unknown }).selection
             : null;
 
         if (typeof selectionRaw !== "string" || selectionRaw.trim().length === 0) {
@@ -810,6 +869,9 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
         }
 
         const selection = selectionRaw.trim();
+        if (!activeCandidateIds.has(selection.toLowerCase())) {
+          throw new Error("selection_outside_active_catalog");
+        }
         summary[selection] = (summary[selection] ?? 0) + 1;
         transcriptEntries.push({
           ballotIndex: i,
@@ -818,7 +880,7 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
           format,
         });
       } catch (err: unknown) {
-        errors.push({ ballotIndex: i, error: (err as Error).message });
+        errors.push({ ballotIndex: i, error: getErrorMessage(err) });
       }
     }
 
@@ -861,8 +923,8 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
       ceremonyId: keyResolution.ceremonyId,
       shareCount: keyResolution.shareCount,
     };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -872,8 +934,8 @@ export async function publishProofAction(electionId: string, proofPayload: strin
     const tx = await contract.publishTallyProof(BigInt(electionId), proofPayload);
     const receipt = await tx.wait();
     return { ok: true, txHash: receipt.hash };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -951,8 +1013,8 @@ export async function publishActaWithContentAction(
     );
 
     return { ok: true, txHash: receipt.hash, snapshotHash: finalSnapshotHash, actId };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -962,8 +1024,8 @@ export async function advanceToResultsPublishedAction(electionId: string) {
     const tx = await contract.publishResults(BigInt(electionId));
     const receipt = await tx.wait();
     return { ok: true, txHash: receipt.hash };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -990,8 +1052,8 @@ export async function createProcessingBatchAction(electionId: string, inputCount
       [batchId, chainId, contractAddress, electionId, nextIdx, inputCount, "PENDING", relatedRoot]
     );
     return { ok: true, batchId };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -1004,8 +1066,8 @@ export async function updateProcessingBatchStatusAction(batchId: string, status:
 
     await pool.query(query, [status, batchId]);
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -1023,8 +1085,8 @@ export async function createTallyJobAction(electionId: string, basedOnBatchSet: 
       [jobId, chainId, contractAddress, electionId, basedOnBatchSet, "RUNNING", "NOT_IMPLEMENTED"]
     );
     return { ok: true, jobId };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -1050,11 +1112,18 @@ export async function updateTallyJobStatusAction(
       );
     }
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
-export async function logIncidentAction(electionId: string, fingerprint: string, code: string, message: string, severity: string = "CRITICAL", evidencePointers: any = []) {
+export async function logIncidentAction(
+  electionId: string,
+  fingerprint: string,
+  code: string,
+  message: string,
+  severity: string = "CRITICAL",
+  evidencePointers: unknown[] = [],
+) {
   try {
     const chainId = "31337";
     const contract = getContract();
@@ -1069,15 +1138,15 @@ export async function logIncidentAction(electionId: string, fingerprint: string,
       [chainId, contractAddress, electionId, fingerprint, code, severity, message, JSON.stringify({}), JSON.stringify(evidencePointers)]
     );
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
 export async function createResultPayloadAction(
   electionId: string,
   tallyJobId: string,
-  payloadJson: any,
+  payloadJson: unknown,
   options?: { proofState?: string; resultKind?: string; publicationStatus?: string },
 ) {
   try {
@@ -1101,8 +1170,15 @@ export async function createResultPayloadAction(
       candidates,
     });
 
+    if (unresolvedLabels.length > 0) {
+      return {
+        ok: false,
+        error: `Result summary contains labels outside the election catalog: ${unresolvedLabels.join(", ")}`,
+      };
+    }
+
     const finalPayloadJson = {
-      ...payloadJson,
+      ...(isRecord(payloadJson) ? payloadJson : {}),
       summaryItems: summaryItems.map((item) => ({
         candidateId: item.candidateId,
         candidateCode: item.candidateCode,
@@ -1168,44 +1244,6 @@ export async function createResultPayloadAction(
         );
       }
 
-      if (unresolvedLabels.length > 0) {
-        const fingerprint = `RESULT_SUMMARY_CATALOG_MISMATCH:${payloadId}`;
-        await client.query(
-          `INSERT INTO incident_logs (
-            chain_id, contract_address, election_id, fingerprint,
-            code, severity, message, details,
-            related_entity_type, related_entity_id, evidence_pointers, active
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-          ON CONFLICT (chain_id, contract_address, election_id, fingerprint) DO UPDATE SET
-            last_seen_at=NOW(),
-            occurrences=incident_logs.occurrences + 1,
-            details=EXCLUDED.details,
-            evidence_pointers=EXCLUDED.evidence_pointers,
-            active=true,
-            resolved_at=NULL`,
-          [
-            chainId,
-            contractAddress,
-            electionId,
-            fingerprint,
-            "RESULT_SUMMARY_CATALOG_MISMATCH",
-            "WARNING",
-            "El resumen de resultados contiene etiquetas no resueltas contra el catálogo de candidaturas.",
-            JSON.stringify({
-              payloadId,
-              unresolvedLabels,
-            }),
-            "RESULT_PAYLOAD",
-            payloadId,
-            JSON.stringify([
-              { type: "result_payload", resultPayloadId: payloadId },
-              { type: "summary_unresolved_labels", values: unresolvedLabels },
-            ]),
-            true,
-          ],
-        );
-      }
-
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -1223,8 +1261,8 @@ export async function createResultPayloadAction(
       summaryItemsCount: summaryItems.length,
       unresolvedLabels,
     };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -1248,8 +1286,8 @@ export async function openAuditWindowAction(electionId: string) {
     );
 
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -1300,7 +1338,7 @@ export async function persistAuditBundleAction(electionId: string) {
           latestProofState === "VERIFIED"
             ? "Resultado y prueba verificados."
             : latestProofState === "TRANSCRIPT_VERIFIED"
-              ? "Descifrado y conteo reales con transcript verificable; ZK completa pendiente."
+              ? "Descifrado y conteo reales con transcript comprometido en cadena; la verificación ZK sigue en un flujo separado."
               : latestProofState === "SIMULATED"
                 ? "Resultado marcado como simulado."
                 : "Resultado aún no verificado.",
@@ -1318,8 +1356,8 @@ export async function persistAuditBundleAction(electionId: string) {
     );
 
     return { ok: true, bundleId, bundleHash };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
 
@@ -1590,7 +1628,8 @@ export async function generateZkProofAction(
           }
         }
       }
-    } catch (decryptionErr: any) {
+    } catch (decryptionErr: unknown) {
+      const decryptionErrorMessage = getErrorMessage(decryptionErr);
       await pool.query(
         `INSERT INTO zk_proof_jobs (
            job_id, chain_id, contract_address, election_id, tally_job_id,
@@ -1609,7 +1648,7 @@ export async function generateZkProofAction(
           tallyJobId,
           ZK_PROOF_SYSTEM,
           ZK_DECRYPTION_CIRCUIT_ID,
-          String(decryptionErr?.message || decryptionErr).slice(0, 1000),
+          decryptionErrorMessage.slice(0, 1000),
         ],
       );
 
@@ -1618,9 +1657,13 @@ export async function generateZkProofAction(
         status: "FAILED",
         circuitId: ZK_DECRYPTION_CIRCUIT_ID,
         verificationKeyHash: null,
-        error: String(decryptionErr?.message || decryptionErr),
+        error: decryptionErrorMessage,
       };
     }
+
+    const decryptionVerified =
+      decryptionProofJob?.status === "VERIFIED_OFFCHAIN" ||
+      decryptionProofJob?.status === "VERIFIED_ONCHAIN";
 
     return {
       ok: true,
@@ -1636,25 +1679,27 @@ export async function generateZkProofAction(
       decryptionProofJob,
       honesty: {
         whatIsProved:
-          "Vote counts are the correct sum of individual ballot selections and all processed ballot hashes are included in the Poseidon Merkle root",
+          "Los conteos publicados son la suma correcta de selecciones individuales y los hashes procesados están incluidos en la raíz Merkle Poseidon",
         whatIsNotProved: [
-          "Correct decryption of ciphertexts (requires decryption circuit)",
-          "On-chain verification (Phase 9C)",
+          ...(decryptionVerified
+            ? []
+            : ["Descifrado correcto de ciphertexts (requiere circuito de descifrado)"]),
+          "Verificación en cadena (fase 9C)",
         ],
-        auditabilityNote: "Full transcript remains available for independent off-chain audit",
+        auditabilityNote: "El transcript completo permanece disponible para auditoría independiente fuera de cadena",
       },
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Update job status to FAILED
     try {
       await pool.query(
         `UPDATE zk_proof_jobs SET status='FAILED', error_message=$2 WHERE job_id=$1`,
-        [jobId, String(err.message || err).slice(0, 1000)],
+        [jobId, getErrorMessage(err).slice(0, 1000)],
       );
     } catch {
       // ignore secondary failure
     }
-    return { ok: false, error: err.message || String(err), jobId };
+    return { ok: false, error: getErrorMessage(err), jobId };
   }
 }
 
@@ -1664,6 +1709,51 @@ function toBigIntValue(value: unknown, label: string): bigint {
   } catch {
     throw new Error(`Invalid bigint value in ${label}`);
   }
+}
+
+type Groth16ProofData = {
+  a: [unknown, unknown];
+  b: [[unknown, unknown], [unknown, unknown]];
+  c: [unknown, unknown];
+};
+
+function parseGroth16ProofData(value: unknown): Groth16ProofData | null {
+  if (!isRecord(value)) return null;
+
+  const aValue = value.a;
+  const bValue = value.b;
+  const cValue = value.c;
+
+  if (!Array.isArray(aValue) || !Array.isArray(bValue) || !Array.isArray(cValue)) {
+    return null;
+  }
+
+  if (aValue.length < 2 || bValue.length < 2 || cValue.length < 2) {
+    return null;
+  }
+
+  const b0 = bValue[0];
+  const b1 = bValue[1];
+  if (!Array.isArray(b0) || !Array.isArray(b1) || b0.length < 2 || b1.length < 2) {
+    return null;
+  }
+
+  return {
+    a: [aValue[0], aValue[1]],
+    b: [
+      [b0[0], b0[1]],
+      [b1[0], b1[1]],
+    ],
+    c: [cValue[0], cValue[1]],
+  };
+}
+
+function parseSignalsFromPublicInputs(value: unknown): string[] {
+  if (!isRecord(value) || !Array.isArray(value.signals)) {
+    return [];
+  }
+
+  return value.signals.map((signal) => String(signal));
 }
 
 export async function submitOnchainZkProofAction(
@@ -1685,8 +1775,8 @@ export async function submitOnchainZkProofAction(
       tallyJobId: string | null;
       status: string;
       circuitId: string;
-      proofJson: any;
-      publicInputs: any;
+      proofJson: unknown;
+      publicInputs: unknown;
       onchainVerificationTx: string | null;
     }>(
       `SELECT
@@ -1736,12 +1826,10 @@ export async function submitOnchainZkProofAction(
       };
     }
 
-    const proof = job.proofJson as any;
-    const signals = Array.isArray(job.publicInputs?.signals)
-      ? job.publicInputs.signals.map((value: unknown) => String(value))
-      : [];
+    const proof = parseGroth16ProofData(job.proofJson);
+    const signals = parseSignalsFromPublicInputs(job.publicInputs);
 
-    if (!proof || !Array.isArray(proof.a) || !Array.isArray(proof.b) || !Array.isArray(proof.c)) {
+    if (!proof) {
       return { ok: false, error: `El job ${job.jobId} no contiene proof_json valido` };
     }
 
@@ -1757,12 +1845,12 @@ export async function submitOnchainZkProofAction(
     // Rust serializes Fq2 coordinates as [c0, c1]; verifier expects [c1, c0].
     const b = [
       [
-        toBigIntValue(proof.b?.[0]?.[1], "proof.b[0][1]"),
-        toBigIntValue(proof.b?.[0]?.[0], "proof.b[0][0]"),
+        toBigIntValue(proof.b[0][1], "proof.b[0][1]"),
+        toBigIntValue(proof.b[0][0], "proof.b[0][0]"),
       ],
       [
-        toBigIntValue(proof.b?.[1]?.[1], "proof.b[1][1]"),
-        toBigIntValue(proof.b?.[1]?.[0], "proof.b[1][0]"),
+        toBigIntValue(proof.b[1][1], "proof.b[1][1]"),
+        toBigIntValue(proof.b[1][0], "proof.b[1][0]"),
       ],
     ] as [[bigint, bigint], [bigint, bigint]];
 
@@ -1820,7 +1908,7 @@ export async function submitOnchainZkProofAction(
       verifierAddress,
       alreadyVerified: false,
     };
-  } catch (err: any) {
-    return { ok: false, error: err.message || String(err) };
+  } catch (err: unknown) {
+    return { ok: false, error: getErrorMessage(err) };
   }
 }

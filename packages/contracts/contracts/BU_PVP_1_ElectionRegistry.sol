@@ -45,6 +45,10 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
 
     // electionId => nullifier used
     mapping(uint256 => mapping(bytes32 => bool)) public registryNullifierUsed;
+    // electionId => voting address registered from signup
+    mapping(uint256 => mapping(address => bool)) public votingAddressRegistered;
+    // electionId => voting address already cast a ballot
+    mapping(uint256 => mapping(address => bool)) public ballotCastByVotingAddress;
 
     // electionId => counters
     mapping(uint256 => uint256) public signupCount;
@@ -89,6 +93,11 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     error WrongPhase(uint256 electionId, Phase expected, Phase actual);
     error RegistryNullifierAlreadyUsed(uint256 electionId, bytes32 nullifier);
     error InvalidRegistryPermit(uint256 electionId, bytes32 nullifier);
+    error InvalidVotingPubKey();
+    error VotingAddressAlreadyRegistered(uint256 electionId, address votingAddress);
+    error VotingAddressNotRegistered(uint256 electionId, address votingAddress);
+    error BallotAlreadyCast(uint256 electionId, address votingAddress);
+    error InvalidBallotSignature(uint256 electionId, address votingAddress);
 
     modifier onlyElectionAuthority(uint256 electionId) {
         if (_elections[electionId].authority != msg.sender) {
@@ -232,19 +241,32 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
             revert InvalidRegistryPermit(electionId, registryNullifier);
         }
 
+        address votingAddress = _deriveVotingAddress(votingPubKey);
+        if (votingAddressRegistered[electionId][votingAddress]) {
+            revert VotingAddressAlreadyRegistered(electionId, votingAddress);
+        }
+
         registryNullifierUsed[electionId][registryNullifier] = true;
+        votingAddressRegistered[electionId][votingAddress] = true;
         signupCount[electionId] += 1;
         emit SignupRecorded(electionId, registryNullifier, votingPubKey);
     }
 
-    /// @notice Publishes an encrypted ballot message.
-    /// @dev ciphertext is treated as evidence; signature validation is off-chain in BU-PVP-1 v1 scaffold.
+    /// @notice Publishes an encrypted ballot message tied to a prior signup.
+    /// @dev The ballot must be signed by the ephemeral voting key registered during signup.
     function publishBallot(
         uint256 electionId,
-        bytes calldata ciphertext
+        bytes calldata votingPubKey,
+        bytes calldata ciphertext,
+        bytes calldata ballotSig
     ) external inPhase(electionId, Phase.VOTING_OPEN) {
+        address votingAddress = _deriveVotingAddress(votingPubKey);
+        _ensureVotingAddressEligible(electionId, votingAddress);
+        _verifyBallotSignature(electionId, votingAddress, ciphertext, ballotSig);
+
         uint256 index = ballotCount[electionId];
         bytes32 ballotHash = keccak256(ciphertext);
+        ballotCastByVotingAddress[electionId][votingAddress] = true;
         ballotCount[electionId] = index + 1;
         emit BallotPublished(electionId, index, ballotHash, ciphertext);
     }
@@ -273,5 +295,42 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         Phase prev = _elections[electionId].phase;
         _elections[electionId].phase = newPhase;
         emit PhaseChanged(electionId, prev, newPhase);
+    }
+
+    function _deriveVotingAddress(bytes calldata votingPubKey) private pure returns (address) {
+        if (votingPubKey.length != 65 || votingPubKey[0] != 0x04) {
+            revert InvalidVotingPubKey();
+        }
+
+        bytes memory rawKey = new bytes(64);
+        for (uint256 i = 0; i < 64; i++) {
+            rawKey[i] = votingPubKey[i + 1];
+        }
+
+        return address(uint160(uint256(keccak256(rawKey))));
+    }
+
+    function _ensureVotingAddressEligible(uint256 electionId, address votingAddress) private view {
+        if (!votingAddressRegistered[electionId][votingAddress]) {
+            revert VotingAddressNotRegistered(electionId, votingAddress);
+        }
+        if (ballotCastByVotingAddress[electionId][votingAddress]) {
+            revert BallotAlreadyCast(electionId, votingAddress);
+        }
+    }
+
+    function _verifyBallotSignature(
+        uint256 electionId,
+        address votingAddress,
+        bytes calldata ciphertext,
+        bytes calldata ballotSig
+    ) private pure {
+        bytes32 ballotDigest = keccak256(
+            abi.encodePacked("BU-PVP-1:ballot", electionId, keccak256(ciphertext))
+        );
+        address recovered = ballotDigest.toEthSignedMessageHash().recover(ballotSig);
+        if (recovered != votingAddress) {
+            revert InvalidBallotSignature(electionId, votingAddress);
+        }
     }
 }

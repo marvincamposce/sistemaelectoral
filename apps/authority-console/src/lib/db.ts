@@ -96,6 +96,91 @@ CREATE TABLE IF NOT EXISTS incident_logs (
 
 CREATE INDEX IF NOT EXISTS incident_logs_election_active_idx
   ON incident_logs(chain_id, contract_address, election_id, active, last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS hn_voter_registry (
+  dni TEXT PRIMARY KEY,
+  full_name TEXT NOT NULL,
+  first_name TEXT,
+  middle_name TEXT,
+  last_name TEXT,
+  second_last_name TEXT,
+  habilitation_status TEXT NOT NULL,
+  status_reason TEXT,
+  census_cutoff_at TIMESTAMPTZ,
+  source TEXT NOT NULL DEFAULT 'MANUAL',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS hn_voter_registry_status_idx
+  ON hn_voter_registry(habilitation_status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS hn_voter_registry_name_idx
+  ON hn_voter_registry(full_name);
+
+CREATE TABLE IF NOT EXISTS hn_wallet_links (
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  link_status TEXT NOT NULL,
+  verification_method TEXT NOT NULL,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at TIMESTAMPTZ,
+  PRIMARY KEY (dni, wallet_address)
+);
+
+CREATE INDEX IF NOT EXISTS hn_wallet_links_dni_idx
+  ON hn_wallet_links(dni, updated_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS hn_wallet_links_active_wallet_uniq
+  ON hn_wallet_links(wallet_address)
+  WHERE link_status = 'ACTIVE' AND revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS hn_enrollment_requests (
+  request_id TEXT PRIMARY KEY,
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  requested_wallet_address TEXT,
+  request_channel TEXT NOT NULL DEFAULT 'CITIZEN_PORTAL',
+  request_notes TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  reviewed_by TEXT,
+  review_notes TEXT,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS hn_enrollment_requests_dni_idx
+  ON hn_enrollment_requests(dni, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS hn_enrollment_requests_status_idx
+  ON hn_enrollment_requests(status, requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS hn_voter_authorizations (
+  authorization_id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  enrollment_request_id TEXT REFERENCES hn_enrollment_requests(request_id) ON DELETE SET NULL,
+  status TEXT NOT NULL,
+  authorized_by TEXT,
+  authorization_notes TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  authorized_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS hn_voter_authorizations_lookup_idx
+  ON hn_voter_authorizations(chain_id, contract_address, election_id, dni, authorized_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS hn_voter_authorizations_active_dni_uniq
+  ON hn_voter_authorizations(chain_id, contract_address, election_id, dni)
+  WHERE status = 'AUTHORIZED' AND revoked_at IS NULL;
 `;
 
 declare global {
@@ -144,6 +229,78 @@ export type ElectionManifestRow = {
   updatedAt: string;
 };
 
+export type HondurasCensusStatus = "HABILITADO" | "INHABILITADO" | "SUSPENDIDO" | "FALLECIDO" | "OBSERVADO";
+
+export type HondurasWalletLinkStatus = "ACTIVE" | "PENDING" | "REVOKED";
+
+export type HondurasWalletVerificationMethod = "MANUAL_AEA" | "SELF_ATTESTED" | "CENSUS_VERIFIED" | "DEMO_SYSTEM";
+
+export type HondurasVoterRegistryRow = {
+  dni: string;
+  fullName: string;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  secondLastName: string | null;
+  habilitationStatus: HondurasCensusStatus;
+  statusReason: string | null;
+  censusCutoffAt: string | null;
+  source: string;
+  metadataJson: unknown;
+  importedAt: string;
+  updatedAt: string;
+};
+
+export type HondurasWalletLinkRow = {
+  dni: string;
+  walletAddress: string;
+  linkStatus: HondurasWalletLinkStatus;
+  verificationMethod: HondurasWalletVerificationMethod;
+  evidenceJson: unknown;
+  linkedAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+};
+
+export type HondurasEnrollmentRequestStatus =
+  | "PENDING_REVIEW"
+  | "APPROVED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export type HondurasEnrollmentRequestRow = {
+  requestId: string;
+  dni: string;
+  status: HondurasEnrollmentRequestStatus;
+  requestedWalletAddress: string | null;
+  requestChannel: string;
+  requestNotes: string | null;
+  metadataJson: unknown;
+  reviewedBy: string | null;
+  reviewNotes: string | null;
+  requestedAt: string;
+  reviewedAt: string | null;
+};
+
+export type HondurasVoterAuthorizationStatus = "AUTHORIZED" | "REVOKED" | "PENDING";
+
+export type HondurasVoterAuthorizationRow = {
+  authorizationId: string;
+  chainId: string;
+  contractAddress: string;
+  electionId: string;
+  dni: string;
+  walletAddress: string;
+  enrollmentRequestId: string | null;
+  status: HondurasVoterAuthorizationStatus;
+  authorizedBy: string | null;
+  authorizationNotes: string | null;
+  metadataJson: unknown;
+  authorizedAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
 export function getPool(databaseUrl: string): Pool {
   if (!globalThis.__authorityConsolePgPool) {
     globalThis.__authorityConsolePgPool = new Pool({ connectionString: databaseUrl });
@@ -161,7 +318,7 @@ export async function insertAdminLogEntry(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId?: number | null;
+  electionId?: number | string | null;
   code: string;
   severity?: string | null;
   message: string;
@@ -199,7 +356,7 @@ export async function insertAdminLogEntry(params: {
     [
       chainId,
       contractAddress,
-      electionId ?? null,
+      electionId !== undefined && electionId !== null ? BigInt(electionId) : null,
       code,
       severity ?? null,
       message,
@@ -217,7 +374,7 @@ export async function listAdminLogEntries(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId?: number;
+  electionId?: number | string;
   limit?: number;
 }): Promise<AdminLogEntry[]> {
   const { pool, chainId, contractAddress, electionId, limit } = params;
@@ -274,7 +431,7 @@ export async function listAdminLogEntries(params: {
         LIMIT $4`,
     electionId === undefined
       ? [chainId, contractAddress, max]
-      : [chainId, contractAddress, electionId, max],
+      : [chainId, contractAddress, BigInt(electionId), max],
   );
 
   return res.rows.map((r) => ({
@@ -297,7 +454,7 @@ export async function listCandidates(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
 }): Promise<CandidateRow[]> {
   const res = await params.pool.query<{
     id: string;
@@ -327,7 +484,7 @@ export async function listCandidates(params: {
     FROM candidates
     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
     ORDER BY ballot_order ASC, created_at ASC`,
-    [params.chainId, params.contractAddress, params.electionId],
+    [params.chainId, params.contractAddress, BigInt(params.electionId)],
   );
 
   return res.rows.map((r) => ({
@@ -337,11 +494,222 @@ export async function listCandidates(params: {
   }));
 }
 
+export async function upsertHondurasVoterRegistryRecord(params: {
+  pool: Pool;
+  dni: string;
+  fullName: string;
+  firstName?: string | null;
+  middleName?: string | null;
+  lastName?: string | null;
+  secondLastName?: string | null;
+  habilitationStatus: HondurasCensusStatus;
+  statusReason?: string | null;
+  censusCutoffAtIso?: string | null;
+  source?: string;
+  metadataJson?: unknown;
+}): Promise<void> {
+  await params.pool.query(
+    `INSERT INTO hn_voter_registry(
+      dni, full_name, first_name, middle_name, last_name, second_last_name,
+      habilitation_status, status_reason, census_cutoff_at, source, metadata_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    ON CONFLICT (dni) DO UPDATE SET
+      full_name=EXCLUDED.full_name,
+      first_name=EXCLUDED.first_name,
+      middle_name=EXCLUDED.middle_name,
+      last_name=EXCLUDED.last_name,
+      second_last_name=EXCLUDED.second_last_name,
+      habilitation_status=EXCLUDED.habilitation_status,
+      status_reason=EXCLUDED.status_reason,
+      census_cutoff_at=EXCLUDED.census_cutoff_at,
+      source=EXCLUDED.source,
+      metadata_json=EXCLUDED.metadata_json,
+      updated_at=NOW()`,
+    [
+      params.dni,
+      params.fullName,
+      params.firstName ?? null,
+      params.middleName ?? null,
+      params.lastName ?? null,
+      params.secondLastName ?? null,
+      params.habilitationStatus,
+      params.statusReason ?? null,
+      params.censusCutoffAtIso ?? null,
+      params.source ?? "MANUAL",
+      JSON.stringify(params.metadataJson ?? {}),
+    ],
+  );
+}
+
+export async function getHondurasVoterRegistryRecord(params: {
+  pool: Pool;
+  dni: string;
+}): Promise<HondurasVoterRegistryRow | null> {
+  const res = await params.pool.query<{
+    dni: string;
+    fullName: string;
+    firstName: string | null;
+    middleName: string | null;
+    lastName: string | null;
+    secondLastName: string | null;
+    habilitationStatus: HondurasCensusStatus;
+    statusReason: string | null;
+    censusCutoffAt: Date | null;
+    source: string;
+    metadataJson: unknown;
+    importedAt: Date;
+    updatedAt: Date;
+  }>(
+    `SELECT
+      dni,
+      full_name AS "fullName",
+      first_name AS "firstName",
+      middle_name AS "middleName",
+      last_name AS "lastName",
+      second_last_name AS "secondLastName",
+      habilitation_status AS "habilitationStatus",
+      status_reason AS "statusReason",
+      census_cutoff_at AS "censusCutoffAt",
+      source,
+      metadata_json AS "metadataJson",
+      imported_at AS "importedAt",
+      updated_at AS "updatedAt"
+    FROM hn_voter_registry
+    WHERE dni=$1
+    LIMIT 1`,
+    [params.dni],
+  );
+
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    ...row,
+    censusCutoffAt: row.censusCutoffAt?.toISOString() ?? null,
+    importedAt: row.importedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export async function listRecentHondurasVoterRegistryRecords(params: {
+  pool: Pool;
+  limit?: number;
+}): Promise<HondurasVoterRegistryRow[]> {
+  const max = Math.max(1, Math.min(100, Number(params.limit ?? 20)));
+  const res = await params.pool.query<{
+    dni: string;
+    fullName: string;
+    firstName: string | null;
+    middleName: string | null;
+    lastName: string | null;
+    secondLastName: string | null;
+    habilitationStatus: HondurasCensusStatus;
+    statusReason: string | null;
+    censusCutoffAt: Date | null;
+    source: string;
+    metadataJson: unknown;
+    importedAt: Date;
+    updatedAt: Date;
+  }>(
+    `SELECT
+      dni,
+      full_name AS "fullName",
+      first_name AS "firstName",
+      middle_name AS "middleName",
+      last_name AS "lastName",
+      second_last_name AS "secondLastName",
+      habilitation_status AS "habilitationStatus",
+      status_reason AS "statusReason",
+      census_cutoff_at AS "censusCutoffAt",
+      source,
+      metadata_json AS "metadataJson",
+      imported_at AS "importedAt",
+      updated_at AS "updatedAt"
+    FROM hn_voter_registry
+    ORDER BY updated_at DESC, imported_at DESC
+    LIMIT $1`,
+    [max],
+  );
+
+  return res.rows.map((row) => ({
+    ...row,
+    censusCutoffAt: row.censusCutoffAt?.toISOString() ?? null,
+    importedAt: row.importedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  }));
+}
+
+export async function upsertHondurasWalletLink(params: {
+  pool: Pool;
+  dni: string;
+  walletAddress: string;
+  linkStatus: HondurasWalletLinkStatus;
+  verificationMethod: HondurasWalletVerificationMethod;
+  evidenceJson?: unknown;
+  revokedAtIso?: string | null;
+}): Promise<void> {
+  await params.pool.query(
+    `INSERT INTO hn_wallet_links(
+      dni, wallet_address, link_status, verification_method, evidence_json, revoked_at
+    ) VALUES ($1,$2,$3,$4,$5,$6)
+    ON CONFLICT (dni, wallet_address) DO UPDATE SET
+      link_status=EXCLUDED.link_status,
+      verification_method=EXCLUDED.verification_method,
+      evidence_json=EXCLUDED.evidence_json,
+      revoked_at=EXCLUDED.revoked_at,
+      updated_at=NOW()`,
+    [
+      params.dni,
+      params.walletAddress,
+      params.linkStatus,
+      params.verificationMethod,
+      JSON.stringify(params.evidenceJson ?? {}),
+      params.revokedAtIso ?? null,
+    ],
+  );
+}
+
+export async function listHondurasWalletLinksByDni(params: {
+  pool: Pool;
+  dni: string;
+}): Promise<HondurasWalletLinkRow[]> {
+  const res = await params.pool.query<{
+    dni: string;
+    walletAddress: string;
+    linkStatus: HondurasWalletLinkStatus;
+    verificationMethod: HondurasWalletVerificationMethod;
+    evidenceJson: unknown;
+    linkedAt: Date;
+    updatedAt: Date;
+    revokedAt: Date | null;
+  }>(
+    `SELECT
+      dni,
+      wallet_address AS "walletAddress",
+      link_status AS "linkStatus",
+      verification_method AS "verificationMethod",
+      evidence_json AS "evidenceJson",
+      linked_at AS "linkedAt",
+      updated_at AS "updatedAt",
+      revoked_at AS "revokedAt"
+    FROM hn_wallet_links
+    WHERE dni=$1
+    ORDER BY updated_at DESC, linked_at DESC`,
+    [params.dni],
+  );
+
+  return res.rows.map((row) => ({
+    ...row,
+    linkedAt: row.linkedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+  }));
+}
+
 export async function upsertCandidate(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
   id: string;
   candidateCode: string;
   displayName: string;
@@ -372,7 +740,7 @@ export async function upsertCandidate(params: {
     [
       params.chainId,
       params.contractAddress,
-      params.electionId,
+      BigInt(params.electionId),
       params.id,
       params.candidateCode,
       params.displayName,
@@ -390,7 +758,7 @@ export async function updateCandidateFields(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
   id: string;
   displayName: string;
   shortName: string;
@@ -416,7 +784,7 @@ export async function updateCandidateFields(params: {
     [
       params.chainId,
       params.contractAddress,
-      params.electionId,
+      BigInt(params.electionId),
       params.id,
       params.displayName,
       params.shortName,
@@ -434,7 +802,7 @@ export async function updateCandidateStatus(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
   id: string;
   status: CandidateStatus;
 }): Promise<number> {
@@ -443,7 +811,7 @@ export async function updateCandidateStatus(params: {
      SET status=$5, updated_at=NOW()
      WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND id=$4
      RETURNING id`,
-    [params.chainId, params.contractAddress, params.electionId, params.id, params.status],
+    [params.chainId, params.contractAddress, BigInt(params.electionId), params.id, params.status],
   );
   return res.rowCount ?? 0;
 }
@@ -452,7 +820,7 @@ export async function upsertElectionManifest(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
   manifestHash: string;
   manifestJson: unknown;
   source?: string;
@@ -462,7 +830,7 @@ export async function upsertElectionManifest(params: {
     `UPDATE election_manifests
      SET is_current=false, updated_at=NOW()
      WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND is_current=true`,
-    [params.chainId, params.contractAddress, params.electionId],
+    [params.chainId, params.contractAddress, BigInt(params.electionId)],
   );
 
   await params.pool.query(
@@ -478,7 +846,7 @@ export async function upsertElectionManifest(params: {
     [
       params.chainId,
       params.contractAddress,
-      params.electionId,
+      BigInt(params.electionId),
       params.manifestHash,
       JSON.stringify(params.manifestJson),
       source,
@@ -490,7 +858,7 @@ export async function getCurrentElectionManifest(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
 }): Promise<ElectionManifestRow | null> {
   const res = await params.pool.query<{
     manifestId: string;
@@ -513,7 +881,7 @@ export async function getCurrentElectionManifest(params: {
     WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND is_current=true
     ORDER BY created_at DESC, manifest_id DESC
     LIMIT 1`,
-    [params.chainId, params.contractAddress, params.electionId],
+    [params.chainId, params.contractAddress, BigInt(params.electionId)],
   );
 
   const row = res.rows[0];
@@ -529,7 +897,7 @@ export async function upsertIncidentLog(params: {
   pool: Pool;
   chainId: string;
   contractAddress: string;
-  electionId: number;
+  electionId: number | string;
   fingerprint: string;
   code: string;
   severity: string;
@@ -561,7 +929,7 @@ export async function upsertIncidentLog(params: {
     [
       params.chainId,
       params.contractAddress,
-      params.electionId,
+      BigInt(params.electionId),
       params.fingerprint,
       params.code,
       params.severity,

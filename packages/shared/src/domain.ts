@@ -177,3 +177,69 @@ export const SignupPermitSchema = z
   .strict();
 
 export type SignupPermit = z.infer<typeof SignupPermitSchema>;
+
+// --- Honduras voter registry and wallet linkage ---
+
+export const HondurasDniSchema = z
+  .string()
+  .transform((value) => value.replace(/\D/g, ""))
+  .refine((value) => /^[0-9]{13}$/.test(value), "Expected 13-digit Honduras DNI");
+
+export type HondurasDni = z.infer<typeof HondurasDniSchema>;
+
+export const HondurasCensusStatusSchema = z.enum([
+  "HABILITADO",
+  "INHABILITADO",
+  "SUSPENDIDO",
+  "FALLECIDO",
+  "OBSERVADO",
+]);
+
+export type HondurasCensusStatus = z.infer<typeof HondurasCensusStatusSchema>;
+
+export const HondurasWalletLinkStatusSchema = z.enum(["ACTIVE", "PENDING", "REVOKED"]);
+export type HondurasWalletLinkStatus = z.infer<typeof HondurasWalletLinkStatusSchema>;
+
+export const HondurasWalletVerificationMethodSchema = z.enum([
+  "MANUAL_AEA",
+  "SELF_ATTESTED",
+  "CENSUS_VERIFIED",
+  "DEMO_SYSTEM",
+]);
+
+export type HondurasWalletVerificationMethod = z.infer<typeof HondurasWalletVerificationMethodSchema>;
+
+export const HondurasCensusRecordSchema = z
+  .object({
+    dni: HondurasDniSchema,
+    fullName: z.string().trim().min(1).max(200),
+    firstName: z.string().trim().max(100).optional(),
+    middleName: z.string().trim().max(100).optional(),
+    lastName: z.string().trim().max(100).optional(),
+    secondLastName: z.string().trim().max(100).optional(),
+    habilitationStatus: HondurasCensusStatusSchema,
+    statusReason: z.string().trim().max(300).optional(),
+    censusCutoffAt: z.string().datetime().optional(),
+    source: z.string().trim().min(1).max(120).default("MANUAL"),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    importedAt: z.string().datetime().optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+
+export type HondurasCensusRecord = z.infer<typeof HondurasCensusRecordSchema>;
+
+export const HondurasWalletLinkSchema = z
+  .object({
+    dni: HondurasDniSchema,
+    walletAddress: EthAddressSchema,
+    linkStatus: HondurasWalletLinkStatusSchema.default("ACTIVE"),
+    verificationMethod: HondurasWalletVerificationMethodSchema.default("MANUAL_AEA"),
+    evidence: z.record(z.string(), z.unknown()).optional(),
+    linkedAt: z.string().datetime().optional(),
+    updatedAt: z.string().datetime().optional(),
+    revokedAt: z.string().datetime().nullable().optional(),
+  })
+  .strict();
+
+export type HondurasWalletLink = z.infer<typeof HondurasWalletLinkSchema>;

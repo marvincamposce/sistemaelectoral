@@ -184,6 +184,48 @@ type ResultSummaryItemRow = {
   unresolvedLabel: string | null;
 };
 
+type HondurasCensusRow = {
+  dni: string;
+  fullName: string;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  secondLastName: string | null;
+  habilitationStatus: string;
+  statusReason: string | null;
+  censusCutoffAt: Date | null;
+  source: string;
+  metadataJson: unknown;
+  importedAt: Date;
+  updatedAt: Date;
+};
+
+type HondurasWalletLinkRow = {
+  dni: string;
+  walletAddress: string;
+  linkStatus: string;
+  verificationMethod: string;
+  evidenceJson: unknown;
+  linkedAt: Date;
+  updatedAt: Date;
+  revokedAt: Date | null;
+};
+
+type DemoBootstrapBody = {
+  dni?: string;
+  pin?: string;
+};
+
+type DemoRegistryCredential = {
+  credentialVersion: "1";
+  protocolVersion: "BU-PVP-1";
+  credentialId: string;
+  issuedAt: string;
+  registryAuthority: string;
+  subjectLabel: string;
+  secretHex: string;
+};
+
 function isCriticalSeverity(severity: string): boolean {
   const s = String(severity ?? "").toUpperCase();
   return s === "CRITICAL" || s === "ERROR";
@@ -207,7 +249,7 @@ function honestyNoteForProofState(proofState: string | null | undefined): string
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "Resultado y prueba verificados.";
   if (state === "TRANSCRIPT_VERIFIED") {
-    return "Descifrado y conteo reales con transcript verificable; ZK completa pendiente.";
+    return "Descifrado y conteo reales con transcript comprometido en cadena; la verificación ZK sigue en un flujo separado.";
   }
   if (state === "SIMULATED") return "Resultado marcado como simulado.";
   return "Resultado aún no verificado.";
@@ -262,6 +304,26 @@ function requireElectionId(id: string): string {
   return id;
 }
 
+function requireHondurasDni(dni: string): string {
+  const normalized = String(dni ?? "").replace(/\D/g, "");
+  if (!/^[0-9]{13}$/.test(normalized)) {
+    throw new Error("Invalid Honduras DNI");
+  }
+  return normalized;
+}
+
+function requireWalletAddress(address: string): string {
+  try {
+    return ethers.getAddress(address).toLowerCase();
+  } catch {
+    throw new Error("Invalid wallet address");
+  }
+}
+
+function normalizeAddress(address: string): string {
+  return ethers.getAddress(address).toLowerCase();
+}
+
 function requireTxHash(txHash: string): string {
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
     throw new Error("Invalid txHash");
@@ -313,6 +375,120 @@ function normalizeCandidate(row: CandidateRow) {
     metadata: row.metadataJson ?? {},
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function normalizeHondurasCensusRecord(row: HondurasCensusRow) {
+  return {
+    dni: row.dni,
+    fullName: row.fullName,
+    firstName: row.firstName,
+    middleName: row.middleName,
+    lastName: row.lastName,
+    secondLastName: row.secondLastName,
+    habilitationStatus: row.habilitationStatus,
+    statusReason: row.statusReason,
+    censusCutoffAt: row.censusCutoffAt?.toISOString() ?? null,
+    source: row.source,
+    metadata: row.metadataJson ?? {},
+    importedAt: row.importedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function normalizeHondurasWalletLink(row: HondurasWalletLinkRow) {
+  return {
+    dni: row.dni,
+    walletAddress: row.walletAddress,
+    linkStatus: row.linkStatus,
+    verificationMethod: row.verificationMethod,
+    evidence: row.evidenceJson ?? {},
+    linkedAt: row.linkedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+  };
+}
+
+function getObjectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function getActiveWalletLink(rows: HondurasWalletLinkRow[]): HondurasWalletLinkRow | null {
+  return (
+    rows.find((link) => String(link.linkStatus).toUpperCase() === "ACTIVE" && !link.revokedAt) ??
+    null
+  );
+}
+
+function getDemoPinForRecord(record: HondurasCensusRow): string | null {
+  const metadata = getObjectRecord(record.metadataJson);
+  const pin = metadata.demoPin;
+  return typeof pin === "string" && pin.trim().length > 0 ? pin.trim() : null;
+}
+
+function deriveCredentialId(secretHex: string): string {
+  return ethers.keccak256(secretHex).toLowerCase();
+}
+
+function deriveRegistryNullifier(params: {
+  credentialSecretHex: string;
+  electionId: string | number | bigint;
+}): string {
+  return ethers
+    .keccak256(
+      ethers.solidityPacked(
+        ["string", "uint256", "bytes32"],
+        ["BU-PVP-1:nullifier", BigInt(String(params.electionId)), params.credentialSecretHex],
+      ),
+    )
+    .toLowerCase();
+}
+
+function computeSignupDigestForPermit(params: {
+  electionId: string | number | bigint;
+  registryNullifier: string;
+}): string {
+  return ethers
+    .keccak256(
+      ethers.solidityPacked(
+        ["string", "uint256", "bytes32"],
+        ["BU-PVP-1:signup", BigInt(String(params.electionId)), params.registryNullifier],
+      ),
+    )
+    .toLowerCase();
+}
+
+async function issueSignupPermitLocally(params: {
+  chainId: string;
+  contractAddress: string;
+  electionId: string;
+  credential: DemoRegistryCredential;
+  reaPrivateKey: string;
+}) {
+  const registryNullifier = deriveRegistryNullifier({
+    credentialSecretHex: params.credential.secretHex,
+    electionId: params.electionId,
+  });
+  const digest = computeSignupDigestForPermit({
+    electionId: params.electionId,
+    registryNullifier,
+  });
+  const wallet = new ethers.Wallet(params.reaPrivateKey);
+  const permitSig = await wallet.signMessage(ethers.getBytes(digest));
+
+  return {
+    permitVersion: "1" as const,
+    protocolVersion: "BU-PVP-1" as const,
+    chainId: String(params.chainId),
+    contractAddress: normalizeAddress(params.contractAddress),
+    electionId: String(params.electionId),
+    registryNullifier,
+    credentialId: params.credential.credentialId,
+    issuedAt: new Date().toISOString(),
+    issuerAddress: normalizeAddress(wallet.address),
+    permitSig,
   };
 }
 
@@ -490,6 +666,11 @@ async function main() {
       endpoints: [
         "/healthz",
         "/v1/elections",
+        "/v1/hn/census/:dni",
+        "/v1/hn/wallet-links/:dni",
+        "/v1/hn/wallet-links/by-wallet/:wallet",
+        "/v1/hn/eligibility/:dni",
+        "/v1/hn/demo/elections/:id/bootstrap-voter",
         "/v1/elections/:id/phases",
         "/v1/elections/:id/phase-changes",
         "/v1/elections/:id/candidates",
@@ -515,6 +696,340 @@ async function main() {
     await pool.query("SELECT 1");
     return { ok: true };
   });
+
+  async function getHondurasCensusRecord(dni: string): Promise<HondurasCensusRow | null> {
+    const res = await pool.query<HondurasCensusRow>(
+      `SELECT
+        dni,
+        full_name AS "fullName",
+        first_name AS "firstName",
+        middle_name AS "middleName",
+        last_name AS "lastName",
+        second_last_name AS "secondLastName",
+        habilitation_status AS "habilitationStatus",
+        status_reason AS "statusReason",
+        census_cutoff_at AS "censusCutoffAt",
+        source,
+        metadata_json AS "metadataJson",
+        imported_at AS "importedAt",
+        updated_at AS "updatedAt"
+      FROM hn_voter_registry
+      WHERE dni=$1
+      LIMIT 1`,
+      [dni],
+    );
+    return res.rows[0] ?? null;
+  }
+
+  async function listHondurasWalletLinksByDni(dni: string): Promise<HondurasWalletLinkRow[]> {
+    const res = await pool.query<HondurasWalletLinkRow>(
+      `SELECT
+        dni,
+        wallet_address AS "walletAddress",
+        link_status AS "linkStatus",
+        verification_method AS "verificationMethod",
+        evidence_json AS "evidenceJson",
+        linked_at AS "linkedAt",
+        updated_at AS "updatedAt",
+        revoked_at AS "revokedAt"
+      FROM hn_wallet_links
+      WHERE dni=$1
+      ORDER BY updated_at DESC, linked_at DESC`,
+      [dni],
+    );
+    return res.rows;
+  }
+
+  async function listHondurasWalletLinksByWallet(walletAddress: string): Promise<HondurasWalletLinkRow[]> {
+    const res = await pool.query<HondurasWalletLinkRow>(
+      `SELECT
+        dni,
+        wallet_address AS "walletAddress",
+        link_status AS "linkStatus",
+        verification_method AS "verificationMethod",
+        evidence_json AS "evidenceJson",
+        linked_at AS "linkedAt",
+        updated_at AS "updatedAt",
+        revoked_at AS "revokedAt"
+      FROM hn_wallet_links
+      WHERE wallet_address=$1
+      ORDER BY updated_at DESC, linked_at DESC`,
+      [walletAddress],
+    );
+    return res.rows;
+  }
+
+  async function ensureDemoWalletLinkForDni(record: HondurasCensusRow): Promise<HondurasWalletLinkRow> {
+    const links = await listHondurasWalletLinksByDni(record.dni);
+    const active = getActiveWalletLink(links);
+    if (active) {
+      const evidence = getObjectRecord(active.evidenceJson);
+      const hasSecret =
+        typeof evidence.demoCredentialSecretHex === "string" &&
+        /^0x[0-9a-fA-F]{64}$/.test(evidence.demoCredentialSecretHex);
+      if (hasSecret) {
+        return active;
+      }
+
+      const seededEvidence = {
+        ...evidence,
+        demoCredentialSecretHex: ethers.hexlify(ethers.randomBytes(32)).toLowerCase(),
+      };
+      await pool.query(
+        `UPDATE hn_wallet_links
+         SET evidence_json=$3, updated_at=NOW()
+         WHERE dni=$1 AND wallet_address=$2`,
+        [active.dni, active.walletAddress, JSON.stringify(seededEvidence)],
+      );
+      return {
+        ...active,
+        evidenceJson: seededEvidence,
+        updatedAt: new Date(),
+      };
+    }
+
+    const embeddedWallet = ethers.Wallet.createRandom();
+    const evidence = {
+      demoEmbeddedWallet: true,
+      demoPrivateKeyHex: embeddedWallet.privateKey.toLowerCase(),
+      demoCredentialSecretHex: ethers.hexlify(ethers.randomBytes(32)).toLowerCase(),
+    };
+
+    await pool.query(
+      `INSERT INTO hn_wallet_links(
+        dni, wallet_address, link_status, verification_method, evidence_json
+      ) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (dni, wallet_address) DO UPDATE SET
+        link_status=EXCLUDED.link_status,
+        verification_method=EXCLUDED.verification_method,
+        evidence_json=EXCLUDED.evidence_json,
+        revoked_at=NULL,
+        updated_at=NOW()`,
+      [
+        record.dni,
+        embeddedWallet.address.toLowerCase(),
+        "ACTIVE",
+        "DEMO_SYSTEM",
+        JSON.stringify(evidence),
+      ],
+    );
+
+    const created = await listHondurasWalletLinksByDni(record.dni);
+    const createdActive = getActiveWalletLink(created);
+    if (!createdActive) {
+      throw new Error("demo_wallet_link_creation_failed");
+    }
+    return createdActive;
+  }
+
+  async function issueDemoSignupPermit(params: {
+    electionId: string;
+    election: ElectionMetaRow;
+    record: HondurasCensusRow;
+    walletLink: HondurasWalletLinkRow;
+  }) {
+    if (!env.REA_PRIVATE_KEY) {
+      throw new Error("rea_private_key_not_configured");
+    }
+
+    const issuerWallet = new ethers.Wallet(env.REA_PRIVATE_KEY);
+    if (issuerWallet.address.toLowerCase() !== String(params.election.registryAuthority).toLowerCase()) {
+      throw new Error("rea_private_key_does_not_match_registry_authority");
+    }
+
+    const evidence = getObjectRecord(params.walletLink.evidenceJson);
+    const demoCredentialSecretHex = evidence.demoCredentialSecretHex;
+    if (typeof demoCredentialSecretHex !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(demoCredentialSecretHex)) {
+      throw new Error("wallet_link_missing_demo_credential_secret");
+    }
+
+    const credential: DemoRegistryCredential = {
+      credentialVersion: "1",
+      protocolVersion: "BU-PVP-1",
+      credentialId: deriveCredentialId(demoCredentialSecretHex),
+      issuedAt: new Date().toISOString(),
+      registryAuthority: params.election.registryAuthority,
+      subjectLabel: `${params.record.dni}:${params.walletLink.walletAddress}`,
+      secretHex: demoCredentialSecretHex,
+    };
+
+    const permit = await issueSignupPermitLocally({
+      chainId,
+      electionId: params.electionId,
+      contractAddress,
+      credential,
+      reaPrivateKey: env.REA_PRIVATE_KEY,
+    });
+
+    await pool.query(
+      `INSERT INTO rea_signup_permits(
+        chain_id, contract_address, election_id, registry_nullifier,
+        credential_id, issuer_address, permit_sig, issued_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (chain_id, contract_address, election_id, registry_nullifier) DO UPDATE SET
+        credential_id=EXCLUDED.credential_id,
+        issuer_address=EXCLUDED.issuer_address,
+        permit_sig=EXCLUDED.permit_sig,
+        issued_at=EXCLUDED.issued_at,
+        recorded_at=NOW()`,
+      [
+        chainId,
+        contractAddress,
+        BigInt(params.electionId),
+        permit.registryNullifier,
+        permit.credentialId,
+        permit.issuerAddress,
+        permit.permitSig,
+        permit.issuedAt,
+      ],
+    );
+
+    return permit;
+  }
+
+  app.get<{ Params: { dni: string } }>("/v1/hn/census/:dni", async (req, reply) => {
+    try {
+      const dni = requireHondurasDni(req.params.dni);
+      const record = await getHondurasCensusRecord(dni);
+      if (!record) {
+        reply.status(404);
+        return { ok: false, error: "dni_not_found", dni };
+      }
+
+      return {
+        ok: true,
+        dni,
+        record: normalizeHondurasCensusRecord(record),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.get<{ Params: { dni: string } }>("/v1/hn/wallet-links/:dni", async (req, reply) => {
+    try {
+      const dni = requireHondurasDni(req.params.dni);
+      const links = await listHondurasWalletLinksByDni(dni);
+      return {
+        ok: true,
+        dni,
+        links: links.map(normalizeHondurasWalletLink),
+        count: links.length,
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.get<{ Params: { wallet: string } }>("/v1/hn/wallet-links/by-wallet/:wallet", async (req, reply) => {
+    try {
+      const walletAddress = requireWalletAddress(req.params.wallet);
+      const links = await listHondurasWalletLinksByWallet(walletAddress);
+      return {
+        ok: true,
+        walletAddress,
+        links: links.map(normalizeHondurasWalletLink),
+        count: links.length,
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.get<{ Params: { dni: string } }>("/v1/hn/eligibility/:dni", async (req, reply) => {
+    try {
+      const dni = requireHondurasDni(req.params.dni);
+      const [record, links] = await Promise.all([
+        getHondurasCensusRecord(dni),
+        listHondurasWalletLinksByDni(dni),
+      ]);
+
+      if (!record) {
+        reply.status(404);
+        return { ok: false, error: "dni_not_found", dni };
+      }
+
+      const activeLink = getActiveWalletLink(links);
+
+      return {
+        ok: true,
+        dni,
+        habilitado: String(record.habilitationStatus).toUpperCase() === "HABILITADO",
+        record: normalizeHondurasCensusRecord(record),
+        walletLink: activeLink ? normalizeHondurasWalletLink(activeLink) : null,
+        walletLinks: links.map(normalizeHondurasWalletLink),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: DemoBootstrapBody }>(
+    "/v1/hn/demo/elections/:id/bootstrap-voter",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const dni = requireHondurasDni(String(req.body?.dni ?? ""));
+        const pin = String(req.body?.pin ?? "").trim();
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+
+        const record = await getHondurasCensusRecord(dni);
+        if (!record) {
+          reply.status(404);
+          return { ok: false, error: "dni_not_found", dni };
+        }
+
+        if (String(record.habilitationStatus).toUpperCase() !== "HABILITADO") {
+          reply.status(403);
+          return {
+            ok: false,
+            error: "dni_not_eligible",
+            dni,
+            record: normalizeHondurasCensusRecord(record),
+          };
+        }
+
+        const expectedPin = getDemoPinForRecord(record);
+        if (expectedPin && pin !== expectedPin) {
+          reply.status(401);
+          return { ok: false, error: "invalid_demo_pin", dni };
+        }
+
+        const walletLink = await ensureDemoWalletLinkForDni(record);
+        const permit = await issueDemoSignupPermit({
+          electionId,
+          election,
+          record,
+          walletLink,
+        });
+
+        return {
+          ok: true,
+          dni,
+          electionId,
+          record: normalizeHondurasCensusRecord(record),
+          walletLink: normalizeHondurasWalletLink(walletLink),
+          permit,
+          demoAuth: {
+            method: expectedPin ? "DNI_PIN" : "DNI_ONLY",
+          },
+        };
+      } catch (err: unknown) {
+        const message = (err as Error).message;
+        const status = message === "rea_private_key_not_configured" ? 503 : 400;
+        reply.status(status);
+        return { ok: false, error: message };
+      }
+    },
+  );
 
   app.get("/v1/elections", async () => {
     const electionsRes = await pool.query<ElectionRow>(
@@ -2444,18 +2959,18 @@ async function main() {
             : null,
           honesty: {
             whatIsProved: job?.status === "VERIFIED_OFFCHAIN"
-              ? "Vote counts are the correct sum of individual ballot selections and ballot inclusion in Poseidon Merkle tree (ZK verified off-chain)"
+              ? "Los conteos publicados son la suma correcta de selecciones individuales y la inclusión de boletas en el árbol Merkle Poseidon (ZK verificada fuera de cadena)"
               : job?.status === "VERIFIED_ONCHAIN"
-                ? "Vote counts are the correct sum of individual ballot selections and ballot inclusion in Poseidon Merkle tree (ZK verified on-chain)"
-                : "No ZK proof generated yet. Auditability depends on transcript verification.",
+                ? "Los conteos publicados son la suma correcta de selecciones individuales y la inclusión de boletas en el árbol Merkle Poseidon (ZK verificada en cadena)"
+                : "Aún no se generó una prueba ZK. La auditabilidad depende de la verificación del transcript.",
             whatIsNotProved: [
-              ...(job?.merkleInclusionVerified ? [] : ["Ballot inclusion in Merkle tree (Phase 9B)"]),
+              ...(job?.merkleInclusionVerified ? [] : ["Inclusión de boletas en árbol Merkle (fase 9B)"]),
               ...(decryptionJob?.status === "VERIFIED_OFFCHAIN" || decryptionJob?.status === "VERIFIED_ONCHAIN"
                 ? []
-                : ["Correct decryption of ciphertexts (requires decryption circuit)"]),
-              ...(job?.verifiedOnchain ? [] : ["On-chain verification (Phase 9C)"]),
+                : ["Descifrado correcto de ciphertexts (requiere circuito de descifrado)"]),
+              ...(job?.verifiedOnchain ? [] : ["Verificación en cadena (fase 9C)"]),
             ],
-            auditabilityNote: "Full transcript remains available for independent off-chain audit regardless of ZK proof status.",
+            auditabilityNote: "El transcript completo permanece disponible para auditoría independiente fuera de cadena sin depender del estado de prueba ZK.",
           },
         };
       } catch (err: unknown) {

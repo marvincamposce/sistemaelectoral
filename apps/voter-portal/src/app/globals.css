@@ -21,12 +21,15 @@
 }
 
 :root {
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
 }
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-slate-25);
+  background:
+    radial-gradient(1200px 520px at 0% -10%, #dbeafe 0%, transparent 60%),
+    radial-gradient(900px 420px at 100% -8%, #ede9fe 0%, transparent 60%),
+    var(--color-slate-25);
   color: #1e293b;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -70,6 +73,12 @@ body {
   background: var(--color-rose-50);
   color: var(--color-rose-700);
   border: 1px solid var(--color-rose-100);
+}
+
+.badge-info {
+  background: var(--color-indigo-50);
+  color: var(--color-indigo-700);
+  border: 1px solid var(--color-indigo-100);
 }
 
 .btn-subtle {

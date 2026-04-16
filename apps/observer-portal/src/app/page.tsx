@@ -266,7 +266,7 @@ function normalizeSeverityLabel(severity: string): string {
   const s = String(severity ?? "").toUpperCase();
   if (s === "ERROR") return "CRITICAL";
   if (s === "WARN") return "WARNING";
-  return s.length > 0 ? s : "UNKNOWN";
+  return s.length > 0 ? s : "DESCONOCIDO";
 }
 
 function severityBadgeClass(severity: string): string {
@@ -341,6 +341,24 @@ const ACTA_TYPE_ICONS: Record<string, string> = {
   ACTA_ESCRUTINIO: "📊",
   ACTA_RESULTADOS: "📜",
 };
+
+const PHASE_LABELS_ES: Record<string, string> = {
+  SETUP: "Preparación",
+  REGISTRY_OPEN: "Registro abierto",
+  REGISTRY_CLOSED: "Registro cerrado",
+  VOTING_OPEN: "Votación abierta",
+  VOTING_CLOSED: "Votación cerrada",
+  PROCESSING: "Procesamiento",
+  TALLYING: "Escrutinio",
+  RESULTS_PUBLISHED: "Resultados publicados",
+  AUDIT_WINDOW_OPEN: "Auditoría abierta",
+  ARCHIVED: "Archivada",
+};
+
+function phaseLabelEs(label: string | undefined, phase: number): string {
+  const key = String(label ?? "").toUpperCase();
+  return PHASE_LABELS_ES[key] ?? `Fase ${phase}`;
+}
 
 function actaLabel(type: string): string {
   return ACTA_TYPE_LABELS[type] ?? type;
@@ -467,7 +485,7 @@ export default async function Page() {
         safeFetchJson<ManifestResponse>(`${apiBase}/v1/elections/${id}/manifest`, {
           ok: true,
           manifest: undefined,
-          source: "unknown",
+          source: "desconocido",
         }),
         safeFetchJson<SignupsSummaryResponse>(
           `${apiBase}/v1/elections/${id}/signups/summary`,
@@ -507,7 +525,7 @@ export default async function Page() {
           electionId: id,
           zkProof: null,
           honesty: {
-            whatIsProved: "No ZK proof endpoint available",
+            whatIsProved: "No hay endpoint de prueba ZK disponible",
             whatIsNotProved: [],
             auditabilityNote: "",
           },
@@ -597,7 +615,7 @@ export default async function Page() {
         {electionsRes === null ? (
           <div className="card" style={{ padding: "3rem", textAlign: "center" }}>
             <p style={{ color: "#94a3b8", fontSize: "0.875rem" }}>
-              No se pudo conectar con la Evidence API.
+              No se pudo conectar con la API de evidencias.
             </p>
           </div>
         ) : electionsDetailed.length === 0 ? (
@@ -697,7 +715,7 @@ export default async function Page() {
                       </h2>
                       <span className="phase-pill">
                         <span className="phase-dot" />
-                        {e.phaseLabel ?? `Fase ${e.phase}`}
+                        {phaseLabelEs(e.phaseLabel, e.phase)}
                       </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-3" style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
@@ -721,7 +739,7 @@ export default async function Page() {
                         Fase actual
                       </span>
                       <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
-                        {e.phaseLabel ?? String(e.phase)}
+                        {phaseLabelEs(e.phaseLabel, e.phase)}
                       </span>
                     </div>
 
@@ -802,7 +820,7 @@ export default async function Page() {
                           {candidatesCatalog.length} candidatura{candidatesCatalog.length !== 1 ? "s" : ""} · {activeCandidatesCount} activa{activeCandidatesCount !== 1 ? "s" : ""}
                         </div>
                         <span className="badge badge-neutral">
-                          Manifiesto: {e.manifestSource ?? "unknown"}
+                          Manifiesto: {e.manifestSource ?? "desconocido"}
                         </span>
                       </div>
 
@@ -876,15 +894,15 @@ export default async function Page() {
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", fontSize: "0.75rem" }}>
                           <div>
-                            <span style={{ color: "#94a3b8" }}>Tally Job:</span>{" "}
+                            <span style={{ color: "#94a3b8" }}>Proceso de escrutinio (tally job):</span>{" "}
                             <span className="hash-display" title={r.tallyJobId}>{fullHash(r.tallyJobId)}</span>
                           </div>
                           <div>
-                            <span style={{ color: "#94a3b8" }}>Proof State:</span>{" "}
+                            <span style={{ color: "#94a3b8" }}>Estado de prueba (proof state):</span>{" "}
                             <span style={{ color: "#475569", fontWeight: 500 }}>{r.proofState}</span>
                           </div>
                           <div style={{ gridColumn: "1 / -1" }}>
-                            <span style={{ color: "#94a3b8" }}>Payload Hash:</span>{" "}
+                            <span style={{ color: "#94a3b8" }}>Huella del contenido (payload hash):</span>{" "}
                             <span className="hash-display" title={r.payloadHash} style={{ maxWidth: "100%" }}>{fullHash(r.payloadHash)}</span>
                           </div>
                           {r.honestyNote && (
@@ -964,7 +982,7 @@ export default async function Page() {
                     {timeline.length === 0 ? (
                       <div className="card p-8 text-center bg-slate-50 border-slate-200">
                         <IconActivity style={{ margin: "0 auto", color: "#94a3b8", width: "24px", height: "24px" }} />
-                        <p style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.5rem" }}>Aún no hay interacciones con el Blockchain.</p>
+                        <p style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.5rem" }}>Aún no hay interacciones con la cadena de bloques (blockchain).</p>
                       </div>
                     ) : (
                       <div className="card" style={{ padding: "1.5rem", background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)" }}>
@@ -1117,19 +1135,19 @@ export default async function Page() {
                                   }}
                                 >
                                   <div className="flex justify-between items-center">
-                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Content Hash</span>
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Huella de contenido (content hash)</span>
                                     <span className="hash-display" title={a.contentHash ?? ""}>{fullHash(a.contentHash)}</span>
                                   </div>
                                   <div className="flex justify-between items-center">
-                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Signing Digest</span>
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Resumen de firma (signing digest)</span>
                                     <span className="hash-display" title={a.signingDigest ?? ""}>{fullHash(a.signingDigest)}</span>
                                   </div>
                                   <div className="flex justify-between items-center">
-                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Anchored Hash</span>
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Huella anclada (anchored hash)</span>
                                     <span className="hash-display" title={a.actId}>{fullHash(a.actId)}</span>
                                   </div>
                                   <div className="flex justify-between items-center">
-                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Anchor Tx</span>
+                                    <span style={{ color: "#94a3b8", fontWeight: 500 }}>Transacción de anclaje</span>
                                     <span className="hash-display" title={a.anchorTxHash}>{fullHash(a.anchorTxHash)}</span>
                                   </div>
                                 </div>
@@ -1162,7 +1180,7 @@ export default async function Page() {
                                 {e.zkProof.circuitId}
                               </span>
                               <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.125rem" }}>
-                                {e.zkProof.proofSystem} · Job {e.zkProof.jobId}
+                                {e.zkProof.proofSystem} · Proceso (job) {e.zkProof.jobId}
                               </div>
                             </div>
                             <span className={`badge ${
@@ -1173,7 +1191,7 @@ export default async function Page() {
                               "badge-neutral"
                             }`}>
                               {e.zkProof.status === "VERIFIED_OFFCHAIN" ? "✓ Verificada off-chain" :
-                               e.zkProof.status === "VERIFIED_ONCHAIN" ? "✓ Verificada on-chain" :
+                               e.zkProof.status === "VERIFIED_ONCHAIN" ? "✓ Verificada en cadena" :
                                e.zkProof.status === "BUILDING" ? "⏳ Generando..." :
                                e.zkProof.status === "FAILED" ? "✗ Fallida" :
                                e.zkProof.status}
@@ -1373,7 +1391,7 @@ export default async function Page() {
                                 #
                               </th>
                               <th style={{ padding: "0.75rem 1rem", textAlign: "left", color: "#94a3b8", fontWeight: 500, fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                                Ballot Hash
+                                Huella de boleta (ballot hash)
                               </th>
                               <th style={{ padding: "0.75rem 1rem", textAlign: "left", color: "#94a3b8", fontWeight: 500, fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                                 Bloque

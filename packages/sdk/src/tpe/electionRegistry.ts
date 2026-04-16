@@ -27,7 +27,7 @@ export const BU_PVP_1_ELECTION_REGISTRY_ABI = [
   "function openAuditWindow(uint256 electionId)",
   "function archiveElection(uint256 electionId)",
   "function signup(uint256 electionId, bytes32 registryNullifier, bytes votingPubKey, bytes permitSig)",
-  "function publishBallot(uint256 electionId, bytes ciphertext)",
+  "function publishBallot(uint256 electionId, bytes votingPubKey, bytes ciphertext, bytes ballotSig)",
   "function publishActa(uint256 electionId, uint8 kind, bytes32 snapshotHash)",
   "function publishTallyProof(uint256 electionId, bytes proofPayload)",
   "event ElectionCreated(uint256 indexed electionId, bytes32 indexed manifestHash, address indexed authority, address registryAuthority, bytes coordinatorPubKey)",

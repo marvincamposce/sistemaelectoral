@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-16T22:57:35.909Z",
+    "chainId": "31337",
+    "contractAddress": "0x8a791620dd6260079bf849dc5567adc3f2fdc318",
+    "title": "Elección Experimental 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "cand-1",
+        "candidateCode": "CAND_1",
+        "displayName": "Mariana Soto",
+        "shortName": "M. Soto",
+        "partyName": "Alianza Cívica",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "cand-2",
+        "candidateCode": "CAND_2",
+        "displayName": "Tomás Rivas",
+        "shortName": "T. Rivas",
+        "partyName": "Movimiento Federal",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      },
+      {
+        "id": "cand-3",
+        "candidateCode": "CAND_3",
+        "displayName": "Lucía Peña",
+        "shortName": "L. Peña",
+        "partyName": "Pacto Social",
+        "ballotOrder": 3,
+        "status": "ACTIVE",
+        "colorHex": "#B45309",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x2bad497188b9d30c6d96f4ce2b113e065b68b18881206172d6f4a15221749749c2a038b7177faf7f6727402377114b6297621e7e4b4b494ffcd66bfe617b0902",
+    "manifestHashHex": "0xc22be4605a9647501bc035b3f7f7ce25b9b941efd510d8ecbb1d0c75cad4e551"
+  }
+}

@@ -37,7 +37,9 @@ export async function runWorkerLoop(pool: pg.Pool, provider: ethers.JsonRpcProvi
         } else if (kind === "BALLOT") {
           tx = await (contract as any).publishBallot(
             BigInt(election_id),
-            payload.ciphertext
+            payload.votingPubKey,
+            payload.ciphertext,
+            payload.ballotSig
           );
         } else {
           throw new Error("Unknown kind: " + kind);

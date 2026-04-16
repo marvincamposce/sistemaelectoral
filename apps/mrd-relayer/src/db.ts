@@ -18,4 +18,11 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
   `);
+
+  await pool.query(`
+    ALTER TABLE mrd_submissions
+      ADD COLUMN IF NOT EXISTS client_ip VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS origin TEXT,
+      ADD COLUMN IF NOT EXISTS auth_subject TEXT;
+  `);
 }

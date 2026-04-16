@@ -19,12 +19,15 @@
 }
 
 :root {
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
 }
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-slate-25);
+  background:
+    radial-gradient(1200px 500px at 10% -12%, #dbeafe 0%, transparent 60%),
+    radial-gradient(900px 420px at 100% -10%, #e0e7ff 0%, transparent 60%),
+    var(--color-slate-25);
   color: #1e293b;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

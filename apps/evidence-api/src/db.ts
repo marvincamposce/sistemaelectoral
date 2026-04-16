@@ -412,6 +412,91 @@ ALTER TABLE zk_proof_jobs
 
 ALTER TABLE zk_proof_jobs
   ADD COLUMN IF NOT EXISTS merkle_inclusion_verified BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS hn_voter_registry (
+  dni TEXT PRIMARY KEY,
+  full_name TEXT NOT NULL,
+  first_name TEXT,
+  middle_name TEXT,
+  last_name TEXT,
+  second_last_name TEXT,
+  habilitation_status TEXT NOT NULL,
+  status_reason TEXT,
+  census_cutoff_at TIMESTAMPTZ,
+  source TEXT NOT NULL DEFAULT 'MANUAL',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS hn_voter_registry_status_idx
+  ON hn_voter_registry(habilitation_status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS hn_voter_registry_name_idx
+  ON hn_voter_registry(full_name);
+
+CREATE TABLE IF NOT EXISTS hn_wallet_links (
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  link_status TEXT NOT NULL,
+  verification_method TEXT NOT NULL,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at TIMESTAMPTZ,
+  PRIMARY KEY (dni, wallet_address)
+);
+
+CREATE INDEX IF NOT EXISTS hn_wallet_links_dni_idx
+  ON hn_wallet_links(dni, updated_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS hn_wallet_links_active_wallet_uniq
+  ON hn_wallet_links(wallet_address)
+  WHERE link_status = 'ACTIVE' AND revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS hn_enrollment_requests (
+  request_id TEXT PRIMARY KEY,
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  requested_wallet_address TEXT,
+  request_channel TEXT NOT NULL DEFAULT 'CITIZEN_PORTAL',
+  request_notes TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  reviewed_by TEXT,
+  review_notes TEXT,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS hn_enrollment_requests_dni_idx
+  ON hn_enrollment_requests(dni, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS hn_enrollment_requests_status_idx
+  ON hn_enrollment_requests(status, requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS hn_voter_authorizations (
+  authorization_id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  enrollment_request_id TEXT REFERENCES hn_enrollment_requests(request_id) ON DELETE SET NULL,
+  status TEXT NOT NULL,
+  authorized_by TEXT,
+  authorization_notes TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  authorized_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS hn_voter_authorizations_lookup_idx
+  ON hn_voter_authorizations(chain_id, contract_address, election_id, dni, authorized_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS hn_voter_authorizations_active_dni_uniq
+  ON hn_voter_authorizations(chain_id, contract_address, election_id, dni)
+  WHERE status = 'AUTHORIZED' AND revoked_at IS NULL;
 `;
 
 export function createPool(databaseUrl: string): Pool {

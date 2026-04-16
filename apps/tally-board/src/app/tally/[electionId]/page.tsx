@@ -28,7 +28,7 @@ import {
 // Recreate public env inline for simplicity
 function getClientEnv() {
   return {
-    NEXT_PUBLIC_EVIDENCE_API_URL: process.env.NEXT_PUBLIC_EVIDENCE_API_URL || "http://localhost:8000"
+    NEXT_PUBLIC_EVIDENCE_API_URL: process.env.NEXT_PUBLIC_EVIDENCE_API_URL || "http://localhost:3020"
   };
 }
 
@@ -42,10 +42,18 @@ type RealTallyComputation = {
   merkleRoot: string;
   merkleRootPoseidon: string;
   transcriptHash: string;
-  transcript: unknown;
+  transcript: Parameters<typeof generateZkProofAction>[1];
   proofPayload: string;
   proofTxHash: string;
 };
+
+type BallotsApiResponse = {
+  ballots?: Array<{ ciphertext: string }>;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 type DecryptionCeremonyState = {
   ceremonyId: string;
@@ -64,7 +72,6 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
   const electionId = resolvedParams.electionId;
 
   const [status, setStatus] = useState<TallyStatus>("IDLE");
-  const [ballots, setBallots] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [lastJobId, setLastJobId] = useState<string | null>(null);
@@ -97,8 +104,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       }
       setCeremony(res.ceremony as DecryptionCeremonyState | null);
       return (res.ceremony as DecryptionCeremonyState | null) ?? null;
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
       return null;
     } finally {
       if (!options?.silent) setCeremonyLoading(false);
@@ -119,8 +126,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       if (!res.ok) throw new Error(res.error ?? "No se pudo crear la ceremonia");
       setCeremony((res.ceremony as DecryptionCeremonyState | null) ?? null);
       setCeremonyMsg(res.created ? "Ceremonia 2-de-3 abierta." : "Ya existía una ceremonia abierta/reutilizable.");
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setCeremonyLoading(false);
     }
@@ -131,11 +138,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       setErrorMsg("");
       setCeremonyMsg("");
       const res = await generateCoordinatorSharesAction();
-      if (!res.ok) throw new Error(res.error ?? "No se pudieron generar shares");
+      if (!res.ok) throw new Error(res.error ?? "No se pudieron generar fragmentos de clave.");
       setGeneratedShares(res.shares);
-      setCeremonyMsg("Shares locales generadas para distribución operativa (2 de 3).");
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+      setCeremonyMsg("Fragmentos de clave generados para distribución operativa (2 de 3).");
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -155,9 +162,9 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       }
 
       setCeremony((res.ceremony as DecryptionCeremonyState | null) ?? null);
-      setCeremonyMsg(res.closed ? "Ceremonia cerrada. Ya no se aceptan nuevas shares." : "La ceremonia ya estaba cerrada.");
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+      setCeremonyMsg(res.closed ? "Ceremonia cerrada. Ya no se aceptan nuevos fragmentos." : "La ceremonia ya estaba cerrada.");
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setCeremonyLoading(false);
     }
@@ -169,20 +176,20 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       setCeremonyMsg("");
 
       if (!trusteeIdInput.trim()) {
-        throw new Error("Ingresa trusteeId antes de enviar la share.");
+        throw new Error("Ingresa el identificador del custodio (trusteeId) antes de enviar el fragmento.");
       }
       if (!sharePayloadInput.trim()) {
-        throw new Error("Ingresa sharePayload antes de enviar la share.");
+        throw new Error("Ingresa el contenido del fragmento (sharePayload) antes de enviarlo.");
       }
       if (submissionChannelInput === "API_SIGNED") {
         if (!ceremony?.ceremonyId) {
-          throw new Error("API_SIGNED requiere una ceremonia activa explícita.");
+          throw new Error("El canal API_SIGNED requiere una ceremonia activa.");
         }
         if (!signerAddressInput.trim()) {
-          throw new Error("Ingresa signerAddress para API_SIGNED.");
+          throw new Error("Ingresa la dirección firmante (signerAddress) para usar API_SIGNED.");
         }
         if (!signatureInput.trim()) {
-          throw new Error("Ingresa signature para API_SIGNED.");
+          throw new Error("Ingresa la firma (signature) para usar API_SIGNED.");
         }
       }
 
@@ -198,21 +205,21 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       });
 
       if (!res.ok) {
-        throw new Error(res.error ?? "No se pudo registrar la share");
+        throw new Error(res.error ?? "No se pudo registrar el fragmento.");
       }
 
       setCeremony((res.ceremony as DecryptionCeremonyState | null) ?? null);
       setCeremonyMsg(
         res.ready
-          ? "Share registrada. Ceremonia lista para descifrado (threshold cumplido)."
-          : "Share registrada. Aún faltan shares para llegar al threshold.",
+          ? "Fragmento registrado. Ceremonia lista para descifrado (umbral cumplido)."
+          : "Fragmento registrado. Aún faltan fragmentos para alcanzar el umbral.",
       );
       setSharePayloadInput("");
       if (submissionChannelInput === "API_SIGNED") {
         setSignatureInput("");
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setShareSubmitting(false);
     }
@@ -227,10 +234,10 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         throw new Error("No hay ceremonia activa para generar el mensaje de firma.");
       }
       if (!trusteeIdInput.trim()) {
-        throw new Error("Ingresa trusteeId para generar mensaje de firma.");
+        throw new Error("Ingresa trusteeId para generar el mensaje de firma.");
       }
       if (!sharePayloadInput.trim()) {
-        throw new Error("Ingresa sharePayload para generar mensaje de firma.");
+        throw new Error("Ingresa el contenido del fragmento (sharePayload) para generar el mensaje de firma.");
       }
 
       setSigningMessageLoading(true);
@@ -246,9 +253,9 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       }
 
       setSigningMessage(res.signingMessage);
-      setCeremonyMsg("Mensaje de firma generado. Firma exactamente este contenido con la wallet del trustee.");
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+  setCeremonyMsg("Mensaje de firma generado. Firma este contenido con la billetera del custodio.");
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setSigningMessageLoading(false);
     }
@@ -263,11 +270,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
       const ceremonySnapshot = await refreshCeremonyState({ silent: true });
       if (!ceremonySnapshot) {
-        addLog("Advertencia: no existe ceremonia 2-de-3 activa. Se intentará fallback legacy solo si está habilitado en servidor.");
+        addLog("Advertencia: no existe una ceremonia 2-de-3 activa. Se intentará modo heredado (legacy) solo si está habilitado en el servidor.");
       } else if (ceremonySnapshot.shareCount < ceremonySnapshot.thresholdRequired) {
         addLog(
-          `Advertencia: ceremonia ${ceremonySnapshot.ceremonyId} con ${ceremonySnapshot.shareCount}/${ceremonySnapshot.thresholdRequired} shares. ` +
-            "Sin threshold completo, solo podrá continuar si el fallback legacy está habilitado.",
+          `Advertencia: ceremonia ${ceremonySnapshot.ceremonyId} con ${ceremonySnapshot.shareCount}/${ceremonySnapshot.thresholdRequired} fragmentos. ` +
+            "Sin umbral completo, solo podrá continuar si el modo heredado (legacy) está habilitado.",
         );
       } else {
         addLog(
@@ -280,27 +287,28 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       
       const env = getClientEnv();
       const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/elections/${electionId}/ballots`);
-      if (!res.ok) throw new Error("Fallo al descargar boletas de la Evidence API");
+      if (!res.ok) throw new Error("Fallo al descargar boletas desde la API de evidencias.");
       
-      const data = await res.json();
-      const ciphertexts = data.ballots.map((b: any) => b.ciphertext);
-      setBallots(ciphertexts);
+      const data = (await res.json()) as BallotsApiResponse;
+      const ciphertexts = Array.isArray(data.ballots)
+        ? data.ballots.map((ballot) => String(ballot.ciphertext))
+        : [];
       addLog(`Se obtuvieron ${ciphertexts.length} cifrados listos para procesar.`);
       const pointer = [{ source: "ballots", count: ciphertexts.length }];
       if (ciphertexts.length === 0) {
-        await logIncidentAction(electionId, "TALLY_NO_BALLOTS", "TALLY_ERROR", "Attempted to run processing batch without published ballots.", "CRITICAL", pointer);
+        await logIncidentAction(electionId, "TALLY_NO_BALLOTS", "TALLY_ERROR", "Se intentó ejecutar un lote de procesamiento sin boletas publicadas.", "CRITICAL", pointer);
         throw new Error("No hay boletas (input_count=0). Abortando. Incidente registrado.");
       }
 
       setStatus("SIMULATING_ZK");
       addLog("Descifrando boletas y calculando resumen real...");
-      const tallyRes = await computeRealTallyAction(electionId, ciphertexts);
+      const tallyRes = await computeRealTallyAction(electionId);
       if (!tallyRes.ok) {
         await logIncidentAction(
           electionId,
           `TALLY_DECRYPTION_FAILED:${new Date().toISOString()}`,
           "TALLY_DECRYPTION_FAILED",
-          `Fallo en descifrado/conteo real: ${tallyRes.error ?? "unknown"}`,
+          `Fallo en descifrado/conteo real: ${tallyRes.error ?? "desconocido"}`,
           "CRITICAL",
           [{ source: "ballots", count: ciphertexts.length }],
         );
@@ -315,34 +323,34 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         ballotsCount: number;
         merkleRoot: string;
         merkleRootPoseidon: string;
-        transcript: unknown;
+        transcript: Parameters<typeof generateZkProofAction>[1];
         transcriptHash: string;
       };
 
       const derivedRoot = tallyData.merkleRoot;
-      addLog(`Root hash Merkle (real) derivado desde ciphertexts: ${derivedRoot}`);
-      addLog(`Root Merkle Poseidon (Fase 9B): ${tallyData.merkleRootPoseidon}`);
+      addLog(`Raíz Merkle real (hash) derivada desde los ciphertexts: ${derivedRoot}`);
+      addLog(`Raíz Merkle Poseidon (fase 9B): ${tallyData.merkleRootPoseidon}`);
       addLog(
-        `Conteo real listo. Validas=${tallyData.validCount}, inválidas=${tallyData.invalidCount}. Resumen=${JSON.stringify(tallyData.summary)}`,
+        `Conteo real listo. Válidas=${tallyData.validCount}, inválidas=${tallyData.invalidCount}. Resumen=${JSON.stringify(tallyData.summary)}`,
       );
 
-      addLog("Creando Processing Batch en base de datos...");
+      addLog("Creando lote de procesamiento (processing batch) en base de datos...");
       const batchRes = await createProcessingBatchAction(electionId, ciphertexts.length, derivedRoot);
-      if (!batchRes.ok) throw new Error(`Error creando batch: ${batchRes.error}`);
+      if (!batchRes.ok) throw new Error(`Error creando el lote: ${batchRes.error}`);
       const batchId = batchRes.batchId;
-      addLog(`Batch creado. ID: ${batchId}`);
+      addLog(`Lote creado. ID: ${batchId}`);
 
       await updateProcessingBatchStatusAction(batchId!, "RUNNING");
 
-      addLog("Procesando Batch de forma determinista (sin simulación temporal)...");
+      addLog("Procesando lote de forma determinista (sin simulación temporal)...");
       await updateProcessingBatchStatusAction(batchId!, "COMPLETED");
-      addLog("Batch procesado y completado.");
+      addLog("Lote procesado y completado.");
 
-      addLog("Creando Tally Job en base de datos...");
+      addLog("Creando proceso de escrutinio (tally job) en base de datos...");
       const jobRes = await createTallyJobAction(electionId, batchId!);
-      if (!jobRes.ok) throw new Error(`Error creando tally job: ${jobRes.error}`);
+      if (!jobRes.ok) throw new Error(`Error creando el proceso de escrutinio: ${jobRes.error}`);
       const jobId = jobRes.jobId;
-      addLog(`Tally Job creado. ID: ${jobId}`);
+      addLog(`Proceso de escrutinio creado. ID: ${jobId}`);
 
       const transcriptHash = tallyData.transcriptHash;
       const proofPayload = ethers.solidityPacked(
@@ -351,10 +359,10 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       );
 
       setStatus("PUBLISHING_STUB");
-      addLog("Publicando commitment del transcript de tally on-chain...");
+  addLog("Publicando compromiso del transcript de escrutinio en cadena (sin verificación ZK en este paso)...");
       const proofResult = await publishProofAction(electionId, proofPayload);
-      if (!proofResult.ok) throw new Error(`Fallo publicando proof: ${proofResult.error}`);
-      addLog(`Proof publicado on-chain. Tx: ${proofResult.txHash}`);
+  if (!proofResult.ok) throw new Error(`Fallo publicando el compromiso de transcript: ${proofResult.error}`);
+  addLog(`Compromiso de transcript publicado en cadena. Tx: ${proofResult.txHash}`);
 
       await updateTallyJobStatusAction(
         jobId!,
@@ -386,13 +394,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       });
 
       setStatus("PUBLISHING_ACTA");
-      addLog("Generando ACTA_ESCRUTINIO firmada y anclando hash en la blockchain...");
+      addLog("Generando ACTA_ESCRUTINIO firmada y anclando huella (hash) en la cadena de bloques...");
       
       const actaJson = {
         kind: "ACTA_ESCRUTINIO",
         electionId,
         tallyMode: "REAL_TRANSCRIPT",
-        note: "Descifrado y conteo reales ejecutados. Compromiso de transcript publicado; ZK completa pendiente.",
+        note: "Descifrado y conteo reales ejecutados. Compromiso de transcript publicado; la verificación ZK corre por un flujo separado.",
         totalProcessed: tallyData.ballotsCount,
         validBallots: tallyData.validCount,
         invalidBallots: tallyData.invalidCount,
@@ -407,17 +415,17 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       // kind=2 = ACTA_ESCRUTINIO in Solidity enum
       const actaResult = await publishActaWithContentAction(electionId, actaJson, 2);
       if (!actaResult.ok) throw new Error(`Fallo anclando acta: ${actaResult.error}`);
-      addLog(`ACTA_ESCRUTINIO anclada On-chain. Tx: ${actaResult.txHash} | actId: ${actaResult.actId}`);
+      addLog(`ACTA_ESCRUTINIO anclada en cadena. Tx: ${actaResult.txHash} | actId: ${actaResult.actId}`);
 
-      addLog("Notificando Contrato para transicionar de TALLYING -> RESULTS_PUBLISHED ...");
+      addLog("Notificando contrato para transicionar de TALLYING a RESULTS_PUBLISHED...");
       const resultsResult = await advanceToResultsPublishedAction(electionId);
-      if (!resultsResult.ok) throw new Error(`Fallo cambiando fase a published: ${resultsResult.error}`);
-      addLog(`Fase Results Published activada. Tx: ${resultsResult.txHash}`);
+      if (!resultsResult.ok) throw new Error(`Fallo cambiando la fase publicada: ${resultsResult.error}`);
+      addLog(`Fase de resultados publicados activada. Tx: ${resultsResult.txHash}`);
 
       setStatus("DONE");
       addLog("Escrutinio completado con descifrado y conteo reales.");
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
       setStatus("IDLE");
     }
   };
@@ -426,11 +434,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
     try {
       setErrorMsg("");
       if (!tallyComputation) {
-        throw new Error("No existe un resultado de tally real para publicar. Ejecuta primero el procesamiento.");
+        throw new Error("No existe un resultado real de escrutinio para publicar. Ejecuta primero el procesamiento.");
       }
 
-      const jobId = lastJobId ?? "unknown-job";
-      addLog(`Generando Result Payload (basado en tallyJobId: ${jobId})...`);
+      const jobId = lastJobId ?? "proceso-desconocido";
+      addLog(`Generando contenido de resultados (payload) basado en tallyJobId: ${jobId}...`);
       const resultJson = {
         electionId,
         tallyJobId: jobId,
@@ -447,9 +455,9 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         proofPayload: tallyComputation.proofPayload,
         proofTxHash: tallyComputation.proofTxHash,
         honesty: {
-          note: "El resultSummary proviene de descifrado real de ciphertexts y transcript verificable.",
-          whatIsReal: "Descifrado, conteo, Merkle root, commitment on-chain, actas ancladas",
-          whatIsPending: "Prueba ZK completa"
+          note: "El resumen de resultados proviene de descifrado real de ciphertexts y un transcript comprometido en cadena.",
+          whatIsReal: "Descifrado, conteo, raíz Merkle, compromiso en cadena y actas ancladas",
+          whatIsPending: "La verificación ZK sigue en un flujo separado y no forma parte de esta publicación base."
         },
         publicationTimestamp: new Date().toISOString(),
       };
@@ -459,14 +467,14 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         resultKind: "TALLY_REAL",
       });
       if (!payloadRes.ok) throw new Error(`Fallo guardando payload: ${payloadRes.error}`);
-      addLog(`Result Payload publicado. Hash: ${payloadRes.payloadHash} | modo=${payloadRes.resultMode}`);
+      addLog(`Contenido de resultados publicado (payload). Hash: ${payloadRes.payloadHash} | modo=${payloadRes.resultMode}`);
 
-      addLog("Generando ACTA_RESULTADOS (kind=3) y anclando on-chain...");
+      addLog("Generando ACTA_RESULTADOS (kind=3) y anclando en cadena...");
       const actaJson = {
         kind: "ACTA_RESULTADOS",
         electionId,
         tallyMode: "REAL_TRANSCRIPT",
-        note: "Resultados publicados desde conteo real; ZK completa pendiente.",
+        note: "Resultados publicados desde conteo real con actas y compromiso de transcript; la verificación ZK se publica aparte.",
         summary: tallyComputation.summary,
         validBallots: tallyComputation.validCount,
         invalidBallots: tallyComputation.invalidCount,
@@ -476,35 +484,35 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       // kind=3 = ACTA_RESULTADOS in Solidity enum
       const actaResult = await publishActaWithContentAction(electionId, actaJson, 3);
       if (!actaResult.ok) throw new Error(`Fallo anclando acta de resultados: ${actaResult.error}`);
-      addLog(`ACTA_RESULTADOS anclada On-chain. Tx: ${actaResult.txHash} | actId: ${actaResult.actId}`);
+      addLog(`ACTA_RESULTADOS anclada en cadena. Tx: ${actaResult.txHash} | actId: ${actaResult.actId}`);
 
       addLog("Abriendo Ventana de Auditoría...");
       const auditRes = await openAuditWindowAction(electionId);
       if (!auditRes.ok) throw new Error(`Fallo abriendo auditoría: ${auditRes.error}`);
-      addLog("Ventana de Auditoría ABIERTA.");
+      addLog("Ventana de auditoría abierta.");
 
-      addLog("Materializando Audit Bundle...");
+      addLog("Materializando paquete de auditoría (audit bundle)...");
       const bundleRes = await persistAuditBundleAction(electionId);
       if (!bundleRes.ok) throw new Error(`Fallo materializando bundle: ${bundleRes.error}`);
-      addLog(`Audit Bundle materializado. bundleHash: ${bundleRes.bundleHash}`);
-    } catch (err: any) {
-      setErrorMsg(err.message || String(err));
+      addLog(`Paquete de auditoría materializado. bundleHash: ${bundleRes.bundleHash}`);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
   return (
     <main className="space-y-6">
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-amber-700 mb-2">Advertencia Oficial JED</h2>
+        <h2 className="text-lg font-semibold text-amber-700 mb-2">Resumen operativo JED</h2>
         <p className="text-sm text-amber-700">
-          Esta consola ejecuta descifrado y conteo reales con compromiso de transcript verificable publicado on-chain.
-          La prueba ZK incluye conteo + inclusion Merkle (Fase 9B) y puede validarse on-chain (Fase 9C) desde esta misma consola.
+          Esta consola ejecuta descifrado y conteo reales con compromiso de transcript verificable publicado en cadena (on-chain).
+          La prueba ZK incluye conteo e inclusión Merkle (fase 9B) y puede validarse en cadena (fase 9C) desde esta misma pantalla.
         </p>
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">Consola de Escrutinio Ciego</h2>
+          <h2 className="text-xl font-bold text-slate-900">Panel de escrutinio guiado</h2>
           <span className="text-xs font-mono text-slate-500">Elección #{electionId}</span>
         </div>
 
@@ -519,7 +527,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
             <div>
               <h3 className="text-sm font-semibold text-slate-800">Ceremonia de Descifrado 2-de-3</h3>
               <p className="text-xs text-slate-500 mt-1">
-                El tally prioriza la reconstrucción de clave desde shares registradas. Si no hay threshold completo, solo continúa con fallback legacy cuando está habilitado en servidor.
+                El escrutinio prioriza la reconstrucción de clave desde fragmentos registrados. Si no hay umbral completo, solo continúa en modo heredado (legacy) cuando está habilitado en servidor.
               </p>
             </div>
             <div className="flex gap-2">
@@ -528,21 +536,21 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                 className="px-3 py-2 text-xs rounded border border-slate-300 text-slate-800 hover:bg-slate-100"
                 disabled={ceremonyLoading}
               >
-                REFRESCAR
+                Actualizar
               </button>
               <button
                 onClick={handleCreateCeremony}
                 className="px-3 py-2 text-xs rounded bg-amber-700 hover:bg-amber-600 text-white"
                 disabled={ceremonyLoading}
               >
-                ABRIR CEREMONIA
+                Abrir ceremonia
               </button>
               <button
                 onClick={handleCloseCeremony}
                 className="px-3 py-2 text-xs rounded bg-rose-700 hover:bg-rose-600 text-white disabled:bg-slate-300"
                 disabled={ceremonyLoading || !ceremony || ceremony.status === "CLOSED"}
               >
-                CERRAR CEREMONIA
+                Cerrar ceremonia
               </button>
             </div>
           </div>
@@ -552,12 +560,12 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
               <span>Cargando estado de ceremonia...</span>
             ) : ceremony ? (
               <div className="space-y-1">
-                <div>Ceremony ID: <span className="font-mono">{ceremony.ceremonyId}</span></div>
+                <div>ID de ceremonia: <span className="font-mono">{ceremony.ceremonyId}</span></div>
                 <div>Estado: <span className="font-semibold">{ceremony.status}</span></div>
                 <div>
-                  Shares: <span className="font-semibold">{ceremony.shareCount}</span> / {ceremony.thresholdRequired}
+                  Fragmentos: <span className="font-semibold">{ceremony.shareCount}</span> / {ceremony.thresholdRequired}
                 </div>
-                <div>Trustees esperados: {ceremony.trusteeCount}</div>
+                <div>Custodios esperados: {ceremony.trusteeCount}</div>
                 {ceremony.trustees.length > 0 && (
                   <div className="pt-2 space-y-1">
                     {ceremony.trustees.map((t) => (
@@ -579,13 +587,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                 onClick={handleGenerateShares}
                 className="px-3 py-2 text-xs rounded border border-sky-600 text-sky-700 hover:bg-sky-100"
               >
-                GENERAR SHARES LOCALES
+                Generar fragmentos locales
               </button>
             </div>
 
             {generatedShares.length > 0 && (
               <div className="space-y-2 rounded border border-sky-200 bg-sky-50 p-3">
-                <div className="text-xs text-sky-700">Shares generadas (distribúyelas fuera de banda):</div>
+                <div className="text-xs text-sky-700">Fragmentos generados (distribúyelos por canal seguro):</div>
                 {generatedShares.map((share, idx) => (
                   <div key={share} className="flex flex-col md:flex-row md:items-center gap-2">
                     <span className="text-[11px] text-sky-700 font-mono">T{idx + 1}</span>
@@ -601,7 +609,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                       }}
                       className="px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-800 hover:bg-slate-100"
                     >
-                      CARGAR
+                      Usar
                     </button>
                   </div>
                 ))}
@@ -626,7 +634,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                 disabled={shareSubmitting}
                 className="px-3 py-2 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:bg-slate-300"
               >
-                {shareSubmitting ? "ENVIANDO..." : "REGISTRAR SHARE"}
+                {shareSubmitting ? "Enviando..." : "Registrar fragmento"}
               </button>
             </div>
 
@@ -636,11 +644,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                 onChange={(e) => setSubmissionChannelInput(e.target.value as "MANUAL" | "API_SIGNED")}
                 className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900"
               >
-                <option value="MANUAL">MANUAL</option>
-                <option value="API_SIGNED">API_SIGNED</option>
+                <option value="MANUAL">Manual</option>
+                <option value="API_SIGNED">Firmada por API (API_SIGNED)</option>
               </select>
               <div className="text-xs text-slate-500 flex items-center">
-                API_SIGNED valida firma ECDSA del trustee sobre mensaje canónico por share.
+                API_SIGNED valida firma ECDSA del custodio sobre el mensaje canónico del fragmento.
               </div>
             </div>
 
@@ -652,27 +660,27 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                     disabled={signingMessageLoading}
                     className="px-3 py-2 text-xs rounded border border-cyan-300 text-cyan-700 hover:bg-cyan-100 disabled:bg-slate-300"
                   >
-                    {signingMessageLoading ? "GENERANDO..." : "GENERAR MENSAJE A FIRMAR"}
+                    {signingMessageLoading ? "Generando..." : "Generar mensaje de firma"}
                   </button>
                 </div>
 
                 <textarea
                   readOnly
                   value={signingMessage}
-                  placeholder="El mensaje canónico aparecerá aquí para firmarlo con la wallet del trustee"
+                  placeholder="El mensaje canónico aparecerá aquí para firmarlo con la billetera del custodio"
                   className="w-full min-h-24 rounded bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] font-mono text-slate-800"
                 />
 
                 <input
                   value={signerAddressInput}
                   onChange={(e) => setSignerAddressInput(e.target.value)}
-                  placeholder="0x... signerAddress"
+                  placeholder="0x... dirección firmante (signerAddress)"
                   className="w-full rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
                 />
                 <input
                   value={signatureInput}
                   onChange={(e) => setSignatureInput(e.target.value)}
-                  placeholder="0x... signature"
+                  placeholder="0x... firma (signature)"
                   className="w-full rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
                 />
               </div>
@@ -686,7 +694,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
           <button 
             disabled={status !== "IDLE" || ceremonyLoading}
             onClick={handleStartTally}
-            className={`w-full px-6 py-4 rounded-xl font-extrabold tracking-widest text-sm flex items-center justify-center gap-3 transition-all ${
+            className={`w-full px-6 py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-3 transition-all ${
               status === "IDLE" && !ceremonyLoading
               ? "bg-slate-900 hover:bg-black text-white shadow-lg hover:shadow-xl ring-2 ring-transparent focus:ring-slate-400" 
               : "bg-slate-200 text-slate-500 cursor-not-allowed"
@@ -695,12 +703,12 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
             {status === "IDLE" ? (
               <>
                 <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                INICIAR DESENCRIPTACIÓN CIENTÍFICA (BATCH JOB)
+                Iniciar descifrado y escrutinio
               </>
             ) : (
               <>
                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-400 border-t-slate-600" />
-                EJECUTANDO ALGORITMOS DE CONTEO...
+                Ejecutando cálculos de conteo...
               </>
             )}
           </button>
@@ -711,10 +719,10 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
               <div className="space-y-2">
                 <button 
                   onClick={handlePublishResults}
-                  className="w-full px-6 py-4 rounded-xl font-bold tracking-widest text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2"
+                  className="w-full px-6 py-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2"
                 >
                   <svg className="w-5 h-5 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                  PUBLICAR RESULTADOS & ABRIR AUDITORÍA PÚBLICA
+                  Publicar resultados y abrir auditoría pública
                 </button>
                 <p className="text-center text-xs text-slate-500 font-medium">Publica el acta matemática y abre la ventana temporal para impugnaciones públicas.</p>
               </div>
@@ -725,9 +733,9 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                 <div className="flex items-start gap-3">
                   <svg className="w-6 h-6 text-violet-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
                   <div>
-                    <h3 className="text-sm font-bold text-violet-900 uppercase tracking-wide">Capa Zero-Knowledge (Pruebas de Conocimiento Cero)</h3>
+                    <h3 className="text-sm font-bold text-violet-900">Prueba de conocimiento cero (ZK)</h3>
                     <p className="text-xs text-violet-700 mt-1 mb-4">
-                      Comprueba matemáticamente que el sistema contó bien sin des-anonimizar o mostrar los votos individuales, usando curvas elípticas.
+                      Comprueba matemáticamente que el sistema contó correctamente sin revelar los votos individuales.
                     </p>
 
                     {tallyComputation && !zkProofStatus && (
@@ -737,26 +745,26 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                             setErrorMsg("");
                             setZkProofStatus("BUILDING");
                             setOnchainVerifyTx(null);
-                            addLog("Generando Prueba ZK (Groth16 BN-128)...");
+                            addLog("Generando prueba ZK (Groth16 BN-128)...");
                             const res = await generateZkProofAction(
                               electionId,
-                              tallyComputation.transcript as any,
-                              lastJobId ?? "unknown",
+                              tallyComputation.transcript,
+                              lastJobId ?? "proceso-desconocido",
                             );
                             if (!res.ok) {
                               setZkProofStatus("FAILED");
-                              throw new Error(res.error ?? "ZK proof generation failed");
+                              throw new Error(res.error ?? "Falló la generación de la prueba ZK.");
                             }
                             setZkProofJobId(res.jobId ?? null);
                             setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
-                            addLog(`ZK Proof generada y verificada off-chain. JobId: ${res.jobId}`);
-                          } catch (err: any) {
-                            setErrorMsg(err.message || String(err));
+                            addLog(`Prueba ZK generada y verificada fuera de cadena. JobId: ${res.jobId}`);
+                          } catch (err: unknown) {
+                            setErrorMsg(getErrorMessage(err));
                           }
                         }}
                         className="w-full px-5 py-3.5 rounded-xl font-bold tracking-wide text-sm bg-violet-600 hover:bg-violet-700 text-white transition-all shadow-md group border border-violet-700"
                       >
-                        GENERAR PRUEBA ZK (Groth16 Local)
+                        Generar prueba ZK (Groth16 local)
                       </button>
                     )}
 
@@ -773,7 +781,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                         
                         <div>
                           Estado SNARK: <span className="uppercase">{zkProofStatus}</span>
-                          {zkProofJobId && <div className="text-[10px] font-normal text-emerald-700/80 mt-0.5">Proof ID: {zkProofJobId}</div>}
+                          {zkProofJobId && <div className="text-[10px] font-normal text-emerald-700/80 mt-0.5">ID de prueba: {zkProofJobId}</div>}
                         </div>
                       </div>
                     )}
@@ -782,23 +790,23 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                       <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
                          <h4 className="text-sm font-bold text-emerald-800 mb-2 flex items-center gap-2">
                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                           Sellar Prueba en Blockchain
+                           Registrar prueba en cadena (blockchain)
                          </h4>
                          <p className="text-xs text-emerald-700 mb-4 font-medium">
-                           Remitir el Groth16 zk-SNARK al Smart Contract (TallyVerifier.sol) para que verifique la autenticidad matemática públicamente, sin depender del servidor.
+                           Envía Groth16 al contrato inteligente (smart contract) para verificación matemática pública, sin depender del servidor.
                          </p>
                          <button
                           onClick={async () => {
                             try {
                               setErrorMsg("");
                               setOnchainSubmitting(true);
-                              addLog("Enviando proof al verificador on-chain...");
+                              addLog("Enviando prueba al verificador en cadena...");
                               const res = await submitOnchainZkProofAction(electionId, { jobId: zkProofJobId ?? undefined });
-                              if (!res.ok) throw new Error(res.error ?? "On-chain verification failed");
+                              if (!res.ok) throw new Error(res.error ?? "Falló la verificación en cadena.");
                               setZkProofStatus("VERIFIED_ONCHAIN");
                               setOnchainVerifyTx(res.txHash ?? null);
-                            } catch (err: any) {
-                              setErrorMsg(err.message || String(err));
+                            } catch (err: unknown) {
+                              setErrorMsg(getErrorMessage(err));
                             } finally {
                               setOnchainSubmitting(false);
                             }
@@ -809,10 +817,10 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                           {onchainSubmitting ? (
                             <>
                               <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                              EJECUTANDO TRANSACCIÓN ON-CHAIN...
+                              Ejecutando transacción en cadena...
                             </>
                           ) : (
-                            "VERIFICAR PRUEBA ON-CHAIN (FASE 9C)"
+                            "Verificar prueba en cadena (fase 9C)"
                           )}
                         </button>
                       </div>
@@ -820,7 +828,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
                     {onchainVerifyTx && (
                       <div className="mt-3 text-[11px] font-mono text-emerald-800 bg-emerald-100/50 p-2 rounded-lg border border-emerald-200">
-                        Blockchain Tx: {onchainVerifyTx}
+                        Transacción blockchain: {onchainVerifyTx}
                       </div>
                     )}
                   </div>
@@ -836,7 +844,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
               <div className="w-3 h-3 rounded-full bg-rose-500" />
               <div className="w-3 h-3 rounded-full bg-amber-500" />
               <div className="w-3 h-3 rounded-full bg-emerald-500" />
-              <span className="ml-2 text-xs font-semibold text-slate-300 uppercase tracking-widest">Protocol Logger</span>
+              <span className="ml-2 text-xs font-semibold text-slate-300 uppercase tracking-widest">Registro del proceso</span>
             </div>
             <div className="p-5 space-y-2 h-64 overflow-y-auto custom-scrollbar">
               {logs.map((L, i) => (

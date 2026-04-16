@@ -89,6 +89,45 @@ function phaseBadgeClass(label: string | undefined): string {
   return "badge badge-info";
 }
 
+const PHASE_LABELS_ES: Record<string, string> = {
+  SETUP: "Preparación",
+  REGISTRY_OPEN: "Registro abierto",
+  REGISTRY_CLOSED: "Registro cerrado",
+  VOTING_OPEN: "Votación abierta",
+  VOTING_CLOSED: "Votación cerrada",
+  PROCESSING: "Procesamiento",
+  TALLYING: "Escrutinio",
+  RESULTS_PUBLISHED: "Resultados publicados",
+  AUDIT_WINDOW_OPEN: "Auditoría abierta",
+  ARCHIVED: "Archivada",
+};
+
+function phaseLabelEs(label: string | undefined, phase: number): string {
+  const key = String(label ?? "").toUpperCase();
+  return PHASE_LABELS_ES[key] ?? `Fase ${phase}`;
+}
+
+const HEX32_REGEX = /^0x[0-9a-fA-F]{64}$/;
+
+function resolveDefaultRegistryAuthority(aeaPrivateKey: string): string {
+  const fromEnv = String(process.env.DEFAULT_REGISTRY_AUTHORITY ?? "").trim();
+  if (fromEnv.length > 0) {
+    try {
+      return ethers.getAddress(fromEnv);
+    } catch {
+      // Ignore invalid override and fallback to the AEA address.
+    }
+  }
+
+  return new ethers.Wallet(aeaPrivateKey).address;
+}
+
+function resolveDefaultCoordinatorPubKey(): string {
+  const fromEnv = String(process.env.DEFAULT_COORDINATOR_PUBKEY ?? "").trim();
+  if (HEX32_REGEX.test(fromEnv)) return fromEnv;
+  return "0x1111111111111111111111111111111111111111111111111111111111111111";
+}
+
 const CreateElectionInputSchema = z
   .object({
     title: z.string().min(1).max(140),
@@ -179,6 +218,13 @@ async function createElectionAction(formData: FormData) {
   const provider = new ethers.JsonRpcProvider(env.RPC_URL);
   const wallet = new ethers.Wallet(env.AEA_PRIVATE_KEY, provider);
   const authorityAddress = await wallet.getAddress();
+
+  const contractCode = await provider.getCode(env.CONTRACT_ADDRESS);
+  if (!contractCode || contractCode === "0x") {
+    throw new Error(
+      `No hay bytecode en ELECTION_REGISTRY_ADDRESS (${env.CONTRACT_ADDRESS}). Ejecuta ./start-dev.sh para redeploy y sincronizar direcciones.`,
+    );
+  }
 
   const registryAuthority = ethers.getAddress(parsed.data.registryAuthority);
   const coordinatorPubKey = parsed.data.coordinatorPubKey;
@@ -379,6 +425,12 @@ export default async function Page() {
   }
 
   const env = envRes.env;
+  const defaultFormValues = {
+    title: `Elección Experimental ${new Date().getFullYear()}`,
+    notes: "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    registryAuthority: resolveDefaultRegistryAuthority(env.AEA_PRIVATE_KEY),
+    coordinatorPubKey: resolveDefaultCoordinatorPubKey(),
+  };
 
   const electionsRes = await safeFetchJson<ElectionsApiResponse | null>(
     `${env.EVIDENCE_API_URL}/v1/elections`,
@@ -408,7 +460,7 @@ export default async function Page() {
           </div>
           {latestElection ? (
             <div className="rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
-              Última elección indexada: #{latestElection.electionId} · fase {latestElection.phaseLabel ?? `FASE ${latestElection.phase}`} · {formatTimestamp(latestElection.createdAtTimestamp)}
+              Última elección indexada: #{latestElection.electionId} · fase {phaseLabelEs(latestElection.phaseLabel, latestElection.phase)} · {formatTimestamp(latestElection.createdAtTimestamp)}
             </div>
           ) : null}
         </header>
@@ -423,7 +475,7 @@ export default async function Page() {
             <span className="text-2xl font-semibold text-slate-900">{electionsWithActivity}</span>
           </article>
           <article className="stat-card">
-            <span className="text-xs text-slate-500 uppercase tracking-wide">Signups</span>
+            <span className="text-xs text-slate-500 uppercase tracking-wide">Inscripciones</span>
             <span className="text-2xl font-semibold text-slate-900">{totalSignups}</span>
           </article>
           <article className="stat-card">
@@ -432,10 +484,27 @@ export default async function Page() {
           </article>
         </section>
 
+        <section className="card p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="section-title">Scope Honduras</div>
+              <div className="text-sm text-slate-600">
+                Censo mínimo para el proyecto: consulta de DNI, habilitación y vínculo con wallets.
+              </div>
+            </div>
+            <Link
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              href="/honduras"
+            >
+              Abrir módulo
+            </Link>
+          </div>
+        </section>
+
         <section className="card p-4 space-y-3">
           <div className="section-title">Elecciones</div>
           {electionsRes === null ? (
-            <div className="text-sm text-slate-600">(Evidence API no disponible)</div>
+            <div className="text-sm text-slate-600">(API de evidencias no disponible)</div>
           ) : elections.length === 0 ? (
             <div className="text-sm text-slate-600">(Sin elecciones indexadas todavía)</div>
           ) : (
@@ -446,11 +515,11 @@ export default async function Page() {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <div className="text-sm font-semibold">Elección #{e.electionId}</div>
-                        <span className={phaseBadgeClass(e.phaseLabel)}>{e.phaseLabel ?? `FASE ${e.phase}`}</span>
+                        <span className={phaseBadgeClass(e.phaseLabel)}>{phaseLabelEs(e.phaseLabel, e.phase)}</span>
                       </div>
-                      <div className="hash-display break-all" title={e.manifestHash}>manifestHash: {shortHash(e.manifestHash)}</div>
+                      <div className="hash-display break-all" title={e.manifestHash}>huella de manifiesto (hash): {shortHash(e.manifestHash)}</div>
                       <div className="text-xs text-slate-700">
-                        signups={e.counts?.signups ?? 0} · boletas={e.counts?.ballots ?? 0}
+                        inscripciones={e.counts?.signups ?? 0} · boletas={e.counts?.ballots ?? 0}
                       </div>
                       <div className="text-xs text-slate-500">creada: {formatTimestamp(e.createdAtTimestamp)}</div>
                       <div className="hash-display break-all" title={e.createdTxHash}>tx: {shortHash(e.createdTxHash)}</div>
@@ -459,7 +528,7 @@ export default async function Page() {
                       className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
                       href={`/elections/${encodeURIComponent(e.electionId)}`}
                     >
-                      abrir
+                      Ver detalle
                     </Link>
                   </div>
                 </div>
@@ -469,8 +538,8 @@ export default async function Page() {
         </section>
 
         <section className="card p-4 space-y-3">
-          <div className="section-title">Instanciar Nueva Elección</div>
-          <CreateElectionForm createElectionAction={createElectionAction} />
+          <div className="section-title">Crear nueva elección asistida</div>
+          <CreateElectionForm createElectionAction={createElectionAction} defaults={defaultFormValues} />
         </section>
       </div>
     </main>

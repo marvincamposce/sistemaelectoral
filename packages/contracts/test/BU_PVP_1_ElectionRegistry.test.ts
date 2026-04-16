@@ -3,6 +3,10 @@ import { network } from "hardhat";
 
 const { ethers } = await network.connect();
 
+function uncompressedPublicKey(privateKey: string): string {
+  return ethers.SigningKey.computePublicKey(privateKey, false);
+}
+
 describe("BU_PVP_1_ElectionRegistry", function () {
   it("enforces the BU-PVP-1 phase machine", async function () {
     const [aea, rea] = await ethers.getSigners();
@@ -47,7 +51,8 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     await (await registry.connect(aea).openRegistry(0)).wait();
 
     const nullifier = "0x" + "33".repeat(32);
-    const votingPubKey = "0x" + "44".repeat(32);
+    const signupWallet = ethers.Wallet.createRandom();
+    const votingPubKey = uncompressedPublicKey(signupWallet.privateKey);
 
     const digest = ethers.keccak256(
       ethers.solidityPacked(["string", "uint256", "bytes32"], ["BU-PVP-1:signup", 0, nullifier]),
@@ -60,6 +65,60 @@ describe("BU_PVP_1_ElectionRegistry", function () {
 
     await expect(
       registry.connect(voter).signup(0, nullifier, votingPubKey, sig),
+    ).to.be.revert(ethers);
+  });
+
+  it("requires a registered voting key and prevents double ballot casting", async function () {
+    const [aea, rea, relayer] = await ethers.getSigners();
+    if (!aea || !rea || !relayer) throw new Error("Missing signers");
+
+    const Factory = await ethers.getContractFactory("BU_PVP_1_ElectionRegistry");
+    const registry = (await Factory.connect(aea).deploy()) as any;
+    await registry.waitForDeployment();
+
+    await (
+      await registry
+        .connect(aea)
+        .createElection("0x" + "11".repeat(32), await rea.getAddress(), "0x" + "22".repeat(32))
+    ).wait();
+    await (await registry.connect(aea).openRegistry(0)).wait();
+
+    const votingWallet = ethers.Wallet.createRandom();
+    const votingPubKey = uncompressedPublicKey(votingWallet.privateKey);
+    const nullifier = "0x" + "33".repeat(32);
+    const digest = ethers.keccak256(
+      ethers.solidityPacked(["string", "uint256", "bytes32"], ["BU-PVP-1:signup", 0, nullifier]),
+    );
+    const permitSig = await rea.signMessage(ethers.getBytes(digest));
+
+    await (
+      await registry.connect(relayer).signup(0, nullifier, votingPubKey, permitSig)
+    ).wait();
+    await (await registry.connect(aea).closeRegistry(0)).wait();
+    await (await registry.connect(aea).openVoting(0)).wait();
+
+    const ciphertext = "0x1234";
+    const ballotDigest = ethers.keccak256(
+      ethers.solidityPacked(["string", "uint256", "bytes32"], ["BU-PVP-1:ballot", 0, ethers.keccak256(ciphertext)]),
+    );
+    const ballotSig = await votingWallet.signMessage(ethers.getBytes(ballotDigest));
+    const rogueWallet = ethers.Wallet.createRandom();
+
+    await expect(
+      registry.connect(relayer).publishBallot(0, votingPubKey, ciphertext, ballotSig),
+    ).to.not.be.revert(ethers);
+
+    await expect(
+      registry.connect(relayer).publishBallot(0, votingPubKey, ciphertext, ballotSig),
+    ).to.be.revert(ethers);
+
+    await expect(
+      registry.connect(relayer).publishBallot(
+        0,
+        uncompressedPublicKey(rogueWallet.privateKey),
+        ciphertext,
+        ballotSig,
+      ),
     ).to.be.revert(ethers);
   });
 });

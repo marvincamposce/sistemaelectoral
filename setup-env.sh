@@ -8,7 +8,8 @@ echo "========================================================="
 # Defaults fijos de Hardhat Local Node
 AEA_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 JED_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-CONTRACT_ADDR="0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
+# Dirección esperada para el primer contrato desplegado en un nodo hardhat limpio.
+CONTRACT_ADDR="0x5FbDB2315678afecb367f032d93F642f64180aa3"
 TALLY_VERIFIER_ADDR="0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 DB_URL="postgresql://blockurna:blockurna@127.0.0.1:5432/blockurna"
 
@@ -72,7 +73,8 @@ EOF
 
 echo "✓ Archivos .env y .env.local generados correctamente."
 echo ""
-echo "Nota: El registry asume que será desplegado en una red limpia de hardhat"
-echo "usando la account #0 local. Su dirección esperada es: $CONTRACT_ADDR"
+echo "Nota: Si usas ./start-dev.sh, las direcciones se sincronizan automáticamente"
+echo "según el despliegue real del momento."
+echo "Dirección esperada en red hardhat limpia: $CONTRACT_ADDR"
 echo "========================================================="
 echo "Configuración Completada."
