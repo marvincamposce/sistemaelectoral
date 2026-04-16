@@ -14,6 +14,10 @@ coverage/
 # Hardhat
 packages/contracts/artifacts/
 packages/contracts/cache/
+
+# ZK artifacts (regenerables)
+packages/zk-tally/keys/
+packages/zk-tally/rust-backend/target/
 # Logs
 npm-debug.log*
 yarn-debug.log*

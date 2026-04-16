@@ -1,7 +1,9 @@
 pragma circom 2.1.0;
 
+include "../node_modules/circomlib/circuits/poseidon.circom";
+
 /*
- * BU-PVP-1 TallyVerifier — Phase 9A Minimal Viable ZK Circuit
+ * BU-PVP-1 TallyVerifier — Phase 9B Merkle Inclusion Circuit
  *
  * PROVES: "The published vote counts per candidate are the correct
  *          aggregation of individual ballot selections."
@@ -10,19 +12,26 @@ pragma circom 2.1.0;
  *   MAX_BALLOTS    = 64   — maximum number of ballots in the election
  *   NUM_CANDIDATES = 4    — number of candidates on the ballot
  *
- * Public inputs (5 signals):
+ * Public inputs (6 signals):
  *   voteCounts[NUM_CANDIDATES] — published vote count per candidate
  *   totalValid                 — total number of valid ballots
+ *   merkleRoot                 — Poseidon Merkle root over ballot hashes
  *
  * Private inputs (MAX_BALLOTS signals):
  *   selections[MAX_BALLOTS]    — each ballot's selection:
  *                                 0..NUM_CANDIDATES-1 = valid candidate vote
  *                                 NUM_CANDIDATES      = invalid/unused slot
  *
+ * Additional private inputs (Phase 9B):
+ *   ballotHashes[MAX_BALLOTS]              — leaf per slot (field element)
+ *   merkleProofs[MAX_BALLOTS][MERKLE_DEPTH] — sibling path to root
+ *   merklePathIndices[MAX_BALLOTS][MERKLE_DEPTH] — 0 if current node is left, 1 if right
+ *
  * Constraints:
  *   1) Each selection ∈ {0, 1, ..., NUM_CANDIDATES}
  *   2) Count of selections matching candidate j == voteCounts[j]
  *   3) Count of valid selections (< NUM_CANDIDATES) == totalValid
+ *   4) Every ballot hash belongs to the published Merkle root
  */
 
 // IsEqual: outputs 1 if a == b, else 0
@@ -75,14 +84,51 @@ template RangeCheck(maxVal) {
     prod[maxVal] === 0;
 }
 
+template MerkleProofVerifier(DEPTH) {
+    signal input leaf;
+    signal input pathElements[DEPTH];
+    signal input pathIndices[DEPTH];
+    signal output root;
+
+    signal levelHash[DEPTH + 1];
+    levelHash[0] <== leaf;
+
+    component hasher[DEPTH];
+    signal leftInput[DEPTH];
+    signal rightInput[DEPTH];
+
+    for (var d = 0; d < DEPTH; d++) {
+        // path index must be a bit
+        pathIndices[d] * (1 - pathIndices[d]) === 0;
+
+        // If pathIndices[d] == 0: current hash is left child
+        // If pathIndices[d] == 1: current hash is right child
+        leftInput[d] <== levelHash[d] + pathIndices[d] * (pathElements[d] - levelHash[d]);
+        rightInput[d] <== pathElements[d] + pathIndices[d] * (levelHash[d] - pathElements[d]);
+
+        hasher[d] = Poseidon(2);
+        hasher[d].inputs[0] <== leftInput[d];
+        hasher[d].inputs[1] <== rightInput[d];
+        levelHash[d + 1] <== hasher[d].out;
+    }
+
+    root <== levelHash[DEPTH];
+}
+
 // Main circuit
 template TallyVerifier(MAX_BALLOTS, NUM_CANDIDATES) {
+    var MERKLE_DEPTH = 6;
+
     // --- Public inputs ---
     signal input voteCounts[NUM_CANDIDATES];
     signal input totalValid;
+    signal input merkleRoot;
 
     // --- Private inputs ---
     signal input selections[MAX_BALLOTS];
+    signal input ballotHashes[MAX_BALLOTS];
+    signal input merkleProofs[MAX_BALLOTS][MERKLE_DEPTH];
+    signal input merklePathIndices[MAX_BALLOTS][MERKLE_DEPTH];
 
     // 1) Range check: each selection must be in {0, ..., NUM_CANDIDATES}
     //    (value NUM_CANDIDATES means "invalid/unused")
@@ -137,7 +183,21 @@ template TallyVerifier(MAX_BALLOTS, NUM_CANDIDATES) {
     }
 
     validSum[MAX_BALLOTS] === totalValid;
+
+    // 4) Verify each ballot hash is included in the published Merkle root
+    component merkleVerifiers[MAX_BALLOTS];
+    for (var i = 0; i < MAX_BALLOTS; i++) {
+        merkleVerifiers[i] = MerkleProofVerifier(MERKLE_DEPTH);
+        merkleVerifiers[i].leaf <== ballotHashes[i];
+
+        for (var d = 0; d < MERKLE_DEPTH; d++) {
+            merkleVerifiers[i].pathElements[d] <== merkleProofs[i][d];
+            merkleVerifiers[i].pathIndices[d] <== merklePathIndices[i][d];
+        }
+
+        merkleVerifiers[i].root === merkleRoot;
+    }
 }
 
 // Instantiate with concrete parameters
-component main {public [voteCounts, totalValid]} = TallyVerifier(64, 4);
+component main {public [voteCounts, totalValid, merkleRoot]} = TallyVerifier(64, 4);

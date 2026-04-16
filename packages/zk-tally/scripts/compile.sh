@@ -15,6 +15,7 @@ circom "$PKG_DIR/circuits/tally_verifier.circom" \
   --r1cs \
   --wasm \
   --sym \
+  -l "$PKG_DIR/node_modules" \
   -o "$BUILD_DIR"
 
 echo ""

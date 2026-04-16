@@ -39,6 +39,7 @@ type RealTallyComputation = {
   invalidCount: number;
   ballotsCount: number;
   merkleRoot: string;
+  merkleRootPoseidon: string;
   transcriptHash: string;
   transcript: unknown;
   proofPayload: string;
@@ -310,12 +311,14 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         invalidCount: number;
         ballotsCount: number;
         merkleRoot: string;
+        merkleRootPoseidon: string;
         transcript: unknown;
         transcriptHash: string;
       };
 
       const derivedRoot = tallyData.merkleRoot;
       addLog(`Root hash Merkle (real) derivado desde ciphertexts: ${derivedRoot}`);
+      addLog(`Root Merkle Poseidon (Fase 9B): ${tallyData.merkleRootPoseidon}`);
       addLog(
         `Conteo real listo. Validas=${tallyData.validCount}, inválidas=${tallyData.invalidCount}. Resumen=${JSON.stringify(tallyData.summary)}`,
       );
@@ -361,6 +364,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
           invalidCount: tallyData.invalidCount,
           ballotsCount: tallyData.ballotsCount,
           merkleRoot: derivedRoot,
+          merkleRootPoseidon: tallyData.merkleRootPoseidon,
           transcriptHash,
         },
       );
@@ -371,6 +375,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         invalidCount: tallyData.invalidCount,
         ballotsCount: tallyData.ballotsCount,
         merkleRoot: derivedRoot,
+        merkleRootPoseidon: tallyData.merkleRootPoseidon,
         transcriptHash,
         transcript: tallyData.transcript,
         proofPayload,
@@ -390,6 +395,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         invalidBallots: tallyData.invalidCount,
         summary: tallyData.summary,
         merkleRoot: derivedRoot,
+        merkleRootPoseidon: tallyData.merkleRootPoseidon,
         transcriptHash,
         proofPayload,
         timestamp: new Date().toISOString()
@@ -433,6 +439,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         validBallots: tallyComputation.validCount,
         invalidBallots: tallyComputation.invalidCount,
         merkleRoot: tallyComputation.merkleRoot,
+        merkleRootPoseidon: tallyComputation.merkleRootPoseidon,
         transcriptHash: tallyComputation.transcriptHash,
         proofPayload: tallyComputation.proofPayload,
         proofTxHash: tallyComputation.proofTxHash,

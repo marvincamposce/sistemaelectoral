@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import { getEnv } from "@/lib/env";
 import { BU_PVP_1_ELECTION_REGISTRY_ABI } from "@blockurna/sdk";
 import {
+  buildPoseidonMerkleBundleFromBallotHashes,
   decryptBallotPayload,
   deriveBallotMerkleRoot,
   parseThresholdSharePayload,
@@ -790,7 +791,10 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
       }
     }
 
+    const allBallotHashes = ciphertexts.map((ciphertext) => ethers.keccak256(String(ciphertext)));
     const merkleRoot = deriveBallotMerkleRoot(ciphertexts);
+    const poseidonMerkle = await buildPoseidonMerkleBundleFromBallotHashes(allBallotHashes);
+
     const transcript = {
       protocolVersion: "BU-PVP-1",
       transcriptVersion: "TALLY_TRANSCRIPT_V1",
@@ -800,6 +804,8 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
       decryptedValidCount: transcriptEntries.length,
       invalidCount: errors.length,
       merkleRoot,
+      merkleRootPoseidon: poseidonMerkle.merkleRoot,
+      allBallotHashes,
       summary,
       ballots: transcriptEntries,
       errors,
@@ -817,6 +823,7 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
       invalidCount: errors.length,
       ballotsCount: ciphertexts.length,
       merkleRoot,
+      merkleRootPoseidon: poseidonMerkle.merkleRoot,
       transcript,
       transcriptHash,
       keySource: keyResolution.keySource,
@@ -1286,13 +1293,13 @@ export async function persistAuditBundleAction(electionId: string) {
 }
 
 /**
- * Phase 9A — Generate and verify a Groth16 ZK proof for a tally transcript.
+ * Phase 9B — Generate and verify a Groth16 ZK proof for a tally transcript.
  *
- * PROVES: The published vote counts are the correct aggregation of
- *         individual ballot selections.
+ * PROVES:
+ *   - The published vote counts are the correct aggregation of ballot selections.
+ *   - Every processed ballot hash is included in the Poseidon Merkle root.
  *
  * DOES NOT PROVE (yet):
- *   - Ballot inclusion in the Merkle tree (Phase 9B)
  *   - Correct decryption (requires decryption circuit)
  *   - On-chain verification (Phase 9C)
  */
@@ -1304,6 +1311,9 @@ export async function generateZkProofAction(
     ballotsCount: number;
     decryptedValidCount: number;
     invalidCount: number;
+    merkleRoot?: string;
+    merkleRootPoseidon?: string;
+    allBallotHashes?: string[];
   },
   tallyJobId: string,
 ) {
@@ -1335,17 +1345,54 @@ export async function generateZkProofAction(
       candidateKeys.push(`__UNUSED_${candidateKeys.length}`);
     }
 
+    const allBallotHashes = Array.isArray(transcript.allBallotHashes)
+      ? transcript.allBallotHashes.map((hashHex) => String(hashHex))
+      : [];
+
+    if (allBallotHashes.length !== transcript.ballotsCount) {
+      return {
+        ok: false,
+        error:
+          "Transcript missing allBallotHashes for Fase 9B witness generation or length mismatch with ballotsCount.",
+      };
+    }
+
+    const merkleBundle = await buildPoseidonMerkleBundleFromBallotHashes(allBallotHashes);
+
+    if (
+      typeof transcript.merkleRootPoseidon === "string" &&
+      transcript.merkleRootPoseidon.length > 0 &&
+      transcript.merkleRootPoseidon !== merkleBundle.merkleRoot
+    ) {
+      return {
+        ok: false,
+        error: "Transcript merkleRootPoseidon mismatch. Refuse to generate proof with inconsistent Merkle data.",
+      };
+    }
+
     // Create job record
     await pool.query(
       `INSERT INTO zk_proof_jobs (
         job_id, chain_id, contract_address, election_id, tally_job_id,
-        proof_system, circuit_id, status, proving_started_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUILDING',NOW())`,
-      [jobId, chainId, contractAddress, electionId, tallyJobId, ZK_PROOF_SYSTEM, ZK_CIRCUIT_ID],
+        proof_system, circuit_id, status,
+        merkle_root_keccak, merkle_root_poseidon,
+        proving_started_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUILDING',$8,$9,NOW())`,
+      [
+        jobId,
+        chainId,
+        contractAddress,
+        electionId,
+        tallyJobId,
+        ZK_PROOF_SYSTEM,
+        ZK_CIRCUIT_ID,
+        transcript.merkleRoot ?? null,
+        merkleBundle.merkleRoot,
+      ],
     );
 
     // Build witness from transcript
-    const witness = buildWitnessFromTranscript(transcript, candidateKeys);
+    const witness = buildWitnessFromTranscript(transcript, candidateKeys, merkleBundle);
 
     // Generate proof
     const proofResult = await proveTally(witness);
@@ -1361,7 +1408,11 @@ export async function generateZkProofAction(
       WHERE job_id=$1`,
       [
         jobId,
-        JSON.stringify({ signals: proofResult.publicSignals, candidateOrder: candidateKeys }),
+        JSON.stringify({
+          signals: proofResult.publicSignals,
+          candidateOrder: candidateKeys,
+          merkleRootPoseidon: merkleBundle.merkleRoot,
+        }),
         JSON.stringify(proofResult.proof),
         proofResult.verificationKeyHash,
       ],
@@ -1380,7 +1431,11 @@ export async function generateZkProofAction(
 
     // Update to VERIFIED_OFFCHAIN
     await pool.query(
-      `UPDATE zk_proof_jobs SET status='VERIFIED_OFFCHAIN', verified_offchain=true WHERE job_id=$1`,
+      `UPDATE zk_proof_jobs SET
+        status='VERIFIED_OFFCHAIN',
+        verified_offchain=true,
+        merkle_inclusion_verified=true
+      WHERE job_id=$1`,
       [jobId],
     );
 
@@ -1396,9 +1451,9 @@ export async function generateZkProofAction(
       verifiedOnchain: false,
       status: "VERIFIED_OFFCHAIN",
       honesty: {
-        whatIsProved: "Vote counts are the correct sum of individual ballot selections",
+        whatIsProved:
+          "Vote counts are the correct sum of individual ballot selections and all processed ballot hashes are included in the Poseidon Merkle root",
         whatIsNotProved: [
-          "Ballot inclusion in Merkle tree (Phase 9B)",
           "Correct decryption of ciphertexts (requires decryption circuit)",
           "On-chain verification (Phase 9C)",
         ],

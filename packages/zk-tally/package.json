@@ -11,7 +11,10 @@
   },
   "scripts": {
     "build:circuit": "bash scripts/compile.sh",
-    "setup": "bash scripts/setup.sh",
+    "build:rust-backend": "cargo build --release --manifest-path rust-backend/Cargo.toml",
+    "setup": "SETUP_BACKEND=rust bash scripts/setup.sh",
+    "setup:rust": "SETUP_BACKEND=rust bash scripts/setup.sh",
+    "setup:snarkjs": "SETUP_BACKEND=snarkjs bash scripts/setup.sh",
     "test": "node --test dist/test/*.test.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -21,6 +24,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
     "typescript": "^5.9.3"
   }
 }

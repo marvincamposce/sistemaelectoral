@@ -215,6 +215,9 @@ type ZkProofResponse = {
     proofSystem: string;
     circuitId: string;
     status: string;
+    merkleRootKeccak: string | null;
+    merkleRootPoseidon: string | null;
+    merkleInclusionVerified: boolean;
     publicInputs: { signals?: string[]; candidateOrder?: string[] } | null;
     verificationKeyHash: string | null;
     verifiedOffchain: boolean;
@@ -1109,6 +1112,16 @@ export default async function Page() {
                           {e.zkProof.verificationKeyHash && (
                             <div style={{ fontSize: "0.6875rem", color: "#94a3b8", fontFamily: "monospace", wordBreak: "break-all", marginBottom: "0.5rem" }}>
                               VKey hash: {e.zkProof.verificationKeyHash}
+                            </div>
+                          )}
+
+                          <div style={{ fontSize: "0.6875rem", color: "#64748b", marginBottom: "0.5rem" }}>
+                            Inclusión Merkle 9B: {e.zkProof.merkleInclusionVerified ? "verificada" : "pendiente"}
+                          </div>
+
+                          {e.zkProof.merkleRootPoseidon && (
+                            <div style={{ fontSize: "0.6875rem", color: "#94a3b8", fontFamily: "monospace", wordBreak: "break-all", marginBottom: "0.5rem" }}>
+                              Poseidon root: {e.zkProof.merkleRootPoseidon}
                             </div>
                           )}
 

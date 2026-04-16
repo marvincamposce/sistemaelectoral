@@ -2324,6 +2324,9 @@ async function main() {
           proofSystem: string;
           circuitId: string;
           status: string;
+          merkleRootKeccak: string | null;
+          merkleRootPoseidon: string | null;
+          merkleInclusionVerified: boolean;
           publicInputs: object;
           verificationKeyHash: string;
           verifiedOffchain: boolean;
@@ -2341,6 +2344,9 @@ async function main() {
             proof_system AS "proofSystem",
             circuit_id AS "circuitId",
             status,
+            merkle_root_keccak AS "merkleRootKeccak",
+            merkle_root_poseidon AS "merkleRootPoseidon",
+            merkle_inclusion_verified AS "merkleInclusionVerified",
             public_inputs AS "publicInputs",
             verification_key_hash AS "verificationKeyHash",
             verified_offchain AS "verifiedOffchain",
@@ -2370,6 +2376,9 @@ async function main() {
                 proofSystem: job.proofSystem,
                 circuitId: job.circuitId,
                 status: job.status,
+                merkleRootKeccak: job.merkleRootKeccak,
+                merkleRootPoseidon: job.merkleRootPoseidon,
+                merkleInclusionVerified: job.merkleInclusionVerified,
                 publicInputs: job.publicInputs,
                 verificationKeyHash: job.verificationKeyHash,
                 verifiedOffchain: job.verifiedOffchain,
@@ -2384,12 +2393,12 @@ async function main() {
             : null,
           honesty: {
             whatIsProved: job?.status === "VERIFIED_OFFCHAIN"
-              ? "Vote counts are the correct sum of individual ballot selections (ZK verified off-chain)"
+              ? "Vote counts are the correct sum of individual ballot selections and ballot inclusion in Poseidon Merkle tree (ZK verified off-chain)"
               : job?.status === "VERIFIED_ONCHAIN"
-                ? "Vote counts are the correct sum of individual ballot selections (ZK verified on-chain)"
+                ? "Vote counts are the correct sum of individual ballot selections and ballot inclusion in Poseidon Merkle tree (ZK verified on-chain)"
                 : "No ZK proof generated yet. Auditability depends on transcript verification.",
             whatIsNotProved: [
-              "Ballot inclusion in Merkle tree (Phase 9B)",
+              ...(job?.merkleInclusionVerified ? [] : ["Ballot inclusion in Merkle tree (Phase 9B)"]),
               "Correct decryption of ciphertexts (requires decryption circuit)",
               ...(job?.verifiedOnchain ? [] : ["On-chain verification (Phase 9C)"]),
             ],

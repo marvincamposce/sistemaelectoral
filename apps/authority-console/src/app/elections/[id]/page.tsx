@@ -1114,7 +1114,7 @@ export default async function ElectionPage({
             </div>
             <div className="space-y-1 md:col-span-2 lg:col-span-4">
               <label className="text-xs text-slate-700" htmlFor="cand-meta">metadataJson (opcional)</label>
-              <textarea id="cand-meta" name="metadataJson" rows={2} className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs font-mono" placeholder="{\"coalitionName\":\"Frente\",\"region\":\"Norte\"}" />
+              <textarea id="cand-meta" name="metadataJson" rows={2} className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs font-mono" placeholder='{"coalitionName":"Frente","region":"Norte"}' />
             </div>
             <div className="md:col-span-2 lg:col-span-4">
               <button type="submit" disabled={!catalogMutable} className="rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-slate-300 px-4 py-2 text-sm font-semibold">

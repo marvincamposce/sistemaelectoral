@@ -385,6 +385,9 @@ CREATE TABLE IF NOT EXISTS zk_proof_jobs (
   proof_system TEXT NOT NULL,
   circuit_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'NOT_STARTED',
+  merkle_root_keccak TEXT,
+  merkle_root_poseidon TEXT,
+  merkle_inclusion_verified BOOLEAN NOT NULL DEFAULT false,
   public_inputs JSONB,
   proof_json JSONB,
   verification_key_hash TEXT,
@@ -400,6 +403,15 @@ CREATE TABLE IF NOT EXISTS zk_proof_jobs (
 
 CREATE INDEX IF NOT EXISTS zk_proof_jobs_election_idx
   ON zk_proof_jobs(chain_id, contract_address, election_id, created_at DESC);
+
+ALTER TABLE zk_proof_jobs
+  ADD COLUMN IF NOT EXISTS merkle_root_keccak TEXT;
+
+ALTER TABLE zk_proof_jobs
+  ADD COLUMN IF NOT EXISTS merkle_root_poseidon TEXT;
+
+ALTER TABLE zk_proof_jobs
+  ADD COLUMN IF NOT EXISTS merkle_inclusion_verified BOOLEAN NOT NULL DEFAULT false;
 `;
 
 export function createPool(databaseUrl: string): Pool {
