@@ -5,3 +5,4 @@ export * from "./snapshot.js";
 export * from "./actas.js";
 export * from "./encryption.js";
 export * from "./merkle.js";
+export * from "./threshold.js";

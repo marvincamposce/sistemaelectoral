@@ -16,9 +16,70 @@ await registry.waitForDeployment();
 
 const registryAddress = await registry.getAddress();
 
-// Deterministic constants (research scaffold only)
-const manifestHash = ("0x" + "11".repeat(32)) as `0x${string}`;
+const seedTimestamp = process.env.BU_SEED_TIMESTAMP ?? "2025-01-01T00:00:00.000Z";
 const coordinatorPubKey = ("0x" + "22".repeat(32)) as `0x${string}`;
+
+const candidateCatalog = [
+  {
+    id: "presidencia-2025-lucia-ferrer",
+    candidateCode: "LUCIA_FERRER",
+    displayName: "Lucia Ferrer",
+    shortName: "L. Ferrer",
+    partyName: "Movimiento Horizonte",
+    ballotOrder: 1,
+    status: "ACTIVE",
+    colorHex: "#1d4ed8",
+    metadata: {
+      office: "PRESIDENCIA",
+      region: "NACIONAL",
+      coalition: "Horizonte Ciudadano",
+    },
+  },
+  {
+    id: "presidencia-2025-mateo-ibarra",
+    candidateCode: "MATEO_IBARRA",
+    displayName: "Mateo Ibarra",
+    shortName: "M. Ibarra",
+    partyName: "Alianza Popular Cívica",
+    ballotOrder: 2,
+    status: "ACTIVE",
+    colorHex: "#b91c1c",
+    metadata: {
+      office: "PRESIDENCIA",
+      region: "NACIONAL",
+      coalition: "Frente Cívico",
+    },
+  },
+  {
+    id: "presidencia-2025-voto-en-blanco",
+    candidateCode: "VOTO_EN_BLANCO",
+    displayName: "Voto en Blanco",
+    shortName: "Blanco",
+    partyName: "Sin partido",
+    ballotOrder: 3,
+    status: "ACTIVE",
+    colorHex: "#475569",
+    metadata: {
+      office: "PRESIDENCIA",
+      region: "NACIONAL",
+      classification: "ABSTENCION_EXPLICITA",
+    },
+  },
+] as const;
+
+const manifestBody = {
+  manifestVersion: "1.0.0",
+  protocolVersion: "BU-PVP-1",
+  electionId: "0",
+  generatedAt: seedTimestamp,
+  authority: (await aea.getAddress()).toLowerCase(),
+  registryAuthority: (await rea.getAddress()).toLowerCase(),
+  coordinatorPubKey,
+  catalogSource: "SEED_EXPERIMENTAL",
+  candidates: candidateCatalog,
+} as const;
+
+const manifestHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(manifestBody))) as `0x${string}`;
 
 await (
   await registry
@@ -34,7 +95,7 @@ const snapshotBody = {
   protocolVersion: "BU-PVP-1",
   electionId: "0",
   kind: "ACTA_APERTURA",
-  generatedAt: new Date().toISOString(),
+  generatedAt: seedTimestamp,
   chainId: chain.chainId.toString(),
   blockRange: { fromBlock: 0, toBlock },
   commitments: {
@@ -55,6 +116,9 @@ const signed = await signSnapshot(snapshotBody as any, ed25519PrivateKeyHex);
 const outDir = path.join("experimental-output");
 await fs.mkdir(outDir, { recursive: true });
 
+const manifestFile = path.join(outDir, "manifest.current.json");
+await fs.writeFile(manifestFile, JSON.stringify(manifestBody, null, 2) + "\n", "utf8");
+
 const outFile = path.join(outDir, "acta_apertura.signed.json");
 await fs.writeFile(outFile, JSON.stringify(signed, null, 2) + "\n", "utf8");
 
@@ -72,7 +136,10 @@ console.log(
       registryAddress,
       chainId: chain.chainId.toString(),
       electionId: 0,
+      manifestFile,
       actaFile: outFile,
+      manifestHash,
+      candidates: candidateCatalog.length,
       snapshotHashHex: signed.signature.snapshotHashHex,
       registryAuthority: await rea.getAddress(),
       authority: await aea.getAddress(),

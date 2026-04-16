@@ -22,23 +22,26 @@ export default async function TallyBoardHome() {
 
   return (
     <main className="space-y-6">
-      <div className="rounded-lg border border-neutral-700 bg-neutral-800 p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-white mb-4">Elecciones Pendientes de Escrutinio</h2>
+      <section className="card p-6">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="text-lg font-semibold text-slate-900">Elecciones Pendientes de Escrutinio</h2>
+          <span className="badge badge-info">Tally Queue</span>
+        </div>
         {relevantElections.length === 0 ? (
-          <p className="text-sm text-neutral-400">No hay elecciones en fase de Tally / Procesamiento asíncrono.</p>
+          <p className="text-sm text-slate-500">No hay elecciones en fase de Tally / Procesamiento asíncrono.</p>
         ) : (
           <div className="space-y-4">
             {relevantElections.map((election: any) => (
-              <div key={election.electionId} className="border border-neutral-700 rounded-md p-4 bg-neutral-900 flex items-center justify-between">
+              <div key={election.electionId} className="rounded-md border border-slate-200 p-4 bg-white flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-neutral-200">Elección #{election.electionId}</div>
-                  <div className="text-xs text-neutral-400 mt-1">Fase Actual: {election.phaseLabel} ({election.phase})</div>
-                  <div className="text-[10px] text-neutral-500 font-mono mt-1 break-all">Manifest: {election.manifestHash}</div>
+                  <div className="text-sm font-semibold text-slate-800">Elección #{election.electionId}</div>
+                  <div className="text-xs text-slate-500 mt-1">Fase Actual: {election.phaseLabel} ({election.phase})</div>
+                  <div className="hash-display mt-2">Manifest: {election.manifestHash}</div>
                 </div>
                 <div>
                   <Link 
                     href={`/tally/${election.electionId}`} 
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-md font-semibold transition"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-4 py-2 rounded-md font-semibold transition"
                   >
                     Operar Tally
                   </Link>
@@ -47,7 +50,7 @@ export default async function TallyBoardHome() {
             ))}
           </div>
         )}
-      </div>
+      </section>
     </main>
   );
 }

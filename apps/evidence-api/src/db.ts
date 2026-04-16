@@ -42,6 +42,53 @@ CREATE TABLE IF NOT EXISTS elections (
 ALTER TABLE elections
   ADD COLUMN IF NOT EXISTS created_at_timestamp TIMESTAMPTZ;
 
+CREATE TABLE IF NOT EXISTS candidates (
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  id TEXT NOT NULL,
+  candidate_code TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  short_name TEXT NOT NULL,
+  party_name TEXT NOT NULL,
+  ballot_order INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  color_hex TEXT,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (chain_id, contract_address, election_id, id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS candidates_code_uniq
+  ON candidates(chain_id, contract_address, election_id, candidate_code);
+
+CREATE INDEX IF NOT EXISTS candidates_election_order_idx
+  ON candidates(chain_id, contract_address, election_id, ballot_order ASC, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS election_manifests (
+  manifest_id BIGSERIAL PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  manifest_hash TEXT NOT NULL,
+  manifest_json JSONB NOT NULL,
+  source TEXT NOT NULL DEFAULT 'DB_PROJECTED',
+  is_current BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS election_manifests_hash_uniq
+  ON election_manifests(chain_id, contract_address, election_id, manifest_hash);
+
+CREATE UNIQUE INDEX IF NOT EXISTS election_manifests_current_uniq
+  ON election_manifests(chain_id, contract_address, election_id)
+  WHERE is_current = true;
+
+CREATE INDEX IF NOT EXISTS election_manifests_created_idx
+  ON election_manifests(chain_id, contract_address, election_id, created_at DESC, manifest_id DESC);
+
 CREATE TABLE IF NOT EXISTS phase_changes (
   chain_id TEXT NOT NULL,
   contract_address TEXT NOT NULL,
@@ -276,6 +323,58 @@ CREATE INDEX IF NOT EXISTS admin_log_entries_election_idx
 
 CREATE INDEX IF NOT EXISTS admin_log_entries_created_idx
   ON admin_log_entries(chain_id, contract_address, created_at DESC, entry_id DESC);
+
+CREATE TABLE IF NOT EXISTS decryption_ceremonies (
+  ceremony_id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  threshold_required INTEGER NOT NULL,
+  trustee_count INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  opened_at TIMESTAMPTZ,
+  closed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS decryption_ceremonies_election_idx
+  ON decryption_ceremonies(chain_id, contract_address, election_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS decryption_shares (
+  ceremony_id TEXT NOT NULL,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  trustee_id TEXT NOT NULL,
+  share_payload TEXT NOT NULL,
+  submission_channel TEXT NOT NULL DEFAULT 'MANUAL',
+  signer_address TEXT,
+  signature TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (ceremony_id, trustee_id)
+);
+CREATE INDEX IF NOT EXISTS decryption_shares_election_idx
+  ON decryption_shares(chain_id, contract_address, election_id, submitted_at DESC);
+
+CREATE TABLE IF NOT EXISTS result_summary_items (
+  id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  result_payload_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL,
+  candidate_code TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  party_name TEXT NOT NULL,
+  votes BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS result_summary_items_result_candidate_uniq
+  ON result_summary_items(chain_id, contract_address, election_id, result_payload_id, candidate_id);
+
+CREATE INDEX IF NOT EXISTS result_summary_items_result_idx
+  ON result_summary_items(chain_id, contract_address, election_id, result_payload_id, created_at ASC);
 `;
 
 export function createPool(databaseUrl: string): Pool {

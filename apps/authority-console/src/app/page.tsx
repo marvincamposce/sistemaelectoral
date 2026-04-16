@@ -15,7 +15,7 @@ import {
 import { z } from "zod";
 
 import { getEnv, getEnvResult } from "../lib/env";
-import { ensureSchema, getPool, insertAdminLogEntry } from "../lib/db";
+import { ensureSchema, getPool, insertAdminLogEntry, upsertCandidate, upsertElectionManifest } from "../lib/db";
 import { getRegistry, parseElectionCreatedFromReceipt } from "../lib/registry";
 
 export const dynamic = "force-dynamic";
@@ -56,14 +56,108 @@ async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
   }
 }
 
+function shortHash(hash: string | null | undefined): string {
+  if (!hash) return "—";
+  if (hash.length <= 18) return hash;
+  return `${hash.slice(0, 10)}...${hash.slice(-8)}`;
+}
+
+function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString("es-MX", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return ts;
+  }
+}
+
+function phaseBadgeClass(label: string | undefined): string {
+  const value = String(label ?? "").toUpperCase();
+  if (value.includes("RESULTS") || value.includes("AUDIT") || value.includes("ARCHIVE")) {
+    return "badge badge-valid";
+  }
+  if (value.includes("VOTING") || value.includes("REGISTRY") || value.includes("PROCESSING") || value.includes("TALLY")) {
+    return "badge badge-warning";
+  }
+  return "badge badge-info";
+}
+
 const CreateElectionInputSchema = z
   .object({
     title: z.string().min(1).max(140),
     notes: z.string().max(1000).optional(),
     registryAuthority: z.string().min(1),
     coordinatorPubKey: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "Expected 32-byte hex"),
+    candidatesJson: z.string().optional(),
   })
   .strict();
+
+const CandidateCatalogSchema = z
+  .object({
+    id: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/),
+    candidateCode: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/),
+    displayName: z.string().trim().min(1).max(160),
+    shortName: z.string().trim().min(1).max(80),
+    partyName: z.string().trim().min(1).max(160),
+    ballotOrder: z.coerce.number().int().min(1).max(9999),
+    status: z.enum(["ACTIVE", "INACTIVE", "WITHDRAWN"]).default("ACTIVE"),
+    colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+type CandidateCatalogItem = z.infer<typeof CandidateCatalogSchema>;
+
+function parseCandidatesCatalog(raw: string): CandidateCatalogItem[] {
+  if (raw.trim().length === 0) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("candidatesJson debe ser JSON válido (array de candidatos)");
+  }
+
+  const arr = z.array(CandidateCatalogSchema).safeParse(parsed);
+  if (!arr.success) {
+    throw new Error(arr.error.message);
+  }
+
+  const byId = new Set<string>();
+  const byCode = new Set<string>();
+  const byOrder = new Set<number>();
+
+  for (const c of arr.data) {
+    const id = c.id.toLowerCase();
+    const code = c.candidateCode.toLowerCase();
+    if (byId.has(id)) throw new Error(`candidate id duplicado: ${c.id}`);
+    if (byCode.has(code)) throw new Error(`candidateCode duplicado: ${c.candidateCode}`);
+    if (byOrder.has(c.ballotOrder)) throw new Error(`ballotOrder duplicado: ${c.ballotOrder}`);
+    byId.add(id);
+    byCode.add(code);
+    byOrder.add(c.ballotOrder);
+  }
+
+  return arr.data
+    .slice()
+    .sort((a, b) => a.ballotOrder - b.ballotOrder)
+    .map((c) => ({
+      ...c,
+      id: c.id.trim(),
+      candidateCode: c.candidateCode.trim(),
+      displayName: c.displayName.trim(),
+      shortName: c.shortName.trim(),
+      partyName: c.partyName.trim(),
+      colorHex: c.colorHex ?? undefined,
+      metadata: c.metadata ?? {},
+    }));
+}
 
 async function createElectionAction(formData: FormData) {
   "use server";
@@ -74,6 +168,7 @@ async function createElectionAction(formData: FormData) {
     notes: String(formData.get("notes") ?? "").trim() || undefined,
     registryAuthority: String(formData.get("registryAuthority") ?? "").trim(),
     coordinatorPubKey: String(formData.get("coordinatorPubKey") ?? "").trim(),
+    candidatesJson: String(formData.get("candidatesJson") ?? "").trim() || undefined,
   });
 
   if (!parsed.success) {
@@ -86,6 +181,7 @@ async function createElectionAction(formData: FormData) {
 
   const registryAuthority = ethers.getAddress(parsed.data.registryAuthority);
   const coordinatorPubKey = parsed.data.coordinatorPubKey;
+  const candidatesCatalog = parseCandidatesCatalog(parsed.data.candidatesJson ?? "");
 
   const manifestBody = {
     manifestVersion: "1",
@@ -98,6 +194,18 @@ async function createElectionAction(formData: FormData) {
     registryAuthority: { address: registryAuthority },
     coordinatorPubKey,
     notes: parsed.data.notes,
+    catalogSource: "DB_PROJECTED",
+    candidates: candidatesCatalog.map((c) => ({
+      id: c.id,
+      candidateCode: c.candidateCode,
+      displayName: c.displayName,
+      shortName: c.shortName,
+      partyName: c.partyName,
+      ballotOrder: c.ballotOrder,
+      status: c.status,
+      colorHex: c.colorHex ?? null,
+      metadata: c.metadata ?? {},
+    })),
   } as const;
 
   const manifestCanonical = canonicalizeJson(manifestBody);
@@ -141,6 +249,37 @@ async function createElectionAction(formData: FormData) {
 
   const pool = getPool(env.DATABASE_URL);
   await ensureSchema(pool);
+
+  if (electionId !== null) {
+    for (const candidate of candidatesCatalog) {
+      await upsertCandidate({
+        pool,
+        chainId: env.CHAIN_ID,
+        contractAddress: env.CONTRACT_ADDRESS,
+        electionId,
+        id: candidate.id,
+        candidateCode: candidate.candidateCode,
+        displayName: candidate.displayName,
+        shortName: candidate.shortName,
+        partyName: candidate.partyName,
+        ballotOrder: candidate.ballotOrder,
+        status: candidate.status,
+        colorHex: candidate.colorHex ?? null,
+        metadataJson: candidate.metadata ?? {},
+      });
+    }
+
+    await upsertElectionManifest({
+      pool,
+      chainId: env.CHAIN_ID,
+      contractAddress: env.CONTRACT_ADDRESS,
+      electionId,
+      manifestHash: manifestHashHex,
+      manifestJson: signedManifest,
+      source: "DB_PROJECTED",
+    });
+  }
+
   await insertAdminLogEntry({
     pool,
     chainId: env.CHAIN_ID,
@@ -154,6 +293,8 @@ async function createElectionAction(formData: FormData) {
       manifestFilePath,
       registryAuthority,
       coordinatorPubKey,
+      candidatesCount: candidatesCatalog.length,
+      candidateIds: candidatesCatalog.map((c) => c.id),
     },
     evidencePointers: receipt
       ? [
@@ -185,25 +326,28 @@ export default async function Page() {
   const envRes = getEnvResult();
   if (!envRes.ok) {
     return (
-      <main className="min-h-screen bg-white text-neutral-900">
+      <main className="min-h-screen text-slate-900">
         <div className="mx-auto max-w-5xl p-6 space-y-6">
-          <header className="space-y-2">
-            <h1 className="text-3xl font-semibold">Consola AEA (BU‑PVP‑1)</h1>
-            <p className="text-sm text-neutral-700">
-              Herramienta operativa para una instancia experimental. No apta para elecciones públicas vinculantes reales.
+          <header className="card p-5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h1 className="text-3xl font-semibold">Consola AEA (BU‑PVP‑1)</h1>
+              <span className="badge badge-critical">Configuración incompleta</span>
+            </div>
+            <p className="text-sm text-slate-700">
+              Herramienta operativa para entorno local reproducible. Completa variables de entorno para habilitar operaciones on-chain.
             </p>
           </header>
 
-          <section className="rounded-lg border border-neutral-200 p-4 space-y-3">
+          <section className="card p-4 space-y-3">
             <div className="text-sm font-medium">Configuración requerida</div>
-            <div className="text-sm text-neutral-700">
+            <div className="text-sm text-slate-700">
               Faltan variables de entorno para iniciar la consola en modo operativo.
             </div>
 
             {envRes.missingKeys.length > 0 ? (
               <div className="space-y-1">
-                <div className="text-xs text-neutral-700 font-semibold">Variables faltantes</div>
-                <ul className="text-xs text-neutral-700 font-mono list-disc pl-5">
+                <div className="text-xs text-slate-700 font-semibold">Variables faltantes</div>
+                <ul className="text-xs text-slate-700 font-mono list-disc pl-5">
                   {envRes.missingKeys.map((k) => (
                     <li key={k}>{k}</li>
                   ))}
@@ -213,8 +357,8 @@ export default async function Page() {
 
             {envRes.problems.length > 0 ? (
               <div className="space-y-1">
-                <div className="text-xs text-neutral-700 font-semibold">Problemas detectados</div>
-                <ul className="text-xs text-neutral-700 font-mono list-disc pl-5">
+                <div className="text-xs text-slate-700 font-semibold">Problemas detectados</div>
+                <ul className="text-xs text-slate-700 font-mono list-disc pl-5">
                   {envRes.problems.map((p, idx) => (
                     <li key={`${p.key}:${idx}`}>{p.key}: {p.message}</li>
                   ))}
@@ -222,9 +366,9 @@ export default async function Page() {
               </div>
             ) : null}
 
-            <div className="text-xs text-neutral-700">Crear archivo de configuración local:</div>
-            <pre className="rounded-md bg-neutral-50 border border-neutral-200 p-3 text-xs overflow-x-auto">cp apps/authority-console/.env.example apps/authority-console/.env.local</pre>
-            <div className="text-xs text-neutral-600">
+            <div className="text-xs text-slate-700">Crear archivo de configuración local:</div>
+            <pre className="rounded-md bg-slate-50 border border-slate-200 p-3 text-xs overflow-x-auto">cp apps/authority-console/.env.example apps/authority-console/.env.local</pre>
+            <div className="text-xs text-slate-600">
               Luego completa <span className="font-mono">ELECTION_REGISTRY_ADDRESS</span> y las claves de AEA.
             </div>
           </section>
@@ -240,40 +384,80 @@ export default async function Page() {
     null,
   );
   const elections = electionsRes?.elections ?? [];
+  const totalSignups = elections.reduce((acc, e) => acc + Number(e.counts?.signups ?? 0), 0);
+  const totalBallots = elections.reduce((acc, e) => acc + Number(e.counts?.ballots ?? 0), 0);
+  const electionsWithActivity = elections.filter(
+    (e) => Number(e.counts?.signups ?? 0) > 0 || Number(e.counts?.ballots ?? 0) > 0,
+  ).length;
+  const latestElection = elections[0] ?? null;
 
   return (
-    <main className="min-h-screen bg-white text-neutral-900">
+    <main className="min-h-screen text-slate-900">
       <div className="mx-auto max-w-5xl p-6 space-y-6">
-        <header className="space-y-2">
-          <h1 className="text-3xl font-semibold">Consola AEA (BU‑PVP‑1)</h1>
-          <p className="text-sm text-neutral-700">
-            Herramienta operativa para una instancia experimental. No apta para elecciones públicas vinculantes reales.
+        <header className="card p-5 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-3xl font-semibold">Consola AEA (BU‑PVP‑1)</h1>
+            <span className="badge badge-info">Operación AEA</span>
+          </div>
+          <p className="text-sm text-slate-700">
+            Gestión de elecciones, transición de fases y publicación de actas con evidencia materializada.
           </p>
-          <div className="text-xs text-neutral-500 break-all">
+          <div className="text-xs text-slate-500 break-all">
             chainId={env.CHAIN_ID} · contract={env.CONTRACT_ADDRESS} · API={env.EVIDENCE_API_URL}
           </div>
+          {latestElection ? (
+            <div className="rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+              Última elección indexada: #{latestElection.electionId} · fase {latestElection.phaseLabel ?? `FASE ${latestElection.phase}`} · {formatTimestamp(latestElection.createdAtTimestamp)}
+            </div>
+          ) : null}
         </header>
 
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-3">
-          <div className="text-sm font-medium">Elecciones (lectura desde Evidence API)</div>
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <article className="stat-card">
+            <span className="text-xs text-slate-500 uppercase tracking-wide">Elecciones</span>
+            <span className="text-2xl font-semibold text-slate-900">{elections.length}</span>
+          </article>
+          <article className="stat-card">
+            <span className="text-xs text-slate-500 uppercase tracking-wide">Con actividad</span>
+            <span className="text-2xl font-semibold text-slate-900">{electionsWithActivity}</span>
+          </article>
+          <article className="stat-card">
+            <span className="text-xs text-slate-500 uppercase tracking-wide">Signups</span>
+            <span className="text-2xl font-semibold text-slate-900">{totalSignups}</span>
+          </article>
+          <article className="stat-card">
+            <span className="text-xs text-slate-500 uppercase tracking-wide">Boletas</span>
+            <span className="text-2xl font-semibold text-slate-900">{totalBallots}</span>
+          </article>
+        </section>
+
+        <section className="card p-4 space-y-3">
+          <div className="section-title">Elecciones</div>
           {electionsRes === null ? (
-            <div className="text-sm text-neutral-600">(Evidence API no disponible)</div>
+            <div className="text-sm text-slate-600">(Evidence API no disponible)</div>
           ) : elections.length === 0 ? (
-            <div className="text-sm text-neutral-600">(Sin elecciones indexadas todavía)</div>
+            <div className="text-sm text-slate-600">(Sin elecciones indexadas todavía)</div>
           ) : (
             <div className="space-y-2">
               {elections.map((e) => (
-                <div key={e.electionId} className="rounded-md border border-neutral-200 p-3">
+                <div key={e.electionId} className="rounded-md border border-slate-200 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
-                      <div className="text-sm font-semibold">Elección #{e.electionId}</div>
-                      <div className="text-xs text-neutral-700 break-all">manifestHash: {e.manifestHash}</div>
-                      <div className="text-xs text-neutral-700">
-                        fase: {e.phaseLabel ?? String(e.phase)} · signups: {e.counts?.signups ?? 0} · ballots:{" "}
-                        {e.counts?.ballots ?? 0}
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold">Elección #{e.electionId}</div>
+                        <span className={phaseBadgeClass(e.phaseLabel)}>{e.phaseLabel ?? `FASE ${e.phase}`}</span>
                       </div>
+                      <div className="hash-display break-all" title={e.manifestHash}>manifestHash: {shortHash(e.manifestHash)}</div>
+                      <div className="text-xs text-slate-700">
+                        signups={e.counts?.signups ?? 0} · boletas={e.counts?.ballots ?? 0}
+                      </div>
+                      <div className="text-xs text-slate-500">creada: {formatTimestamp(e.createdAtTimestamp)}</div>
+                      <div className="hash-display break-all" title={e.createdTxHash}>tx: {shortHash(e.createdTxHash)}</div>
                     </div>
-                    <Link className="text-xs underline" href={`/elections/${encodeURIComponent(e.electionId)}`}>
+                    <Link
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      href={`/elections/${encodeURIComponent(e.electionId)}`}
+                    >
                       abrir
                     </Link>
                   </div>
@@ -283,69 +467,115 @@ export default async function Page() {
           )}
         </section>
 
-        <section className="rounded-lg border border-neutral-200 p-4 space-y-3">
-          <div className="text-sm font-medium">Crear elección</div>
+        <section className="card p-4 space-y-3">
+          <div className="section-title">Crear elección</div>
           <form action={createElectionAction} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs text-neutral-700" htmlFor="title">
+              <label className="text-xs text-slate-700" htmlFor="title">
                 Título del manifiesto
               </label>
               <input
                 id="title"
                 name="title"
                 required
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Elección experimental BU‑PVP‑1"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-neutral-700" htmlFor="registryAuthority">
+              <label className="text-xs text-slate-700" htmlFor="registryAuthority">
                 REA (registryAuthority) — address
               </label>
               <input
                 id="registryAuthority"
                 name="registryAuthority"
                 required
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-mono"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono"
                 placeholder="0x..."
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-neutral-700" htmlFor="coordinatorPubKey">
+              <label className="text-xs text-slate-700" htmlFor="coordinatorPubKey">
                 coordinatorPubKey (32 bytes)
               </label>
               <input
                 id="coordinatorPubKey"
                 name="coordinatorPubKey"
                 required
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-mono"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono"
                 placeholder="0x22..(64 hex)"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-neutral-700" htmlFor="notes">
+              <label className="text-xs text-slate-700" htmlFor="notes">
                 Notas (opcional)
               </label>
               <textarea
                 id="notes"
                 name="notes"
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                 rows={3}
                 placeholder="Notas de contexto para auditoría post-electoral"
               />
             </div>
 
+            <div className="space-y-1">
+              <label className="text-xs text-slate-700" htmlFor="candidatesJson">
+                Catálogo de candidatos (JSON, opcional)
+              </label>
+              <textarea
+                id="candidatesJson"
+                name="candidatesJson"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs font-mono"
+                rows={9}
+                defaultValue={[
+                  "[",
+                  "  {",
+                  "    \"id\": \"cand-1\",",
+                  "    \"candidateCode\": \"CAND_1\",",
+                  "    \"displayName\": \"Mariana Soto\",",
+                  "    \"shortName\": \"M. Soto\",",
+                  "    \"partyName\": \"Alianza Cívica\",",
+                  "    \"ballotOrder\": 1,",
+                  "    \"status\": \"ACTIVE\",",
+                  "    \"colorHex\": \"#1D4ED8\"",
+                  "  },",
+                  "  {",
+                  "    \"id\": \"cand-2\",",
+                  "    \"candidateCode\": \"CAND_2\",",
+                  "    \"displayName\": \"Tomás Rivas\",",
+                  "    \"shortName\": \"T. Rivas\",",
+                  "    \"partyName\": \"Movimiento Federal\",",
+                  "    \"ballotOrder\": 2,",
+                  "    \"status\": \"ACTIVE\",",
+                  "    \"colorHex\": \"#0F766E\"",
+                  "  },",
+                  "  {",
+                  "    \"id\": \"cand-3\",",
+                  "    \"candidateCode\": \"CAND_3\",",
+                  "    \"displayName\": \"Lucía Peña\",",
+                  "    \"shortName\": \"L. Peña\",",
+                  "    \"partyName\": \"Pacto Social\",",
+                  "    \"ballotOrder\": 3,",
+                  "    \"status\": \"ACTIVE\",",
+                  "    \"colorHex\": \"#B45309\"",
+                  "  }",
+                  "]",
+                ].join("\n")}
+              />
+            </div>
+
             <button
               type="submit"
-              className="rounded-md bg-neutral-900 text-white px-4 py-2 text-sm font-semibold"
+              className="rounded-md bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 text-sm font-semibold"
             >
               Crear (on-chain)
             </button>
           </form>
-          <div className="text-xs text-neutral-600">
+          <div className="text-xs text-slate-600">
             La consola genera un manifiesto firmado (ed25519) y usa su hash como <span className="font-mono">manifestHash</span>.
           </div>
         </section>

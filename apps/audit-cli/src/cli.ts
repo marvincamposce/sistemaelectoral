@@ -841,6 +841,18 @@ program
       // 1. Fetch the full audit bundle
       const bundle = await fetchJson<any>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/audit-bundle`);
 
+      const [candidatesRes, manifestRes, resultsRes] = await Promise.all([
+        fetchJson<{ ok: boolean; candidates?: Array<any> }>(
+          `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/candidates`,
+        ).catch(() => ({ ok: false, candidates: [] })),
+        fetchJson<{ ok: boolean; source?: string; manifest?: any }>(
+          `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/manifest`,
+        ).catch(() => ({ ok: false, source: "unavailable", manifest: null })),
+        fetchJson<{ ok: boolean; results?: Array<any> }>(
+          `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/results`,
+        ).catch(() => ({ ok: false, results: [] })),
+      ]);
+
       if (!bundle.ok) {
         console.log(JSON.stringify({ ok: false, error: bundle.error ?? "Bundle fetch failed" }, null, 2));
         process.exitCode = 1;
@@ -878,6 +890,28 @@ program
 
       // 4. Summary
       const result = bundle.resultPayloads?.[0] ?? null;
+      const detailedResult = resultsRes.results?.[0] ?? null;
+
+      const candidates = Array.isArray(candidatesRes.candidates) ? candidatesRes.candidates : [];
+      const candidateIdSet = new Set(candidates.map((c: any) => String(c.id ?? "").toLowerCase()).filter(Boolean));
+      const candidateCodeSet = new Set(candidates.map((c: any) => String(c.candidateCode ?? "").toLowerCase()).filter(Boolean));
+
+      const summaryItems = Array.isArray(detailedResult?.summaryItems) ? detailedResult.summaryItems : [];
+      const unresolvedSummaryItems = summaryItems.filter((item: any) => {
+        const id = String(item?.candidateId ?? "").toLowerCase();
+        const code = String(item?.candidateCode ?? "").toLowerCase();
+        return !candidateIdSet.has(id) && !candidateCodeSet.has(code);
+      });
+
+      const manifestCandidates = Array.isArray(manifestRes.manifest?.manifestJson?.candidates)
+        ? manifestRes.manifest.manifestJson.candidates
+        : [];
+      const manifestCandidateIdSet = new Set(
+        manifestCandidates.map((c: any) => String(c.id ?? c.candidateId ?? "").toLowerCase()).filter(Boolean),
+      );
+      const dbCatalogMatchesManifest =
+        manifestCandidates.length === candidates.length &&
+        candidates.every((candidate: any) => manifestCandidateIdSet.has(String(candidate.id ?? "").toLowerCase()));
 
       console.log(JSON.stringify({
         ok: true,
@@ -906,6 +940,28 @@ program
           payloadHash: result.payloadHash,
           isSimulated: result.resultMode === "SIMULATED",
         } : null,
+        candidateCatalog: {
+          count: candidates.length,
+          activeCount: candidates.filter((candidate: any) => String(candidate.status ?? "").toUpperCase() === "ACTIVE").length,
+          manifestSource: manifestRes.source ?? null,
+          manifestHash: manifestRes.manifest?.manifestHash ?? null,
+          manifestCandidateCount: manifestCandidates.length,
+          dbCatalogMatchesManifest,
+        },
+        resultSummaryValidation: detailedResult
+          ? {
+              resultId: detailedResult.id,
+              summaryItemsCount: summaryItems.length,
+              hasUnresolvedCandidateLabels: Boolean(detailedResult.hasUnresolvedCandidateLabels),
+              unresolvedByCatalogCount: unresolvedSummaryItems.length,
+              unresolvedByCatalog: unresolvedSummaryItems.map((item: any) => ({
+                candidateId: item?.candidateId ?? null,
+                candidateCode: item?.candidateCode ?? null,
+                displayName: item?.displayName ?? null,
+                votes: item?.votes ?? null,
+              })),
+            }
+          : null,
         auditWindow: bundle.auditWindow ? {
           status: bundle.auditWindow.status,
           openedAt: bundle.auditWindow.openedAt,
@@ -913,6 +969,12 @@ program
         honesty: bundle.honesty,
         warnings: [
           ...(result?.resultMode === "SIMULATED" ? ["resultSummary es estático, no proviene de descifrado real"] : []),
+          ...(candidates.length === 0 ? ["No hay catálogo de candidatos publicado en Evidence API"] : []),
+          ...(!dbCatalogMatchesManifest ? ["El catálogo DB no coincide con el manifiesto vigente"] : []),
+          ...(Boolean(detailedResult?.hasUnresolvedCandidateLabels) ? ["El resultado reporta etiquetas de candidato no resueltas"] : []),
+          ...(unresolvedSummaryItems.length > 0
+            ? ["Hay summaryItems que no corresponden al catálogo oficial de candidatos"]
+            : []),
           ...(!hasEscrutinio ? ["Falta ACTA_ESCRUTINIO"] : []),
           ...(!hasResultados ? ["Falta ACTA_RESULTADOS"] : []),
           ...(bundle.exportStatus !== "MATERIALIZED" ? ["Bundle no materializado"] : []),

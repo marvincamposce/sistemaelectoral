@@ -135,6 +135,55 @@ type IncidentRow = {
   resolvedAt: Date | null;
 };
 
+type CandidateRow = {
+  id: string;
+  candidateCode: string;
+  displayName: string;
+  shortName: string;
+  partyName: string;
+  ballotOrder: number;
+  status: string;
+  colorHex: string | null;
+  metadataJson: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ElectionManifestRow = {
+  manifestHash: string;
+  manifestJson: unknown;
+  source: string;
+  signatureHex: string | null;
+  signerAddress: string | null;
+  schemaVersion: string;
+  generatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ResultPayloadRow = {
+  id: string;
+  tallyJobId: string | null;
+  resultKind: string;
+  payloadJson: unknown;
+  payloadHash: string;
+  publicationStatus: string;
+  proofState: string | null;
+  createdAt: Date;
+  publishedAt: Date | null;
+};
+
+type ResultSummaryItemRow = {
+  resultId: string;
+  candidateId: string | null;
+  candidateCode: string | null;
+  displayName: string;
+  partyName: string | null;
+  votes: number;
+  rank: number | null;
+  unresolvedLabel: string | null;
+};
+
 function isCriticalSeverity(severity: string): boolean {
   const s = String(severity ?? "").toUpperCase();
   return s === "CRITICAL" || s === "ERROR";
@@ -250,6 +299,178 @@ function computeSignupDigest(params: { electionId: string; registryNullifier: st
   );
 }
 
+function normalizeCandidate(row: CandidateRow) {
+  return {
+    id: row.id,
+    candidateId: row.id,
+    candidateCode: row.candidateCode,
+    displayName: row.displayName,
+    shortName: row.shortName,
+    partyName: row.partyName,
+    ballotOrder: row.ballotOrder,
+    status: row.status,
+    colorHex: row.colorHex,
+    metadata: row.metadataJson ?? {},
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function coerceVotes(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  if (typeof value === "bigint") return Number(value);
+  return 0;
+}
+
+function resolveResultSummary(params: {
+  payloadJson: unknown;
+  candidates: ReturnType<typeof normalizeCandidate>[];
+}) {
+  const { payloadJson, candidates } = params;
+  const byId = new Map(candidates.map((c) => [String(c.id).toLowerCase(), c]));
+  const byCode = new Map(candidates.map((c) => [String(c.candidateCode).toLowerCase(), c]));
+
+  const items: Array<{
+    candidateId: string | null;
+    candidateCode: string | null;
+    displayName: string;
+    partyName: string | null;
+    votes: number;
+    status: string | null;
+    unresolvedLabel: string | null;
+  }> = [];
+
+  const unresolvedLabels: string[] = [];
+
+  const raw = payloadJson as any;
+  const summaryItems = Array.isArray(raw?.summaryItems) ? raw.summaryItems : null;
+
+  if (summaryItems) {
+    for (const rawItem of summaryItems) {
+      const candidateId =
+        typeof rawItem?.candidateId === "string" && rawItem.candidateId.length > 0
+          ? rawItem.candidateId
+          : null;
+      const candidateCode =
+        typeof rawItem?.candidateCode === "string" && rawItem.candidateCode.length > 0
+          ? rawItem.candidateCode
+          : null;
+      const resolved = candidateId
+        ? byId.get(candidateId.toLowerCase()) ?? (candidateCode ? byCode.get(candidateCode.toLowerCase()) : undefined)
+        : candidateCode
+          ? byCode.get(candidateCode.toLowerCase())
+          : undefined;
+
+      if (!resolved) {
+        const label = String(candidateId ?? candidateCode ?? rawItem?.displayName ?? "UNKNOWN");
+        unresolvedLabels.push(label);
+        items.push({
+          candidateId,
+          candidateCode,
+          displayName: String(rawItem?.displayName ?? label),
+          partyName: typeof rawItem?.partyName === "string" ? rawItem.partyName : null,
+          votes: coerceVotes(rawItem?.votes),
+          status: null,
+          unresolvedLabel: label,
+        });
+      } else {
+        items.push({
+          candidateId: resolved.id,
+          candidateCode: resolved.candidateCode,
+          displayName: resolved.displayName,
+          partyName: resolved.partyName,
+          votes: coerceVotes(rawItem?.votes),
+          status: resolved.status,
+          unresolvedLabel: null,
+        });
+      }
+    }
+  } else if (raw && typeof raw.summary === "object" && raw.summary !== null) {
+    for (const [label, votes] of Object.entries(raw.summary as Record<string, unknown>)) {
+      const resolved = byId.get(label.toLowerCase()) ?? byCode.get(label.toLowerCase());
+      if (!resolved) {
+        unresolvedLabels.push(label);
+        items.push({
+          candidateId: null,
+          candidateCode: null,
+          displayName: label,
+          partyName: null,
+          votes: coerceVotes(votes),
+          status: null,
+          unresolvedLabel: label,
+        });
+      } else {
+        items.push({
+          candidateId: resolved.id,
+          candidateCode: resolved.candidateCode,
+          displayName: resolved.displayName,
+          partyName: resolved.partyName,
+          votes: coerceVotes(votes),
+          status: resolved.status,
+          unresolvedLabel: null,
+        });
+      }
+    }
+  }
+
+  return {
+    items,
+    unresolvedLabels,
+    hasUnresolvedLabels: unresolvedLabels.length > 0,
+  };
+}
+
+function resolveStoredResultSummary(params: {
+  rows: ResultSummaryItemRow[];
+  candidates: ReturnType<typeof normalizeCandidate>[];
+}) {
+  const { rows, candidates } = params;
+  const byId = new Map(candidates.map((c) => [String(c.id).toLowerCase(), c]));
+  const byCode = new Map(candidates.map((c) => [String(c.candidateCode).toLowerCase(), c]));
+
+  const unresolvedLabels: string[] = [];
+  const items = rows.map((row) => {
+    const resolved = row.candidateId
+      ? byId.get(row.candidateId.toLowerCase()) ?? (row.candidateCode ? byCode.get(row.candidateCode.toLowerCase()) : undefined)
+      : row.candidateCode
+        ? byCode.get(row.candidateCode.toLowerCase())
+        : undefined;
+
+    if (!resolved) {
+      const unresolvedLabel = row.unresolvedLabel ?? row.displayName;
+      unresolvedLabels.push(unresolvedLabel);
+      return {
+        candidateId: row.candidateId,
+        candidateCode: row.candidateCode,
+        displayName: row.displayName,
+        partyName: row.partyName,
+        votes: coerceVotes(row.votes),
+        rank: row.rank,
+        status: null,
+        unresolvedLabel,
+      };
+    }
+
+    return {
+      candidateId: resolved.id,
+      candidateCode: resolved.candidateCode,
+      displayName: resolved.displayName,
+      partyName: resolved.partyName,
+      votes: coerceVotes(row.votes),
+      rank: row.rank,
+      status: resolved.status,
+      unresolvedLabel: null,
+    };
+  });
+
+  return {
+    items,
+    unresolvedLabels,
+    hasUnresolvedLabels: unresolvedLabels.length > 0,
+  };
+}
+
 async function main() {
   const env = getEnv();
 
@@ -271,6 +492,9 @@ async function main() {
         "/v1/elections",
         "/v1/elections/:id/phases",
         "/v1/elections/:id/phase-changes",
+        "/v1/elections/:id/candidates",
+        "/v1/elections/:id/candidates/:candidateId",
+        "/v1/elections/:id/manifest",
         "/v1/elections/:id/acts",
         "/v1/elections/:id/acts/:actId",
         "/v1/elections/:id/acts/:actId/content",
@@ -367,6 +591,194 @@ async function main() {
     );
     return res.rows[0] ?? null;
   }
+
+  async function listElectionCandidates(electionId: string) {
+    const res = await pool.query<CandidateRow>(
+      `SELECT
+        id,
+        candidate_code AS "candidateCode",
+        display_name AS "displayName",
+        short_name AS "shortName",
+        party_name AS "partyName",
+        ballot_order::int AS "ballotOrder",
+        status AS "status",
+        color_hex AS "colorHex",
+        metadata_json AS "metadataJson",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM candidates
+      WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+      ORDER BY ballot_order ASC, created_at ASC`,
+      [chainId, contractAddress, electionId],
+    );
+
+    return res.rows.map(normalizeCandidate);
+  }
+
+  async function getCurrentElectionManifest(electionId: string): Promise<ElectionManifestRow | null> {
+    const res = await pool.query<ElectionManifestRow>(
+      `SELECT
+        manifest_hash AS "manifestHash",
+        manifest_json AS "manifestJson",
+        source,
+        NULL::text AS "signatureHex",
+        NULL::text AS "signerAddress",
+        COALESCE(
+          manifest_json->'manifest'->>'manifestVersion',
+          manifest_json->>'manifestVersion',
+          '1.0.0'
+        ) AS "schemaVersion",
+        NULL::timestamptz AS "generatedAt",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM election_manifests
+      WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND is_current=true
+      ORDER BY updated_at DESC, manifest_id DESC
+      LIMIT 1`,
+      [chainId, contractAddress, electionId],
+    );
+    return res.rows[0] ?? null;
+  }
+
+  app.get<{ Params: { id: string } }>("/v1/elections/:id/candidates", async (req, reply) => {
+    try {
+      const electionId = requireElectionId(req.params.id);
+      const election = await getElectionMeta(electionId.toString());
+      if (!election) {
+        reply.status(404);
+        return { ok: false, error: "election_not_found" };
+      }
+
+      const candidates = await listElectionCandidates(electionId);
+      return {
+        ok: true,
+        chainId,
+        contractAddress,
+        electionId: electionId.toString(),
+        candidates,
+        count: candidates.length,
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.get<{ Params: { id: string; candidateId: string } }>(
+    "/v1/elections/:id/candidates/:candidateId",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const election = await getElectionMeta(electionId.toString());
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
+        }
+
+        const candidateId = req.params.candidateId.trim();
+        if (!candidateId) {
+          reply.status(400);
+          return { ok: false, error: "candidate_id_required" };
+        }
+
+        const res = await pool.query<CandidateRow>(
+          `SELECT
+            id,
+            candidate_code AS "candidateCode",
+            display_name AS "displayName",
+            short_name AS "shortName",
+            party_name AS "partyName",
+            ballot_order::int AS "ballotOrder",
+            status AS "status",
+            color_hex AS "colorHex",
+            metadata_json AS "metadataJson",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
+          FROM candidates
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+            AND (id=$4 OR lower(candidate_code)=lower($4))
+          LIMIT 1`,
+          [chainId, contractAddress, electionId, candidateId],
+        );
+
+        if (res.rows.length === 0) {
+          reply.status(404);
+          return { ok: false, error: "candidate_not_found" };
+        }
+
+        return {
+          ok: true,
+          chainId,
+          contractAddress,
+          electionId: electionId.toString(),
+          candidate: normalizeCandidate(res.rows[0]!),
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>("/v1/elections/:id/manifest", async (req, reply) => {
+    try {
+      const electionId = requireElectionId(req.params.id);
+      const election = await getElectionMeta(electionId.toString());
+      if (!election) {
+        reply.status(404);
+        return { ok: false, error: "election_not_found" };
+      }
+
+      const [manifest, candidates] = await Promise.all([
+        getCurrentElectionManifest(electionId),
+        listElectionCandidates(electionId),
+      ]);
+
+      if (!manifest) {
+        return {
+          ok: true,
+          chainId,
+          contractAddress,
+          electionId: electionId.toString(),
+          manifest: {
+            manifestHash: election.manifestHash,
+            manifestJson: {
+              electionId: electionId.toString(),
+              candidates,
+              catalogSource: "DB_CANDIDATES_FALLBACK",
+            },
+            signatureHex: null,
+            signerAddress: null,
+            schemaVersion: "1.0.0",
+            generatedAt: null,
+            updatedAt: null,
+          },
+          source: "fallback",
+        };
+      }
+
+      return {
+        ok: true,
+        chainId,
+        contractAddress,
+        electionId: electionId.toString(),
+        manifest: {
+          manifestHash: manifest.manifestHash,
+          manifestJson: manifest.manifestJson,
+          signatureHex: manifest.signatureHex,
+          signerAddress: manifest.signerAddress,
+          schemaVersion: manifest.schemaVersion,
+          generatedAt: manifest.generatedAt?.toISOString() ?? null,
+          createdAt: manifest.createdAt.toISOString(),
+          updatedAt: manifest.updatedAt.toISOString(),
+        },
+        source: "materialized",
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 
   app.get<{ Params: { id: string } }>("/v1/elections/:id/phases", async (req, reply) => {
     try {
@@ -787,23 +1199,6 @@ async function main() {
         } else if (!content) {
           verifyErrorCode = "INCOMPLETE_METADATA";
           verifyError = "Contenido no disponible en la base de datos";
-        }
-
-        // Automatic incident generation rule
-        if (verifyErrorCode) {
-           const fingerprint = `act-verify:${actId}:${verifyErrorCode}`;
-           const code = verifyErrorCode;
-           const msg = verifyError ?? "Error de validación desconocido";
-           
-           await pool.query(
-             `INSERT INTO incident_logs (
-               chain_id, contract_address, election_id, fingerprint, code, severity,
-               message, details, related_entity_type, related_entity_id, first_seen_at, last_seen_at, active
-             ) VALUES (
-               $1, $2, $3, $4, $5, 'CRITICAL', $6, '{}'::jsonb, 'ACTA', $7, NOW(), NOW(), true
-             ) ON CONFLICT (chain_id, contract_address, election_id, fingerprint) DO UPDATE SET active=true, last_seen_at=NOW()`,
-             [chainId, contractAddress, electionId, fingerprint, code, msg, actId]
-           );
         }
 
         const incidentsRes = await pool.query<{
@@ -1593,34 +1988,71 @@ async function main() {
         return { ok: false, error: "election_not_found" };
       }
 
-      const res = await pool.query(
-        `SELECT
-          id,
-          tally_job_id AS "tallyJobId",
-          result_kind AS "resultKind",
-          payload_json AS "payloadJson",
-          payload_hash AS "payloadHash",
-          publication_status AS "publicationStatus",
-          proof_state AS "proofState",
-          created_at AS "createdAt",
-          published_at AS "publishedAt"
-        FROM result_payloads
-        WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
-        ORDER BY created_at DESC`,
-        [chainId, contractAddress, electionId],
-      );
+      const [candidates, resultsRes, summaryItemsRes] = await Promise.all([
+        listElectionCandidates(electionId),
+        pool.query<ResultPayloadRow>(
+          `SELECT
+            id,
+            tally_job_id AS "tallyJobId",
+            result_kind AS "resultKind",
+            payload_json AS "payloadJson",
+            payload_hash AS "payloadHash",
+            publication_status AS "publicationStatus",
+            proof_state AS "proofState",
+            created_at AS "createdAt",
+            published_at AS "publishedAt"
+          FROM result_payloads
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          ORDER BY created_at DESC`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query<ResultSummaryItemRow>(
+          `SELECT
+            result_payload_id AS "resultId",
+            candidate_id AS "candidateId",
+            candidate_code AS "candidateCode",
+            display_name AS "displayName",
+            party_name AS "partyName",
+            votes::int AS "votes",
+            NULL::int AS "rank",
+            NULL::text AS "unresolvedLabel"
+          FROM result_summary_items
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          ORDER BY result_payload_id ASC, votes DESC, display_name ASC`,
+          [chainId, contractAddress, electionId],
+        ),
+      ]);
+
+      const summaryItemsByResult = new Map<string, ResultSummaryItemRow[]>();
+      for (const item of summaryItemsRes.rows) {
+        const list = summaryItemsByResult.get(item.resultId) ?? [];
+        list.push(item);
+        summaryItemsByResult.set(item.resultId, list);
+      }
 
       return {
         ok: true,
         chainId,
         contractAddress,
         electionId: electionId.toString(),
-        results: res.rows.map((r) => ({
-          ...r,
-          resultMode: mapProofStateToResultMode(r.proofState),
-          createdAt: r.createdAt.toISOString(),
-          publishedAt: r.publishedAt?.toISOString() ?? null,
-        })),
+        candidates,
+        results: resultsRes.rows.map((r) => {
+          const storedSummaryRows = summaryItemsByResult.get(r.id) ?? [];
+          const summary = storedSummaryRows.length
+            ? resolveStoredResultSummary({ rows: storedSummaryRows, candidates })
+            : resolveResultSummary({ payloadJson: r.payloadJson, candidates });
+
+          return {
+            ...r,
+            resultMode: mapProofStateToResultMode(r.proofState),
+            honestyNote: honestyNoteForProofState(r.proofState),
+            createdAt: r.createdAt.toISOString(),
+            publishedAt: r.publishedAt?.toISOString() ?? null,
+            summaryItems: summary.items,
+            hasUnresolvedCandidateLabels: summary.hasUnresolvedLabels,
+            unresolvedCandidateLabels: summary.unresolvedLabels,
+          };
+        }),
       };
     } catch (err: unknown) {
       reply.status(400);
@@ -1683,39 +2115,66 @@ async function main() {
         }
         const resultId = String(req.params.resultId);
 
-        const res = await pool.query(
-          `SELECT
-            id,
-            tally_job_id AS "tallyJobId",
-            result_kind AS "resultKind",
-            payload_json AS "payloadJson",
-            payload_hash AS "payloadHash",
-            publication_status AS "publicationStatus",
-            proof_state AS "proofState",
-            created_at AS "createdAt",
-            published_at AS "publishedAt"
-          FROM result_payloads
-          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND id=$4
-          LIMIT 1`,
-          [chainId, contractAddress, electionId, resultId],
-        );
+        const [candidates, resultRes, summaryItemsRes] = await Promise.all([
+          listElectionCandidates(electionId),
+          pool.query<ResultPayloadRow>(
+            `SELECT
+              id,
+              tally_job_id AS "tallyJobId",
+              result_kind AS "resultKind",
+              payload_json AS "payloadJson",
+              payload_hash AS "payloadHash",
+              publication_status AS "publicationStatus",
+              proof_state AS "proofState",
+              created_at AS "createdAt",
+              published_at AS "publishedAt"
+            FROM result_payloads
+            WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND id=$4
+            LIMIT 1`,
+            [chainId, contractAddress, electionId, resultId],
+          ),
+          pool.query<ResultSummaryItemRow>(
+            `SELECT
+              result_payload_id AS "resultId",
+              candidate_id AS "candidateId",
+              candidate_code AS "candidateCode",
+              display_name AS "displayName",
+              party_name AS "partyName",
+              votes::int AS "votes",
+              NULL::int AS "rank",
+              NULL::text AS "unresolvedLabel"
+            FROM result_summary_items
+            WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND result_payload_id=$4
+            ORDER BY votes DESC, display_name ASC`,
+            [chainId, contractAddress, electionId, resultId],
+          ),
+        ]);
 
-        if (res.rows.length === 0) {
+        if (resultRes.rows.length === 0) {
           reply.status(404);
           return { ok: false, error: "result_not_found" };
         }
 
-        const r = res.rows[0]!;
+        const r = resultRes.rows[0]!;
+        const summary = summaryItemsRes.rows.length
+          ? resolveStoredResultSummary({ rows: summaryItemsRes.rows, candidates })
+          : resolveResultSummary({ payloadJson: r.payloadJson, candidates });
+
         return {
           ok: true,
           chainId,
           contractAddress,
           electionId: electionId.toString(),
+          candidates,
           result: {
             ...r,
             resultMode: mapProofStateToResultMode(r.proofState),
+            honestyNote: honestyNoteForProofState(r.proofState),
             createdAt: r.createdAt.toISOString(),
             publishedAt: r.publishedAt?.toISOString() ?? null,
+            summaryItems: summary.items,
+            hasUnresolvedCandidateLabels: summary.hasUnresolvedLabels,
+            unresolvedCandidateLabels: summary.unresolvedLabels,
           },
         };
       } catch (err: unknown) {

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { z } from "zod";
 
 import { getEnvResult } from "../../../../../lib/env";
-import { ensureSchema, getPool, listAdminLogEntries } from "../../../../../lib/db";
+import { ensureSchema, getCurrentElectionManifest, getPool, listAdminLogEntries } from "../../../../../lib/db";
 
 export const runtime = "nodejs";
 
@@ -47,6 +47,30 @@ export async function GET(
   const electionId = Number(parsed.data.id);
   const pool = getPool(env.DATABASE_URL);
   await ensureSchema(pool);
+
+  const currentManifest = await getCurrentElectionManifest({
+    pool,
+    chainId: env.CHAIN_ID,
+    contractAddress: env.CONTRACT_ADDRESS,
+    electionId,
+  });
+
+  if (currentManifest && currentManifest.manifestJson) {
+    const manifestHashHex = String(currentManifest.manifestHash ?? "").trim();
+    const fileName = manifestHashHex
+      ? `manifest_${manifestHashHex}.signed.json`
+      : `manifest.election-${electionId}.signed.json`;
+
+    return new Response(JSON.stringify(currentManifest.manifestJson, null, 2) + "\n", {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "content-disposition": `attachment; filename=${fileName}`,
+      },
+    });
+  }
+
+  // Backward-compatible fallback for old elections created before manifest materialization.
 
   const entries = await listAdminLogEntries({
     pool,

@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 
 import { ethers } from "ethers";
 import { BU_PVP_1_ELECTION_REGISTRY_ABI } from "@blockurna/sdk";
-import { canonicalizeJson, sha256Hex, verifySignedSnapshot } from "@blockurna/crypto";
+import {
+  canonicalizeJson,
+  sha256Hex,
+  verifyActaECDSASignature,
+  verifySignedSnapshot,
+} from "@blockurna/crypto";
 import { SignedSnapshotSchema } from "@blockurna/shared";
 
 import { getEnv } from "./env.js";
@@ -177,6 +182,8 @@ const PHASE_LABELS = [
   "AUDIT_WINDOW",
   "ARCHIVED",
 ] as const;
+
+const CONSISTENCY_RULESET_VERSION = "2";
 
 const ACTA_KIND_LABELS = [
   "ACTA_APERTURA",
@@ -369,7 +376,7 @@ async function refreshActaCustodyIncidents(params: {
       : [chainId, contractAddress, custodyCodes],
   );
 
-  const anchoredActsRes = await pool.query<{
+  const activeAnchorsRes = await pool.query<{
     election_id: string;
     kind: number;
     act_id: string;
@@ -378,7 +385,7 @@ async function refreshActaCustodyIncidents(params: {
     block_timestamp: Date | null;
   }>(
     electionFilter
-      ? `SELECT DISTINCT ON (election_id, snapshot_hash)
+      ? `SELECT DISTINCT ON (election_id, kind)
           election_id::text AS election_id,
           kind::int AS kind,
           snapshot_hash AS act_id,
@@ -387,8 +394,8 @@ async function refreshActaCustodyIncidents(params: {
           block_timestamp
         FROM acta_anchors
         WHERE chain_id=$1 AND contract_address=$2 AND election_id = ANY($3::bigint[])
-        ORDER BY election_id, snapshot_hash, block_number ASC, log_index ASC`
-      : `SELECT DISTINCT ON (election_id, snapshot_hash)
+        ORDER BY election_id, kind, block_number DESC, log_index DESC`
+      : `SELECT DISTINCT ON (election_id, kind)
           election_id::text AS election_id,
           kind::int AS kind,
           snapshot_hash AS act_id,
@@ -397,7 +404,7 @@ async function refreshActaCustodyIncidents(params: {
           block_timestamp
         FROM acta_anchors
         WHERE chain_id=$1 AND contract_address=$2
-        ORDER BY election_id, snapshot_hash, block_number ASC, log_index ASC`,
+        ORDER BY election_id, kind, block_number DESC, log_index DESC`,
     electionFilter ? [chainId, contractAddress, electionIdsHint] : [chainId, contractAddress],
   );
 
@@ -413,9 +420,9 @@ async function refreshActaCustodyIncidents(params: {
   );
 
   const contentKeySet = new Set(contentKeysRes.rows.map((r) => `${r.election_id}:${r.act_id.toLowerCase()}`));
-  const anchoredKeySet = new Set(anchoredActsRes.rows.map((r) => `${r.election_id}:${r.act_id.toLowerCase()}`));
+  const activeAnchorKeySet = new Set(activeAnchorsRes.rows.map((r) => `${r.election_id}:${r.act_id.toLowerCase()}`));
 
-  for (const a of anchoredActsRes.rows) {
+  for (const a of activeAnchorsRes.rows) {
     const key = `${a.election_id}:${a.act_id.toLowerCase()}`;
     if (!contentKeySet.has(key)) {
       const actId = a.act_id.toLowerCase();
@@ -455,31 +462,37 @@ async function refreshActaCustodyIncidents(params: {
   }
 
   const contentRowsRes = await pool.query<{
-    election_id: string;
-    act_id: string;
-    act_type: string;
-    canonical_json: unknown;
-    signed_json: unknown;
-    content_hash: string;
+    electionId: string;
+    actId: string;
+    actType: string;
+    canonicalJson: unknown;
+    signedJson: unknown;
+    contentHash: string;
+    signatureScheme: string | null;
+    expectedSignerAddress: string | null;
   }>(
     electionFilter
       ? `SELECT
-          election_id::text AS election_id,
-          act_id,
-          act_type,
-          canonical_json,
-          signed_json,
-          content_hash
+          election_id::text AS "electionId",
+          act_id AS "actId",
+          act_type AS "actType",
+          canonical_json AS "canonicalJson",
+          signed_json AS "signedJson",
+          content_hash AS "contentHash",
+          signature_scheme AS "signatureScheme",
+          expected_signer_address AS "expectedSignerAddress"
         FROM acta_contents
         WHERE chain_id=$1 AND contract_address=$2 AND election_id = ANY($3::bigint[])
         ORDER BY election_id ASC, created_at DESC`
       : `SELECT
-          election_id::text AS election_id,
-          act_id,
-          act_type,
-          canonical_json,
-          signed_json,
-          content_hash
+          election_id::text AS "electionId",
+          act_id AS "actId",
+          act_type AS "actType",
+          canonical_json AS "canonicalJson",
+          signed_json AS "signedJson",
+          content_hash AS "contentHash",
+          signature_scheme AS "signatureScheme",
+          expected_signer_address AS "expectedSignerAddress"
         FROM acta_contents
         WHERE chain_id=$1 AND contract_address=$2
         ORDER BY election_id ASC, created_at DESC`,
@@ -487,61 +500,102 @@ async function refreshActaCustodyIncidents(params: {
   );
 
   for (const row of contentRowsRes.rows) {
-    const actId = row.act_id.toLowerCase();
-    const key = `${row.election_id}:${actId}`;
+    const actId = row.actId.toLowerCase();
+    const key = `${row.electionId}:${actId}`;
 
-    const anchorFoundOnChain = anchoredKeySet.has(key);
-
-    if (!anchorFoundOnChain) {
-      await upsertIncident({
-        pool,
-        chainId,
-        contractAddress,
-        electionId: row.election_id,
-        incident: {
-          fingerprint: `ACTA_ANCHOR_MISSING:${actId}`,
-          code: "ACTA_ANCHOR_MISSING",
-          severity: "CRITICAL",
-          message: "Signed acta content exists but no on-chain anchor was indexed for actId",
-          details: { actId, actType: row.act_type },
-          relatedEntityType: "ACTA",
-          relatedEntityId: actId,
-          evidencePointers: [{ type: "acta", actId, electionId: row.election_id }],
-        },
-      });
+    // Evaluate only the currently authoritative anchors (latest per kind).
+    if (!activeAnchorKeySet.has(key)) {
+      continue;
     }
 
-    const verified = await verifySignedSnapshot(row.signed_json);
-    if (!verified.ok) {
+    const signedJson = row.signedJson as any;
+    const signatureObj =
+      signedJson && typeof signedJson === "object" && typeof signedJson.signature === "object"
+        ? signedJson.signature
+        : null;
+
+    const resolvedSignatureScheme =
+      (typeof row.signatureScheme === "string" && row.signatureScheme.trim().length > 0
+        ? row.signatureScheme
+        : typeof signatureObj?.signatureScheme === "string"
+          ? signatureObj.signatureScheme
+          : typeof signatureObj?.algorithm === "string"
+            ? signatureObj.algorithm
+            : "") ?? "";
+
+    let signatureOk = false;
+    let computedHash = "";
+    let verifyError: string | null = null;
+    let verifyErrorCode: string | null = null;
+
+    if (resolvedSignatureScheme === "ECDSA_SECP256K1_ETH_V1" && signatureObj) {
+      const expectedSignerAddress =
+        typeof row.expectedSignerAddress === "string" && row.expectedSignerAddress.length > 0
+          ? row.expectedSignerAddress
+          : typeof signatureObj.signerAddress === "string"
+            ? signatureObj.signerAddress
+            : "";
+
+      if (expectedSignerAddress.length === 0) {
+        verifyError = "Missing expected signer address for ECDSA acta verification";
+        verifyErrorCode = "MISSING_EXPECTED_SIGNER";
+        computedHash = sha256Hex(canonicalizeJson(row.canonicalJson)).toLowerCase();
+      } else {
+        const verification = verifyActaECDSASignature(
+          row.canonicalJson as Record<string, unknown>,
+          signatureObj,
+          expectedSignerAddress,
+        );
+        signatureOk = verification.ok;
+        computedHash = String(verification.contentHash ?? "").toLowerCase();
+        if (!verification.ok) {
+          verifyError = verification.error ?? "verification_failed";
+          verifyErrorCode = verification.errorCode ?? "ECDSA_VERIFY_FAILED";
+        }
+      }
+    } else {
+      const verified = await verifySignedSnapshot(row.signedJson);
+      signatureOk = verified.ok;
+      computedHash = verified.ok
+        ? String(verified.snapshotHashHex ?? "").toLowerCase()
+        : sha256Hex(canonicalizeJson(row.canonicalJson)).toLowerCase();
+      if (!verified.ok) {
+        verifyError = verified.error ?? "verification_failed";
+        verifyErrorCode = "LEGACY_VERIFY_FAILED";
+      }
+    }
+
+    if (!signatureOk) {
       await upsertIncident({
         pool,
         chainId,
         contractAddress,
-        electionId: row.election_id,
+        electionId: row.electionId,
         incident: {
           fingerprint: `ACTA_SIGNATURE_INVALID:${actId}`,
           code: "ACTA_SIGNATURE_INVALID",
           severity: "CRITICAL",
-          message: "Signed acta failed local verification (signature/hash)",
+          message: "Signed acta failed local verification",
           details: {
             actId,
-            actType: row.act_type,
-            error: verified.error ?? "verification_failed",
+            actType: row.actType,
+            signatureScheme: resolvedSignatureScheme || null,
+            errorCode: verifyErrorCode,
+            error: verifyError,
           },
           relatedEntityType: "ACTA",
           relatedEntityId: actId,
-          evidencePointers: [{ type: "acta", actId, electionId: row.election_id }],
+          evidencePointers: [{ type: "acta", actId, electionId: row.electionId }],
         },
       });
     }
 
-    const computedHash = sha256Hex(canonicalizeJson(row.canonical_json)).toLowerCase();
     if (computedHash !== actId) {
       await upsertIncident({
         pool,
         chainId,
         contractAddress,
-        electionId: row.election_id,
+        electionId: row.electionId,
         incident: {
           fingerprint: `ACTA_HASH_MISMATCH:${actId}`,
           code: "ACTA_HASH_MISMATCH",
@@ -549,22 +603,85 @@ async function refreshActaCustodyIncidents(params: {
           message: "Acta content hash does not match actId (anchor snapshot hash)",
           details: {
             actId,
-            actType: row.act_type,
+            actType: row.actType,
+            signatureScheme: resolvedSignatureScheme || null,
             computedContentHash: computedHash,
-            storedContentHash: String(row.content_hash ?? ""),
+            storedContentHash: String(row.contentHash ?? ""),
           },
           relatedEntityType: "ACTA",
           relatedEntityId: actId,
-          evidencePointers: [{ type: "acta", actId, electionId: row.election_id }],
+          evidencePointers: [{ type: "acta", actId, electionId: row.electionId }],
         },
       });
     }
 
-    const verificationStatus = anchorFoundOnChain && verified.ok && computedHash === actId ? "OK" : "ERROR";
+    const verificationStatus = signatureOk && computedHash === actId ? "OK" : "ERROR";
     await pool.query(
       "UPDATE acta_contents SET verification_status=$5 WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND act_id=$4",
-      [chainId, contractAddress, row.election_id, actId, verificationStatus],
+      [chainId, contractAddress, row.electionId, actId, verificationStatus],
     );
+  }
+}
+
+async function resolveRecoveredRelayerIncidents(params: {
+  pool: ReturnType<typeof createPool>;
+  chainId: string;
+  contractAddress: string;
+}): Promise<void> {
+  const { pool, chainId, contractAddress } = params;
+
+  try {
+    await pool.query(
+      `UPDATE incident_logs i
+       SET active=false, resolved_at=NOW(), last_seen_at=NOW()
+       FROM mrd_submissions s
+       WHERE i.chain_id=$1
+         AND i.contract_address=$2
+         AND i.code='MRD_SIGNUP_FAILED'
+         AND i.active=true
+         AND i.related_entity_type='MRD_SUBMISSION'
+         AND i.related_entity_id = s.id::text
+         AND s.kind='SIGNUP'
+         AND i.election_id::text = s.election_id
+         AND EXISTS (
+           SELECT 1
+           FROM signup_records sr
+           WHERE sr.chain_id=i.chain_id
+             AND sr.contract_address=i.contract_address
+             AND sr.election_id=i.election_id
+             AND LOWER(sr.registry_nullifier) = LOWER(COALESCE(s.payload->>'registryNullifier', ''))
+         )`,
+      [chainId, contractAddress],
+    );
+
+    await pool.query(
+      `UPDATE incident_logs i
+       SET active=false, resolved_at=NOW(), last_seen_at=NOW()
+       FROM mrd_submissions s
+       WHERE i.chain_id=$1
+         AND i.contract_address=$2
+         AND i.code='MRD_BALLOT_FAILED'
+         AND i.active=true
+         AND i.related_entity_type='MRD_SUBMISSION'
+         AND i.related_entity_id = s.id::text
+         AND s.kind='BALLOT'
+         AND i.election_id::text = s.election_id
+         AND EXISTS (
+           SELECT 1
+           FROM ballot_records br
+           WHERE br.chain_id=i.chain_id
+             AND br.contract_address=i.contract_address
+             AND br.election_id=i.election_id
+             AND br.ciphertext = COALESCE(s.payload->>'ciphertext', '')
+         )`,
+      [chainId, contractAddress],
+    );
+  } catch (err: unknown) {
+    // mrd_submissions may not exist in deployments without relayer.
+    if ((err as { code?: string })?.code === "42P01") {
+      return;
+    }
+    throw err;
   }
 }
 
@@ -834,6 +951,7 @@ async function computeAndStoreConsistencyReport(params: {
   const maxBlockNumber = maxBlockRes.rows[0]?.max_block ? Number(maxBlockRes.rows[0].max_block) : null;
 
   const dataVersion = [
+    CONSISTENCY_RULESET_VERSION,
     election.phase,
     phaseChangesCount,
     actaAnchorsCount,
@@ -950,7 +1068,7 @@ async function computeAndStoreConsistencyReport(params: {
     `SELECT
       tx_hash,
       log_index,
-      block_number::text AS block_number,
+      block_number,
       block_timestamp,
       previous_phase,
       new_phase
@@ -1131,7 +1249,7 @@ async function computeAndStoreConsistencyReport(params: {
       block_number: string;
       block_timestamp: Date | null;
     }>(
-      `SELECT kind, tx_hash, log_index, block_number::text AS block_number, block_timestamp
+      `SELECT kind, tx_hash, log_index, block_number, block_timestamp
        FROM (
          SELECT 'PhaseChanged' AS kind, tx_hash, log_index, block_number, block_timestamp
          FROM phase_changes
@@ -1219,7 +1337,7 @@ async function computeAndStoreConsistencyReport(params: {
     };
 
     const signupsRes = await pool.query<EventRow>(
-      `SELECT tx_hash, log_index, block_number::text AS block_number, block_timestamp
+      `SELECT tx_hash, log_index, block_number, block_timestamp
        FROM signup_records
        WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
        ORDER BY block_number ASC, log_index ASC
@@ -1228,7 +1346,7 @@ async function computeAndStoreConsistencyReport(params: {
     );
 
     const ballotsRes = await pool.query<EventRow>(
-      `SELECT tx_hash, log_index, block_number::text AS block_number, block_timestamp
+      `SELECT tx_hash, log_index, block_number, block_timestamp
        FROM ballot_records
        WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
        ORDER BY block_number ASC, log_index ASC
@@ -1532,6 +1650,7 @@ async function main() {
     electionIdsHint: diskRefresh.electionIdsTouched,
   });
   await refreshConsistencyForAllElections({ pool, chainId, contractAddress });
+  await resolveRecoveredRelayerIncidents({ pool, chainId, contractAddress });
   await materializePendingIndexerResetIncidents({ pool, chainId, contractAddress });
 
   const iface = new ethers.Interface(BU_PVP_1_ELECTION_REGISTRY_ABI);
@@ -1836,6 +1955,7 @@ async function main() {
         electionIds: Array.from(touchedElectionIds.values()).sort((a, b) => Number(a) - Number(b)),
       });
 
+      await resolveRecoveredRelayerIncidents({ pool, chainId, contractAddress });
       await materializePendingIndexerResetIncidents({ pool, chainId, contractAddress });
     }
   }

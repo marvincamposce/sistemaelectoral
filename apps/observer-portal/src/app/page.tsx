@@ -131,6 +131,7 @@ type IncidentsResponse = {
 
 type ResultsResponse = {
   ok: boolean;
+  candidates?: CandidateCatalogItem[];
   results: Array<{
     id: string;
     tallyJobId: string;
@@ -140,9 +141,50 @@ type ResultsResponse = {
     publicationStatus: string;
     proofState: string;
     resultMode: string;
+    honestyNote?: string;
+    summaryItems?: Array<{
+      candidateId: string | null;
+      candidateCode: string | null;
+      displayName: string;
+      partyName: string | null;
+      votes: number;
+      rank?: number | null;
+      status?: string | null;
+      unresolvedLabel?: string | null;
+    }>;
+    hasUnresolvedCandidateLabels?: boolean;
+    unresolvedCandidateLabels?: string[];
     createdAt: string;
     publishedAt: string | null;
   }>;
+};
+
+type CandidateCatalogItem = {
+  id: string;
+  candidateCode: string;
+  displayName: string;
+  shortName: string;
+  partyName: string;
+  ballotOrder: number;
+  status: string;
+  colorHex: string | null;
+};
+
+type CandidatesResponse = {
+  ok: boolean;
+  candidates: CandidateCatalogItem[];
+};
+
+type ManifestResponse = {
+  ok: boolean;
+  source?: string;
+  manifest?: {
+    manifestHash: string;
+    manifestJson?: any;
+    generatedAt?: string | null;
+    updatedAt?: string | null;
+    schemaVersion?: string;
+  };
 };
 
 type AuditWindowResponse = {
@@ -321,6 +363,8 @@ export default async function Page() {
         phaseChangesRes,
         actsRes,
         anchorsRes,
+        candidatesRes,
+        manifestRes,
         signupsSummaryRes,
         ballotsSummaryRes,
         ballotsRes,
@@ -339,6 +383,15 @@ export default async function Page() {
           `${apiBase}/v1/elections/${id}/anchors`,
           { ok: true, anchors: [] },
         ),
+        safeFetchJson<CandidatesResponse>(`${apiBase}/v1/elections/${id}/candidates`, {
+          ok: true,
+          candidates: [],
+        }),
+        safeFetchJson<ManifestResponse>(`${apiBase}/v1/elections/${id}/manifest`, {
+          ok: true,
+          manifest: undefined,
+          source: "unknown",
+        }),
         safeFetchJson<SignupsSummaryResponse>(
           `${apiBase}/v1/elections/${id}/signups/summary`,
           { ok: true, summary: { total: 0, uniqueNullifiers: 0 } },
@@ -379,6 +432,9 @@ export default async function Page() {
         phaseChanges: phaseChangesRes.phaseChanges,
         acts: actsRes.acts,
         anchors: anchorsRes.anchors,
+        candidates: candidatesRes.candidates,
+        manifest: manifestRes.manifest ?? null,
+        manifestSource: manifestRes.source ?? null,
         signupsSummary: signupsSummaryRes.summary,
         ballotsSummary: ballotsSummaryRes.summary,
         ballots: ballotsRes.ballots,
@@ -480,6 +536,17 @@ export default async function Page() {
                 : warningCount > 0
                   ? "WARNING"
                   : "OK";
+
+              const candidatesCatalog = (e.candidates ?? [])
+                .slice()
+                .sort((a, b) => a.ballotOrder - b.ballotOrder);
+              const activeCandidatesCount = candidatesCatalog.filter(
+                (candidate) => String(candidate.status).toUpperCase() === "ACTIVE",
+              ).length;
+              const latestResult = e.results?.[0] ?? null;
+              const latestSummaryItems = (latestResult?.summaryItems ?? [])
+                .slice()
+                .sort((a, b) => (b.votes ?? 0) - (a.votes ?? 0));
 
               const timeline = [
                 {
@@ -634,9 +701,79 @@ export default async function Page() {
                     )}
                   </div>
 
+                  {/* ─── Candidate Catalog ─── */}
+                  <section style={{ marginBottom: "2rem" }}>
+                    <h3 className="section-title">Catálogo de candidaturas</h3>
+                    <div className="card" style={{ padding: "1rem 1.25rem" }}>
+                      <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
+                        <div style={{ fontSize: "0.75rem", color: "#475569" }}>
+                          {candidatesCatalog.length} candidatura{candidatesCatalog.length !== 1 ? "s" : ""} · {activeCandidatesCount} activa{activeCandidatesCount !== 1 ? "s" : ""}
+                        </div>
+                        <span className="badge badge-neutral">
+                          Manifiesto: {e.manifestSource ?? "unknown"}
+                        </span>
+                      </div>
+
+                      {e.manifest?.manifestHash && (
+                        <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginBottom: "0.75rem" }}>
+                          Hash manifiesto vigente: <span className="hash-display" title={e.manifest.manifestHash}>{fullHash(e.manifest.manifestHash)}</span>
+                        </div>
+                      )}
+
+                      {candidatesCatalog.length === 0 ? (
+                        <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>
+                          No hay candidaturas registradas en el catálogo de esta elección.
+                        </p>
+                      ) : (
+                        <div style={{ display: "grid", gap: "0.5rem" }}>
+                          {candidatesCatalog.map((candidate) => (
+                            <div
+                              key={candidate.id}
+                              style={{
+                                border: "1px solid #e2e8f0",
+                                borderRadius: "10px",
+                                padding: "0.625rem 0.75rem",
+                                display: "grid",
+                                gridTemplateColumns: "auto 1fr auto",
+                                gap: "0.75rem",
+                                alignItems: "center",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                <span
+                                  style={{
+                                    width: "10px",
+                                    height: "10px",
+                                    borderRadius: "999px",
+                                    background: candidate.colorHex ?? "#94a3b8",
+                                    display: "inline-block",
+                                  }}
+                                />
+                                <span style={{ fontSize: "0.75rem", color: "#94a3b8", minWidth: "2rem" }}>
+                                  #{candidate.ballotOrder}
+                                </span>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a" }}>
+                                  {candidate.displayName}
+                                </div>
+                                <div style={{ fontSize: "0.6875rem", color: "#64748b" }}>
+                                  {candidate.partyName || "Sin partido"} · {candidate.candidateCode}
+                                </div>
+                              </div>
+                              <span className={`badge ${String(candidate.status).toUpperCase() === "ACTIVE" ? "badge-valid" : "badge-neutral"}`}>
+                                {candidate.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
                   {/* ─── Results (if available) ─── */}
                   {e.results && e.results.length > 0 && (() => {
-                    const r = e.results[0]!;
+                    const r = latestResult!;
                     return (
                       <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "2rem", borderLeft: "3px solid #6366f1" }}>
                         <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
@@ -658,7 +795,56 @@ export default async function Page() {
                             <span style={{ color: "#94a3b8" }}>Payload Hash:</span>{" "}
                             <span className="hash-display" title={r.payloadHash} style={{ maxWidth: "100%" }}>{fullHash(r.payloadHash)}</span>
                           </div>
+                          {r.honestyNote && (
+                            <div style={{ gridColumn: "1 / -1", color: "#475569" }}>
+                              <span style={{ color: "#94a3b8" }}>Estado:</span> {r.honestyNote}
+                            </div>
+                          )}
                         </div>
+
+                        {latestSummaryItems.length > 0 && (
+                          <div style={{ marginTop: "1rem", borderTop: "1px solid #e2e8f0", paddingTop: "0.75rem" }}>
+                            <h4 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#334155", marginBottom: "0.5rem" }}>
+                              Resumen por candidatura
+                            </h4>
+                            <div style={{ display: "grid", gap: "0.5rem" }}>
+                              {latestSummaryItems.map((item) => (
+                                <div
+                                  key={`${r.id}:${item.candidateId ?? item.candidateCode ?? item.displayName}`}
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "1fr auto",
+                                    gap: "0.5rem",
+                                    alignItems: "center",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  <div style={{ color: "#0f172a", fontWeight: 500 }}>
+                                    {item.displayName}
+                                    {item.partyName ? ` · ${item.partyName}` : ""}
+                                  </div>
+                                  <div style={{ color: "#334155", fontWeight: 700 }}>{item.votes}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {r.hasUnresolvedCandidateLabels && (
+                          <div
+                            style={{
+                              marginTop: "0.875rem",
+                              padding: "0.625rem 0.75rem",
+                              borderRadius: "8px",
+                              border: "1px solid #fcd34d",
+                              background: "#fffbeb",
+                              fontSize: "0.75rem",
+                              color: "#92400e",
+                            }}
+                          >
+                            Se detectaron etiquetas de resultado no resueltas contra el catálogo oficial: {(r.unresolvedCandidateLabels ?? []).join(", ")}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

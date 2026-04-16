@@ -1,0 +1,12 @@
+{
+  "permitVersion": "1",
+  "protocolVersion": "BU-PVP-1",
+  "chainId": "31337",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "electionId": "0",
+  "registryNullifier": "0x166e3fa8e5885ce976f8675c622731f1060389ec990d4617db1820e42681b803",
+  "credentialId": "0x95b7eb6a1546006a2593bb6a233b4b8407cfe869db34e396c2b83271df4d3e6e",
+  "issuedAt": "2026-04-16T00:38:52.386Z",
+  "issuerAddress": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+  "permitSig": "0xda5e20b9713f395294471e06063c6e06add62a80ae5c88c30075c94636a41e3f3e0f43f2d3b26f410448020a4a8066c5ef5117b3194389583d88a2eb83921f431b"
+}
