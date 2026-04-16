@@ -1,0 +1,57 @@
+{
+  "manifestVersion": "1.0.0",
+  "protocolVersion": "BU-PVP-1",
+  "electionId": "0",
+  "generatedAt": "2025-01-01T00:00:00.000Z",
+  "authority": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+  "registryAuthority": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+  "coordinatorPubKey": "0x2222222222222222222222222222222222222222222222222222222222222222",
+  "catalogSource": "SEED_EXPERIMENTAL",
+  "candidates": [
+    {
+      "id": "presidencia-2025-lucia-ferrer",
+      "candidateCode": "LUCIA_FERRER",
+      "displayName": "Lucia Ferrer",
+      "shortName": "L. Ferrer",
+      "partyName": "Movimiento Horizonte",
+      "ballotOrder": 1,
+      "status": "ACTIVE",
+      "colorHex": "#1d4ed8",
+      "metadata": {
+        "office": "PRESIDENCIA",
+        "region": "NACIONAL",
+        "coalition": "Horizonte Ciudadano"
+      }
+    },
+    {
+      "id": "presidencia-2025-mateo-ibarra",
+      "candidateCode": "MATEO_IBARRA",
+      "displayName": "Mateo Ibarra",
+      "shortName": "M. Ibarra",
+      "partyName": "Alianza Popular Cívica",
+      "ballotOrder": 2,
+      "status": "ACTIVE",
+      "colorHex": "#b91c1c",
+      "metadata": {
+        "office": "PRESIDENCIA",
+        "region": "NACIONAL",
+        "coalition": "Frente Cívico"
+      }
+    },
+    {
+      "id": "presidencia-2025-voto-en-blanco",
+      "candidateCode": "VOTO_EN_BLANCO",
+      "displayName": "Voto en Blanco",
+      "shortName": "Blanco",
+      "partyName": "Sin partido",
+      "ballotOrder": 3,
+      "status": "ACTIVE",
+      "colorHex": "#475569",
+      "metadata": {
+        "office": "PRESIDENCIA",
+        "region": "NACIONAL",
+        "classification": "ABSTENCION_EXPLICITA"
+      }
+    }
+  ]
+}

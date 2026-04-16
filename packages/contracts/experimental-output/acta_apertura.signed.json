@@ -4,14 +4,14 @@
     "protocolVersion": "BU-PVP-1",
     "electionId": "0",
     "kind": "ACTA_APERTURA",
-    "generatedAt": "2026-04-15T03:18:50.518Z",
+    "generatedAt": "2025-01-01T00:00:00.000Z",
     "chainId": "31337",
     "blockRange": {
       "fromBlock": 0,
-      "toBlock": 23
+      "toBlock": 2
     },
     "commitments": {
-      "manifestHash": "0x1111111111111111111111111111111111111111111111111111111111111111"
+      "manifestHash": "0x40703fb7499a150f395e45fa7445adbf24bd76142b926d10f4eeccc61befd921"
     },
     "counts": {
       "signups": 0,
@@ -22,7 +22,7 @@
   "signature": {
     "algorithm": "ed25519-sha256-jcs",
     "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
-    "signatureHex": "0x30ec81a933c6a518ec7048b377394799de3c88511190d580e41dcbbc772534a85202d8dad47e6d8f3db3903e5604b14d32e2736df6bb1236e90f0698ca019505",
-    "snapshotHashHex": "0xe9ad5cfcef502df4dfc3b91f1563387bce70174042616d6c0417eef42ba14afb"
+    "signatureHex": "0x5d198112bfe50acea91f2919e9ada92bd17ae7899197237edc2a205c20c0d86039a5524db74c0e09203fee57577a74e003f766c0f8b1bb7f0c860e7162944d0d",
+    "snapshotHashHex": "0x1f5a99718011cfbc530878685fcd1e68cd4c0e3bd5071b817c9b201d05bcf7e1"
   }
 }

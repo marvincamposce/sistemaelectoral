@@ -1,8 +1,8 @@
 import hre from "hardhat";
 import crypto from "node:crypto";
-const { ethers } = hre;
 
 async function main() {
+  const { ethers } = await hre.network.connect();
   const electionId = process.env.ELECTION_ID || "0";
   
   // Constantes del entorno dummy
