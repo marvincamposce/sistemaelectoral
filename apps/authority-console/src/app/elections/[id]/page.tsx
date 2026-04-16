@@ -1210,28 +1210,40 @@ export default async function ElectionPage({
           )}
         </section>
 
-        <section className="card p-4 space-y-3">
-          <div className="section-title">Control de fases (BU‑PVP‑1)</div>
+        <section className="card p-6 space-y-4 border-indigo-100 shadow-md">
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+            <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Orquestación de Fases (Smart Contract)</h3>
+          </div>
           {availableEvents.length === 0 ? (
-            <div className="text-sm text-slate-600">(Sin transiciones disponibles desde {currentPhaseLabel})</div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 text-center">
+              <p className="text-sm font-medium text-slate-600">Ningún cambio de estado disponible desde <span className="font-bold text-indigo-700">{currentPhaseLabel}</span>.</p>
+            </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-3">
               {availableEvents.map((event) => (
-                <form key={event} action={transitionPhaseAction}>
+                <form key={event} action={transitionPhaseAction} className="w-full">
                   <input type="hidden" name="electionId" value={electionIdStr} />
                   <input type="hidden" name="event" value={event} />
                   <button
                     type="submit"
-                    className="rounded-md bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 text-xs font-semibold"
+                    className="w-full flex items-center justify-between rounded-xl bg-slate-900 text-white hover:bg-black transition-all px-5 py-4 text-sm font-extrabold tracking-wide shadow-md hover:shadow-lg focus:ring-4 focus:ring-indigo-100 group"
                   >
-                    {eventLabel(event)}
+                    <span className="flex items-center gap-3">
+                      <svg className="w-5 h-5 text-indigo-400 group-hover:animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                      EJECUTAR: {eventLabel(event)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">ON-CHAIN TX</span>
                   </button>
                 </form>
               ))}
             </div>
           )}
-          <div className="text-xs text-slate-600">
-            La máquina de estados se valida en consola y en el contrato (reverts en transiciones inválidas).
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex gap-3">
+            <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <p className="text-xs text-amber-800 font-medium leading-relaxed">
+              <strong>Atención:</strong> La máquina de estados oficial de BlockUrna (BU-PVP-1) se encuentra inyectada y auditada a nivel Smart Contract. Cualquier transición ilícita revertirá la transacción perdiendo los gas fees.
+            </p>
           </div>
         </section>
 
@@ -1350,32 +1362,45 @@ export default async function ElectionPage({
           ) : null}
         </section>
 
-        <section className="card p-4 space-y-3">
-          <div className="section-title">Bitácora administrativa (Postgres)</div>
-          <div className="text-xs text-slate-600">
-            Descargar JSON: <a className="underline" href={`/api/elections/${encodeURIComponent(electionIdStr)}/admin-log`}>admin-log</a>
-            {" · "}
-            <a className="underline" href={`/api/elections/${encodeURIComponent(electionIdStr)}/manifest`}>manifiesto</a>
+        <section className="card p-6 space-y-3 bg-slate-950 border-slate-900 shadow-inner">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              <h3 className="text-sm font-bold text-slate-100 font-mono tracking-widest">/var/log/aea/admin.log</h3>
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono flex gap-3">
+              <a className="hover:text-amber-400 transition-colors" href={`/api/elections/${encodeURIComponent(electionIdStr)}/admin-log`}>[EXPORT JSON]</a>
+              <a className="hover:text-amber-400 transition-colors" href={`/api/elections/${encodeURIComponent(electionIdStr)}/manifest`}>[MANIFEST]</a>
+            </div>
           </div>
           {adminLog.length === 0 ? (
-            <div className="text-sm text-slate-600">(Sin entradas aún)</div>
+            <div className="text-xs text-slate-600 font-mono py-4">{'>> EOF - No hay entradas aún'}</div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1 font-mono text-[11px] h-64 overflow-y-auto pr-2 custom-scrollbar">
               {adminLog.map((e) => (
-                <div key={e.entryId} className="rounded-md border border-slate-200 p-3">
+                <div key={e.entryId} className="border-l-2 border-slate-800 pl-3 py-1 hover:bg-slate-900 transition-colors group">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="text-xs text-slate-500">{formatTimestamp(e.createdAt)}</div>
+                    <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <div className="text-xs font-semibold text-slate-900">{e.code}</div>
-                        {e.severity ? <span className={severityBadgeClass(e.severity)}>{e.severity}</span> : null}
+                        <span className="text-slate-500">[{formatTimestamp(e.createdAt)}]</span>
+                        {e.severity === 'CRITICAL' ? (
+                          <span className="text-rose-500 font-bold">[{e.severity}]</span>
+                        ) : e.severity === 'WARNING' ? (
+                          <span className="text-amber-400 font-bold">[{e.severity}]</span>
+                        ) : (
+                          <span className="text-sky-400 font-bold">[{e.severity || 'INFO'}]</span>
+                        )}
+                        <span className="text-indigo-300 font-semibold">{e.code}</span>
                       </div>
-                      <div className="text-xs text-slate-700">{e.message}</div>
+                      <div className="text-slate-300 group-hover:text-white transition-colors">{'>'} {e.message}</div>
                       {e.relatedTxHash ? (
-                        <div className="hash-display" title={e.relatedTxHash}>txHash: {shortHash(e.relatedTxHash)}</div>
+                        <div className="text-slate-500 flex items-center gap-1 mt-1">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                          TX: <span className="text-slate-400">{e.relatedTxHash}</span>
+                        </div>
                       ) : null}
                     </div>
-                    <div className="text-xs text-slate-500">#{e.entryId}</div>
+                    <div className="text-[9px] text-slate-700">IDX:{e.entryId}</div>
                   </div>
                 </div>
               ))}

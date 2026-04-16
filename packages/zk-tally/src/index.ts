@@ -24,8 +24,11 @@ export const NUM_CANDIDATES = 4;
 export const INVALID_SELECTION = NUM_CANDIDATES; // value 4 = invalid/unused
 export const MERKLE_TREE_DEPTH = 6;
 
-export const CIRCUIT_ID = "TallyVerifier_4x64";
+export const TALLY_CIRCUIT_ID = "TallyVerifier_4x64";
+export const DECRYPTION_CIRCUIT_ID = "DecryptionVerifier_4x64";
+export const CIRCUIT_ID = TALLY_CIRCUIT_ID;
 export const PROOF_SYSTEM = "GROTH16_BN128";
+export type ZkCircuitKind = "TALLY" | "DECRYPTION";
 
 export type ZkBackend = "rust" | "snarkjs";
 
@@ -43,15 +46,51 @@ function readBackendFromEnv(): ZkBackend {
 export const ZK_BACKEND: ZkBackend = readBackendFromEnv();
 
 // Paths to build artifacts and keys
-export const PATHS = {
+type CircuitPaths = {
+  r1cs: string;
+  wasm: string;
+  zkey: string;
+  rustProvingKey: string;
+  rustVerifyingKey: string;
+  vkey: string;
+};
+
+const RUST_BINARY_PATH = resolve(PKG_ROOT, "rust-backend/target/release/zk_tally_rs");
+
+export const PATHS: CircuitPaths = {
   r1cs: resolve(PKG_ROOT, "build/tally_verifier.r1cs"),
   wasm: resolve(PKG_ROOT, "build/tally_verifier_js/tally_verifier.wasm"),
   zkey: resolve(PKG_ROOT, "keys/tally_verifier_final.zkey"),
-  rustBinary: resolve(PKG_ROOT, "rust-backend/target/release/zk_tally_rs"),
   rustProvingKey: resolve(PKG_ROOT, "keys/tally_verifier_rust.pk.bin"),
   rustVerifyingKey: resolve(PKG_ROOT, "keys/tally_verifier_rust.vk.bin"),
   vkey: resolve(PKG_ROOT, "keys/verification_key.json"),
 };
+
+export const DECRYPTION_PATHS: CircuitPaths = {
+  r1cs: resolve(PKG_ROOT, "build/decryption_verifier.r1cs"),
+  wasm: resolve(PKG_ROOT, "build/decryption_verifier_js/decryption_verifier.wasm"),
+  zkey: resolve(PKG_ROOT, "keys/decryption_verifier_final.zkey"),
+  rustProvingKey: resolve(PKG_ROOT, "keys/decryption_verifier_rust.pk.bin"),
+  rustVerifyingKey: resolve(PKG_ROOT, "keys/decryption_verifier_rust.vk.bin"),
+  vkey: resolve(PKG_ROOT, "keys/verification_key_decryption.json"),
+};
+
+function getCircuitConfig(circuit: ZkCircuitKind): {
+  circuitId: string;
+  paths: CircuitPaths;
+} {
+  if (circuit === "DECRYPTION") {
+    return {
+      circuitId: DECRYPTION_CIRCUIT_ID,
+      paths: DECRYPTION_PATHS,
+    };
+  }
+
+  return {
+    circuitId: TALLY_CIRCUIT_ID,
+    paths: PATHS,
+  };
+}
 
 export interface TallyWitnessInput {
   /** Vote count per candidate (length = NUM_CANDIDATES) */
@@ -77,6 +116,23 @@ export interface TallyMerkleBundleInput {
   merklePathIndices: string[][];
 }
 
+export interface DecryptionWitnessInput {
+  /** Vote count per candidate (length = NUM_CANDIDATES) */
+  voteCounts: string[];
+  /** Total number of valid ballots */
+  totalValid: string;
+  /** Active slot selector (length = MAX_BALLOTS): 1=real ballot, 0=padding */
+  activeSlots: string[];
+  /** Decrypted selection index per slot (length = MAX_BALLOTS), values 0..NUM_CANDIDATES */
+  selections: string[];
+  /** selectionCiphertext lane value per slot */
+  selectionCiphertexts: string[];
+  /** Nonce field per slot */
+  selectionNonces: string[];
+  /** Shared-key field per slot */
+  selectionSharedKeys: string[];
+}
+
 export interface ZkTallyProofResult {
   proof: object;
   publicSignals: string[];
@@ -90,6 +146,20 @@ export interface ZkTallyVerifyResult {
   valid: boolean;
   proofSystem: string;
   circuitId: string;
+}
+
+export interface DecryptionWitnessEntry {
+  selectionCiphertext: string;
+  selectionNonce: string;
+  selectionSharedKey: string;
+  decryptedSelection: string;
+}
+
+export interface BuildDecryptionWitnessParams {
+  summary: Record<string, number>;
+  candidateOrder: string[];
+  /** Per-real-ballot witness entries in deterministic ballot order */
+  entries: DecryptionWitnessEntry[];
 }
 
 /**
@@ -210,25 +280,90 @@ export function buildWitnessFromTranscript(
 }
 
 /**
+ * Build witness input for decryption verification circuit (Phase 9D).
+ */
+export function buildDecryptionWitness(params: BuildDecryptionWitnessParams): DecryptionWitnessInput {
+  const { summary, candidateOrder, entries } = params;
+
+  if (candidateOrder.length !== NUM_CANDIDATES) {
+    throw new Error(
+      `candidateOrder must have exactly ${NUM_CANDIDATES} entries, got ${candidateOrder.length}`,
+    );
+  }
+
+  if (entries.length > MAX_BALLOTS) {
+    throw new Error(
+      `decryption witness supports max ${MAX_BALLOTS} entries, got ${entries.length}`,
+    );
+  }
+
+  const voteCounts = candidateOrder.map((name) => String(summary[name] ?? 0));
+
+  const activeSlots: string[] = new Array(MAX_BALLOTS).fill("0");
+  const selections: string[] = new Array(MAX_BALLOTS).fill(String(INVALID_SELECTION));
+  const selectionCiphertexts: string[] = new Array(MAX_BALLOTS).fill("0");
+  const selectionNonces: string[] = new Array(MAX_BALLOTS).fill("0");
+  const selectionSharedKeys: string[] = new Array(MAX_BALLOTS).fill("0");
+
+  let totalValid = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!;
+    const decryptedSelection = Number(entry.decryptedSelection);
+    if (!Number.isInteger(decryptedSelection) || decryptedSelection < 0 || decryptedSelection > INVALID_SELECTION) {
+      throw new Error(`Invalid decryptedSelection at index ${i}: ${entry.decryptedSelection}`);
+    }
+
+    activeSlots[i] = "1";
+    selections[i] = String(decryptedSelection);
+    selectionCiphertexts[i] = String(entry.selectionCiphertext);
+    selectionNonces[i] = String(entry.selectionNonce);
+    selectionSharedKeys[i] = String(entry.selectionSharedKey);
+
+    if (decryptedSelection < NUM_CANDIDATES) {
+      totalValid += 1;
+    }
+  }
+
+  return {
+    voteCounts,
+    totalValid: String(totalValid),
+    activeSlots,
+    selections,
+    selectionCiphertexts,
+    selectionNonces,
+    selectionSharedKeys,
+  };
+}
+
+/**
  * Check that all required build artifacts exist.
  */
 export function checkArtifacts(): { ok: boolean; missing: string[] } {
+  return checkArtifactsForCircuit("TALLY");
+}
+
+export function checkArtifactsForCircuit(circuit: ZkCircuitKind): {
+  ok: boolean;
+  missing: string[];
+} {
+  const { paths } = getCircuitConfig(circuit);
   const missing: string[] = [];
 
   const requiredPaths: Array<[string, string]> =
     ZK_BACKEND === "rust"
       ? [
-          ["r1cs", PATHS.r1cs],
-          ["wasm", PATHS.wasm],
-          ["rustBinary", PATHS.rustBinary],
-          ["rustProvingKey", PATHS.rustProvingKey],
-          ["rustVerifyingKey", PATHS.rustVerifyingKey],
-          ["vkey", PATHS.vkey],
+          ["r1cs", paths.r1cs],
+          ["wasm", paths.wasm],
+          ["rustBinary", RUST_BINARY_PATH],
+          ["rustProvingKey", paths.rustProvingKey],
+          ["rustVerifyingKey", paths.rustVerifyingKey],
+          ["vkey", paths.vkey],
         ]
       : [
-          ["wasm", PATHS.wasm],
-          ["zkey", PATHS.zkey],
-          ["vkey", PATHS.vkey],
+          ["wasm", paths.wasm],
+          ["zkey", paths.zkey],
+          ["vkey", paths.vkey],
         ];
 
   for (const [name, path] of requiredPaths) {
@@ -246,25 +381,27 @@ export function checkArtifacts(): { ok: boolean; missing: string[] } {
 export async function proveTally(
   input: TallyWitnessInput,
 ): Promise<ZkTallyProofResult> {
-  const artifacts = checkArtifacts();
+  const artifacts = checkArtifactsForCircuit("TALLY");
   if (!artifacts.ok) {
     throw new Error(
       `Missing ZK artifacts: ${artifacts.missing.join(", ")}. Run setup.sh first.`,
     );
   }
 
+  const { paths, circuitId } = getCircuitConfig("TALLY");
+
   const proofOutput =
     ZK_BACKEND === "rust"
-      ? proveTallyWithRust(input)
+      ? proveWithRust(input as unknown as Record<string, unknown>, paths)
       : await snarkjs.groth16.fullProve(
           input as unknown as Record<string, unknown>,
-          PATHS.wasm,
-          PATHS.zkey,
+          paths.wasm,
+          paths.zkey,
         );
 
   // Compute vkey hash for integrity
   const { createHash } = await import("node:crypto");
-  const vkeyContent = readFileSync(PATHS.vkey);
+  const vkeyContent = readFileSync(paths.vkey);
   const verificationKeyHash = createHash("sha256")
     .update(vkeyContent)
     .digest("hex");
@@ -273,7 +410,43 @@ export async function proveTally(
     proof: proofOutput.proof,
     publicSignals: proofOutput.publicSignals,
     proofSystem: PROOF_SYSTEM,
-    circuitId: CIRCUIT_ID,
+    circuitId,
+    verificationKeyHash,
+  };
+}
+
+export async function proveDecryption(
+  input: DecryptionWitnessInput,
+): Promise<ZkTallyProofResult> {
+  const artifacts = checkArtifactsForCircuit("DECRYPTION");
+  if (!artifacts.ok) {
+    throw new Error(
+      `Missing ZK artifacts: ${artifacts.missing.join(", ")}. Run setup.sh first.`,
+    );
+  }
+
+  const { paths, circuitId } = getCircuitConfig("DECRYPTION");
+
+  const proofOutput =
+    ZK_BACKEND === "rust"
+      ? proveWithRust(input as unknown as Record<string, unknown>, paths)
+      : await snarkjs.groth16.fullProve(
+          input as unknown as Record<string, unknown>,
+          paths.wasm,
+          paths.zkey,
+        );
+
+  const { createHash } = await import("node:crypto");
+  const vkeyContent = readFileSync(paths.vkey);
+  const verificationKeyHash = createHash("sha256")
+    .update(vkeyContent)
+    .digest("hex");
+
+  return {
+    proof: proofOutput.proof,
+    publicSignals: proofOutput.publicSignals,
+    proofSystem: PROOF_SYSTEM,
+    circuitId,
     verificationKeyHash,
   };
 }
@@ -285,40 +458,58 @@ export async function verifyTallyProof(
   proof: object,
   publicSignals: string[],
 ): Promise<ZkTallyVerifyResult> {
+  return verifyProofForCircuit("TALLY", proof, publicSignals);
+}
+
+export async function verifyDecryptionProof(
+  proof: object,
+  publicSignals: string[],
+): Promise<ZkTallyVerifyResult> {
+  return verifyProofForCircuit("DECRYPTION", proof, publicSignals);
+}
+
+async function verifyProofForCircuit(
+  circuit: ZkCircuitKind,
+  proof: object,
+  publicSignals: string[],
+): Promise<ZkTallyVerifyResult> {
+  const { paths, circuitId } = getCircuitConfig(circuit);
   const valid =
     ZK_BACKEND === "rust"
-      ? verifyTallyWithRust(proof, publicSignals)
-      : await verifyTallyWithSnarkjs(proof, publicSignals);
+      ? verifyWithRust(paths, proof, publicSignals)
+      : await verifyWithSnarkjs(paths, proof, publicSignals);
 
   return {
     valid: Boolean(valid),
     proofSystem: PROOF_SYSTEM,
-    circuitId: CIRCUIT_ID,
+    circuitId,
   };
 }
 
-async function verifyTallyWithSnarkjs(
+async function verifyWithSnarkjs(
+  paths: CircuitPaths,
   proof: object,
   publicSignals: string[],
 ): Promise<boolean> {
-  const vkeyJson = JSON.parse(readFileSync(PATHS.vkey, "utf-8"));
+  const vkeyJson = JSON.parse(readFileSync(paths.vkey, "utf-8"));
   return snarkjs.groth16.verify(vkeyJson, publicSignals, proof);
 }
 
-function proveTallyWithRust(
-  input: TallyWitnessInput,
+function proveWithRust(
+  input: Record<string, unknown>,
+  paths: CircuitPaths,
 ): { proof: object; publicSignals: string[] } {
   const args = [
     "prove",
     "--wasm",
-    PATHS.wasm,
+    paths.wasm,
     "--r1cs",
-    PATHS.r1cs,
+    paths.r1cs,
     "--proving-key",
-    PATHS.rustProvingKey,
+    paths.rustProvingKey,
   ];
 
-  const result = spawnSync(PATHS.rustBinary, args, {
+  const result = spawnSync(RUST_BINARY_PATH, args, {
     input: JSON.stringify(input),
     encoding: "utf-8",
     maxBuffer: 16 * 1024 * 1024,
@@ -353,14 +544,14 @@ function proveTallyWithRust(
   };
 }
 
-function verifyTallyWithRust(proof: object, publicSignals: string[]): boolean {
+function verifyWithRust(paths: CircuitPaths, proof: object, publicSignals: string[]): boolean {
   const args = [
     "verify",
     "--verifying-key",
-    PATHS.rustVerifyingKey,
+    paths.rustVerifyingKey,
   ];
 
-  const result = spawnSync(PATHS.rustBinary, args, {
+  const result = spawnSync(RUST_BINARY_PATH, args, {
     input: JSON.stringify({ proof, public_signals: publicSignals }),
     encoding: "utf-8",
     maxBuffer: 8 * 1024 * 1024,
@@ -412,5 +603,32 @@ export function parsePublicSignals(
     voteCounts,
     totalValid: Number(publicSignals[NUM_CANDIDATES]),
     merkleRoot: String(publicSignals[merkleRootIndex] ?? ""),
+  };
+}
+
+/**
+ * Parse decryption verifier public signals.
+ * Public signals order matches decryption circuit declaration:
+ *   voteCounts[0..3], totalValid, decryptionCommitment
+ */
+export function parseDecryptionPublicSignals(
+  publicSignals: string[],
+  candidateOrder: string[],
+): {
+  voteCounts: Record<string, number>;
+  totalValid: number;
+  decryptionCommitment: string;
+} {
+  const voteCounts: Record<string, number> = {};
+  for (let i = 0; i < NUM_CANDIDATES; i++) {
+    const name = candidateOrder[i] ?? `candidate_${i}`;
+    voteCounts[name] = Number(publicSignals[i]);
+  }
+
+  const commitmentIndex = NUM_CANDIDATES + 1;
+  return {
+    voteCounts,
+    totalValid: Number(publicSignals[NUM_CANDIDATES]),
+    decryptionCommitment: String(publicSignals[commitmentIndex] ?? ""),
   };
 }

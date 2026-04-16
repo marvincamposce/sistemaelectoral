@@ -2,11 +2,16 @@
 
 import { ethers } from "ethers";
 import { getEnv } from "@/lib/env";
-import { BU_PVP_1_ELECTION_REGISTRY_ABI } from "@blockurna/sdk";
+import {
+  BU_PVP_1_ELECTION_REGISTRY_ABI,
+  BU_PVP_1_TALLY_VERIFIER_ABI,
+} from "@blockurna/sdk";
 import {
   buildPoseidonMerkleBundleFromBallotHashes,
+  decodeBallotCiphertextEnvelope,
   decryptBallotPayload,
   deriveBallotMerkleRoot,
+  deriveZkFriendlySelectionWitnessData,
   parseThresholdSharePayload,
   reconstructCoordinatorKeyFromShares,
   signActaECDSA,
@@ -16,11 +21,16 @@ import {
 import { pool } from "@/lib/db";
 import crypto from "crypto";
 import {
+  buildDecryptionWitness,
   buildWitnessFromTranscript,
+  checkArtifactsForCircuit,
+  proveDecryption,
   proveTally,
+  verifyDecryptionProof,
   verifyTallyProof,
   checkArtifacts as checkZkArtifacts,
   CIRCUIT_ID as ZK_CIRCUIT_ID,
+  DECRYPTION_CIRCUIT_ID as ZK_DECRYPTION_CIRCUIT_ID,
   PROOF_SYSTEM as ZK_PROOF_SYSTEM,
   NUM_CANDIDATES as ZK_NUM_CANDIDATES,
 } from "@blockurna/zk-tally";
@@ -30,6 +40,17 @@ function getContract() {
   const provider = new ethers.JsonRpcProvider(env.RPC_URL);
   const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
   return new ethers.Contract(env.ELECTION_REGISTRY_ADDRESS, BU_PVP_1_ELECTION_REGISTRY_ABI, wallet);
+}
+
+function getTallyVerifierContract() {
+  const env = getEnv();
+  if (!env.TALLY_VERIFIER_ADDRESS) {
+    throw new Error("Missing TALLY_VERIFIER_ADDRESS in environment");
+  }
+
+  const provider = new ethers.JsonRpcProvider(env.RPC_URL);
+  const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
+  return new ethers.Contract(env.TALLY_VERIFIER_ADDRESS, BU_PVP_1_TALLY_VERIFIER_ABI, wallet);
 }
 
 function mapProofStateToResultMode(proofState: string): string {
@@ -746,7 +767,7 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
       ballotIndex: number;
       ballotHash: string;
       selection: string;
-      format: "X25519_XCHACHA20" | "LEGACY_RAW_HEX";
+      format: "X25519_XCHACHA20" | "BABYJUB_POSEIDON_V2" | "LEGACY_RAW_HEX";
     }> = [];
     const errors: Array<{ ballotIndex: number; error: string }> = [];
 
@@ -756,9 +777,19 @@ export async function computeRealTallyAction(electionId: string, ciphertexts: st
 
       try {
         let decrypted: unknown;
-        let format: "X25519_XCHACHA20" | "LEGACY_RAW_HEX" = "X25519_XCHACHA20";
+        let format: "X25519_XCHACHA20" | "BABYJUB_POSEIDON_V2" | "LEGACY_RAW_HEX" =
+          "X25519_XCHACHA20";
+        let envelopeVersion: string | null = null;
         try {
-          decrypted = decryptBallotPayload(ciphertext, keyResolution.keyHex);
+          envelopeVersion = decodeBallotCiphertextEnvelope(ciphertext).version;
+        } catch {
+          envelopeVersion = null;
+        }
+        try {
+          decrypted = await decryptBallotPayload(ciphertext, keyResolution.keyHex);
+          if (envelopeVersion === "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2") {
+            format = "BABYJUB_POSEIDON_V2";
+          }
         } catch {
           if (keyResolution.keySource === "LEGACY_ENV") {
             // Transitional compatibility while old ballots are drained from the system.
@@ -1318,6 +1349,7 @@ export async function generateZkProofAction(
   tallyJobId: string,
 ) {
   const jobId = crypto.randomUUID();
+  const decryptionJobId = crypto.randomUUID();
 
   try {
     const { chainId, contractAddress } = await resolveRuntimeContext();
@@ -1439,6 +1471,157 @@ export async function generateZkProofAction(
       [jobId],
     );
 
+    // Best-effort Phase 9D: generate decryption proof on top of V2 ciphertext witness lane.
+    let decryptionProofJob: {
+      jobId: string;
+      status: string;
+      circuitId: string;
+      verificationKeyHash: string | null;
+      error: string | null;
+    } | null = null;
+
+    try {
+      const decryptionArtifacts = checkArtifactsForCircuit("DECRYPTION");
+      if (decryptionArtifacts.ok) {
+        const ballotsRes = await pool.query<{
+          ballotIndex: number;
+          ciphertext: string;
+        }>(
+          `SELECT ballot_index::int AS "ballotIndex", ciphertext
+           FROM ballot_records
+           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+           ORDER BY ballot_index ASC, block_number ASC, log_index ASC`,
+          [chainId, contractAddress, electionId],
+        );
+
+        const keyResolution = await resolveCoordinatorPrivateKeyForTally({
+          chainId,
+          contractAddress,
+          electionId,
+        });
+
+        if (keyResolution.ok) {
+          const v2Ballots = ballotsRes.rows.filter((row) => {
+            try {
+              return decodeBallotCiphertextEnvelope(String(row.ciphertext)).version === "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2";
+            } catch {
+              return false;
+            }
+          });
+
+          if (v2Ballots.length > 0) {
+            await pool.query(
+              `INSERT INTO zk_proof_jobs (
+                 job_id, chain_id, contract_address, election_id, tally_job_id,
+                 proof_system, circuit_id, status,
+                 proving_started_at
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUILDING',NOW())`,
+              [
+                decryptionJobId,
+                chainId,
+                contractAddress,
+                electionId,
+                tallyJobId,
+                ZK_PROOF_SYSTEM,
+                ZK_DECRYPTION_CIRCUIT_ID,
+              ],
+            );
+
+            const decryptionEntries = [] as Array<{
+              selectionCiphertext: string;
+              selectionNonce: string;
+              selectionSharedKey: string;
+              decryptedSelection: string;
+            }>;
+
+            for (const ballot of v2Ballots) {
+              const entry = await deriveZkFriendlySelectionWitnessData(
+                String(ballot.ciphertext),
+                keyResolution.keyHex,
+              );
+              decryptionEntries.push(entry);
+            }
+
+            const decryptionWitness = buildDecryptionWitness({
+              summary: transcript.summary,
+              candidateOrder: candidateKeys,
+              entries: decryptionEntries,
+            });
+
+            const decryptionProof = await proveDecryption(decryptionWitness);
+            const decryptionVerify = await verifyDecryptionProof(
+              decryptionProof.proof,
+              decryptionProof.publicSignals,
+            );
+
+            if (!decryptionVerify.valid) {
+              throw new Error("Off-chain verification failed for decryption proof");
+            }
+
+            await pool.query(
+              `UPDATE zk_proof_jobs SET
+                 status='VERIFIED_OFFCHAIN',
+                 verified_offchain=true,
+                 public_inputs=$2,
+                 proof_json=$3,
+                 verification_key_hash=$4,
+                 proving_completed_at=NOW(),
+                 error_message=NULL
+               WHERE job_id=$1`,
+              [
+                decryptionJobId,
+                JSON.stringify({
+                  signals: decryptionProof.publicSignals,
+                  candidateOrder: candidateKeys,
+                  witnessBallotsCount: decryptionEntries.length,
+                }),
+                JSON.stringify(decryptionProof.proof),
+                decryptionProof.verificationKeyHash,
+              ],
+            );
+
+            decryptionProofJob = {
+              jobId: decryptionJobId,
+              status: "VERIFIED_OFFCHAIN",
+              circuitId: ZK_DECRYPTION_CIRCUIT_ID,
+              verificationKeyHash: decryptionProof.verificationKeyHash,
+              error: null,
+            };
+          }
+        }
+      }
+    } catch (decryptionErr: any) {
+      await pool.query(
+        `INSERT INTO zk_proof_jobs (
+           job_id, chain_id, contract_address, election_id, tally_job_id,
+           proof_system, circuit_id, status,
+           error_message, proving_started_at, proving_completed_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'FAILED',$8,NOW(),NOW())
+         ON CONFLICT (job_id) DO UPDATE SET
+           status='FAILED',
+           error_message=EXCLUDED.error_message,
+           proving_completed_at=NOW()`,
+        [
+          decryptionJobId,
+          chainId,
+          contractAddress,
+          electionId,
+          tallyJobId,
+          ZK_PROOF_SYSTEM,
+          ZK_DECRYPTION_CIRCUIT_ID,
+          String(decryptionErr?.message || decryptionErr).slice(0, 1000),
+        ],
+      );
+
+      decryptionProofJob = {
+        jobId: decryptionJobId,
+        status: "FAILED",
+        circuitId: ZK_DECRYPTION_CIRCUIT_ID,
+        verificationKeyHash: null,
+        error: String(decryptionErr?.message || decryptionErr),
+      };
+    }
+
     return {
       ok: true,
       jobId,
@@ -1450,6 +1633,7 @@ export async function generateZkProofAction(
       verifiedOffchain: true,
       verifiedOnchain: false,
       status: "VERIFIED_OFFCHAIN",
+      decryptionProofJob,
       honesty: {
         whatIsProved:
           "Vote counts are the correct sum of individual ballot selections and all processed ballot hashes are included in the Poseidon Merkle root",
@@ -1471,5 +1655,172 @@ export async function generateZkProofAction(
       // ignore secondary failure
     }
     return { ok: false, error: err.message || String(err), jobId };
+  }
+}
+
+function toBigIntValue(value: unknown, label: string): bigint {
+  try {
+    return BigInt(String(value));
+  } catch {
+    throw new Error(`Invalid bigint value in ${label}`);
+  }
+}
+
+export async function submitOnchainZkProofAction(
+  electionId: string,
+  options?: { jobId?: string },
+) {
+  try {
+    const { chainId, contractAddress } = await resolveRuntimeContext();
+    const verifierContract = getTallyVerifierContract();
+
+    const whereByJob = options?.jobId ? " AND job_id=$4" : "";
+    const circuitIdParam = options?.jobId ? 5 : 4;
+    const queryParams = options?.jobId
+      ? [chainId, contractAddress, electionId, options.jobId, ZK_CIRCUIT_ID]
+      : [chainId, contractAddress, electionId, ZK_CIRCUIT_ID];
+
+    const jobRes = await pool.query<{
+      jobId: string;
+      tallyJobId: string | null;
+      status: string;
+      circuitId: string;
+      proofJson: any;
+      publicInputs: any;
+      onchainVerificationTx: string | null;
+    }>(
+      `SELECT
+         job_id AS "jobId",
+         tally_job_id AS "tallyJobId",
+         status,
+         circuit_id AS "circuitId",
+         proof_json AS "proofJson",
+         public_inputs AS "publicInputs",
+         onchain_verification_tx AS "onchainVerificationTx"
+       FROM zk_proof_jobs
+       WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3${whereByJob} AND circuit_id=$${circuitIdParam}
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      queryParams,
+    );
+
+    const job = jobRes.rows[0] ?? null;
+    if (!job) {
+      return {
+        ok: false,
+        error: "No hay ZK proof job de tally verificado para esta eleccion",
+      };
+    }
+
+    if (job.circuitId !== ZK_CIRCUIT_ID) {
+      return {
+        ok: false,
+        error: `El job ${job.jobId} no corresponde al circuito on-chain de tally (${job.circuitId})`,
+      };
+    }
+
+    if (job.status === "VERIFIED_ONCHAIN" && job.onchainVerificationTx) {
+      return {
+        ok: true,
+        jobId: job.jobId,
+        status: "VERIFIED_ONCHAIN",
+        txHash: job.onchainVerificationTx,
+        alreadyVerified: true,
+      };
+    }
+
+    if (job.status !== "VERIFIED_OFFCHAIN" && job.status !== "PROVED") {
+      return {
+        ok: false,
+        error: `El job ${job.jobId} no esta listo para verificacion on-chain (status=${job.status})`,
+      };
+    }
+
+    const proof = job.proofJson as any;
+    const signals = Array.isArray(job.publicInputs?.signals)
+      ? job.publicInputs.signals.map((value: unknown) => String(value))
+      : [];
+
+    if (!proof || !Array.isArray(proof.a) || !Array.isArray(proof.b) || !Array.isArray(proof.c)) {
+      return { ok: false, error: `El job ${job.jobId} no contiene proof_json valido` };
+    }
+
+    if (signals.length === 0) {
+      return { ok: false, error: `El job ${job.jobId} no contiene public inputs` };
+    }
+
+    const a = [
+      toBigIntValue(proof.a[0], "proof.a[0]"),
+      toBigIntValue(proof.a[1], "proof.a[1]"),
+    ] as [bigint, bigint];
+
+    // Rust serializes Fq2 coordinates as [c0, c1]; verifier expects [c1, c0].
+    const b = [
+      [
+        toBigIntValue(proof.b?.[0]?.[1], "proof.b[0][1]"),
+        toBigIntValue(proof.b?.[0]?.[0], "proof.b[0][0]"),
+      ],
+      [
+        toBigIntValue(proof.b?.[1]?.[1], "proof.b[1][1]"),
+        toBigIntValue(proof.b?.[1]?.[0], "proof.b[1][0]"),
+      ],
+    ] as [[bigint, bigint], [bigint, bigint]];
+
+    const c = [
+      toBigIntValue(proof.c[0], "proof.c[0]"),
+      toBigIntValue(proof.c[1], "proof.c[1]"),
+    ] as [bigint, bigint];
+
+    const input = signals.map((value: string, index: number) =>
+      toBigIntValue(value, `publicSignals[${index}]`),
+    );
+
+    const tx = await verifierContract.verifyTallyProof(BigInt(electionId), job.jobId, a, b, c, input);
+    const receipt = await tx.wait();
+    const txHash = receipt?.hash ?? tx.hash;
+    const verifierAddress = (await verifierContract.getAddress()).toLowerCase();
+
+    await pool.query(
+      `UPDATE zk_proof_jobs
+       SET status='VERIFIED_ONCHAIN',
+           verified_onchain=true,
+           onchain_verifier_address=$2,
+           onchain_verification_tx=$3,
+           error_message=NULL
+       WHERE job_id=$1`,
+      [job.jobId, verifierAddress, txHash],
+    );
+
+    if (job.tallyJobId) {
+      await pool.query(
+        `UPDATE tally_jobs SET proof_state='VERIFIED' WHERE tally_job_id=$1`,
+        [job.tallyJobId],
+      );
+
+      await pool.query(
+        `UPDATE result_payloads
+         SET proof_state='VERIFIED'
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND tally_job_id=$4`,
+        [chainId, contractAddress, electionId, job.tallyJobId],
+      );
+    } else {
+      await pool.query(
+        `UPDATE result_payloads
+         SET proof_state='VERIFIED'
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`,
+        [chainId, contractAddress, electionId],
+      );
+    }
+
+    return {
+      ok: true,
+      jobId: job.jobId,
+      status: "VERIFIED_ONCHAIN",
+      txHash,
+      verifierAddress,
+      alreadyVerified: false,
+    };
+  } catch (err: any) {
+    return { ok: false, error: err.message || String(err) };
   }
 }

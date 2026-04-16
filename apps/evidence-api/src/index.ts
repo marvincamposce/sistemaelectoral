@@ -2358,13 +2358,48 @@ async function main() {
             proving_completed_at AS "provingCompletedAt",
             created_at AS "createdAt"
           FROM zk_proof_jobs
-          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND circuit_id=$4
           ORDER BY created_at DESC
           LIMIT 1`,
-          [chainId, contractAddress, electionId.toString()],
+          [chainId, contractAddress, electionId.toString(), "TallyVerifier_4x64"],
+        );
+
+        const decryptionRes = await pool.query<{
+          jobId: string;
+          tallyJobId: string;
+          proofSystem: string;
+          circuitId: string;
+          status: string;
+          verificationKeyHash: string;
+          verifiedOffchain: boolean;
+          verifiedOnchain: boolean;
+          errorMessage: string;
+          provingStartedAt: Date;
+          provingCompletedAt: Date;
+          createdAt: Date;
+        }>(
+          `SELECT
+            job_id AS "jobId",
+            tally_job_id AS "tallyJobId",
+            proof_system AS "proofSystem",
+            circuit_id AS "circuitId",
+            status,
+            verification_key_hash AS "verificationKeyHash",
+            verified_offchain AS "verifiedOffchain",
+            verified_onchain AS "verifiedOnchain",
+            error_message AS "errorMessage",
+            proving_started_at AS "provingStartedAt",
+            proving_completed_at AS "provingCompletedAt",
+            created_at AS "createdAt"
+          FROM zk_proof_jobs
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND circuit_id=$4
+          ORDER BY created_at DESC
+          LIMIT 1`,
+          [chainId, contractAddress, electionId.toString(), "DecryptionVerifier_4x64"],
         );
 
         const job = res.rows[0] ?? null;
+        const decryptionJob = decryptionRes.rows[0] ?? null;
 
         return {
           ok: true,
@@ -2391,6 +2426,22 @@ async function main() {
                 createdAt: job.createdAt?.toISOString(),
               }
             : null,
+          decryptionProof: decryptionJob
+            ? {
+                jobId: decryptionJob.jobId,
+                tallyJobId: decryptionJob.tallyJobId,
+                proofSystem: decryptionJob.proofSystem,
+                circuitId: decryptionJob.circuitId,
+                status: decryptionJob.status,
+                verificationKeyHash: decryptionJob.verificationKeyHash,
+                verifiedOffchain: decryptionJob.verifiedOffchain,
+                verifiedOnchain: decryptionJob.verifiedOnchain,
+                errorMessage: decryptionJob.errorMessage,
+                provingStartedAt: decryptionJob.provingStartedAt?.toISOString(),
+                provingCompletedAt: decryptionJob.provingCompletedAt?.toISOString(),
+                createdAt: decryptionJob.createdAt?.toISOString(),
+              }
+            : null,
           honesty: {
             whatIsProved: job?.status === "VERIFIED_OFFCHAIN"
               ? "Vote counts are the correct sum of individual ballot selections and ballot inclusion in Poseidon Merkle tree (ZK verified off-chain)"
@@ -2399,7 +2450,9 @@ async function main() {
                 : "No ZK proof generated yet. Auditability depends on transcript verification.",
             whatIsNotProved: [
               ...(job?.merkleInclusionVerified ? [] : ["Ballot inclusion in Merkle tree (Phase 9B)"]),
-              "Correct decryption of ciphertexts (requires decryption circuit)",
+              ...(decryptionJob?.status === "VERIFIED_OFFCHAIN" || decryptionJob?.status === "VERIFIED_ONCHAIN"
+                ? []
+                : ["Correct decryption of ciphertexts (requires decryption circuit)"]),
               ...(job?.verifiedOnchain ? [] : ["On-chain verification (Phase 9C)"]),
             ],
             auditabilityNote: "Full transcript remains available for independent off-chain audit regardless of ZK proof status.",

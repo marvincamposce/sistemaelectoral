@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { network } from "hardhat";
 
@@ -113,13 +114,14 @@ const ed25519PrivateKeyHex =
 
 const signed = await signSnapshot(snapshotBody as any, ed25519PrivateKeyHex);
 
-const outDir = path.join("experimental-output");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const outDir = path.join(REPO_ROOT, "packages", "contracts", "experimental-output");
 await fs.mkdir(outDir, { recursive: true });
 
 const manifestFile = path.join(outDir, "manifest.current.json");
 await fs.writeFile(manifestFile, JSON.stringify(manifestBody, null, 2) + "\n", "utf8");
 
-const outFile = path.join(outDir, "acta_apertura.signed.json");
+const outFile = path.join(outDir, `election_0_acta_apertura_${signed.signature.snapshotHashHex}.signed.json`);
 await fs.writeFile(outFile, JSON.stringify(signed, null, 2) + "\n", "utf8");
 
 // Anchor the acta hash on-chain (kind 0 == ACTA_APERTURA)

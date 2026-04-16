@@ -19,11 +19,25 @@ circom "$PKG_DIR/circuits/tally_verifier.circom" \
   -o "$BUILD_DIR"
 
 echo ""
-echo "=== Circuit info ==="
+echo "=== Compiling decryption_verifier.circom ==="
+circom "$PKG_DIR/circuits/decryption_verifier.circom" \
+  --r1cs \
+  --wasm \
+  --sym \
+  -l "$PKG_DIR/node_modules" \
+  -o "$BUILD_DIR"
+
+echo ""
+echo "=== Circuit info (tally_verifier) ==="
 npx snarkjs r1cs info "$BUILD_DIR/tally_verifier.r1cs"
+
+echo ""
+echo "=== Circuit info (decryption_verifier) ==="
+npx snarkjs r1cs info "$BUILD_DIR/decryption_verifier.r1cs"
 
 echo ""
 echo "=== Build artifacts ==="
 ls -la "$BUILD_DIR"/tally_verifier*
+ls -la "$BUILD_DIR"/decryption_verifier*
 echo ""
 echo "Done. Next step: bash scripts/setup.sh"

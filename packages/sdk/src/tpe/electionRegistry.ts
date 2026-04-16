@@ -38,6 +38,12 @@ export const BU_PVP_1_ELECTION_REGISTRY_ABI = [
   "event TallyProofPublished(uint256 indexed electionId, bytes32 indexed proofHash, bytes proofPayload)",
 ] as const;
 
+export const BU_PVP_1_TALLY_VERIFIER_ABI = [
+  "function groth16Verifier() view returns (address)",
+  "function verifyTallyProof(uint256 electionId, string jobId, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[] input) returns (bool)",
+  "event TallyProofVerifiedOnChain(uint256 indexed electionId, bytes32 indexed jobIdHash, bytes32 indexed proofHash, bytes32 publicInputsHash, address verifierContract)",
+] as const;
+
 type ElectionRegistryContract = ethers.Contract & {
   electionCount: () => Promise<bigint>;
   getElection: (electionId: number) => Promise<ElectionRegistryElection>;

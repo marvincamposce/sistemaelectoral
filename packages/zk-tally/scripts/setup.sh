@@ -18,6 +18,7 @@ PKG_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PKG_DIR/build"
 KEYS_DIR="$PKG_DIR/keys"
 SETUP_META_FILE="$KEYS_DIR/tally_verifier_setup.meta"
+DECRYPTION_SETUP_META_FILE="$KEYS_DIR/decryption_verifier_setup.meta"
 
 mkdir -p "$KEYS_DIR"
 
@@ -144,8 +145,20 @@ fi
 
 if [ "$SETUP_BACKEND" = "rust" ]; then
   WASM="$BUILD_DIR/tally_verifier_js/tally_verifier.wasm"
+  DECRYPTION_WASM="$BUILD_DIR/decryption_verifier_js/decryption_verifier.wasm"
   if [ ! -f "$WASM" ]; then
     echo "ERROR: wasm not found. Run 'bash scripts/compile.sh' first."
+    exit 1
+  fi
+
+  DECRYPTION_R1CS="$BUILD_DIR/decryption_verifier.r1cs"
+  if [ ! -f "$DECRYPTION_R1CS" ]; then
+    echo "ERROR: decryption r1cs not found. Run 'bash scripts/compile.sh' first."
+    exit 1
+  fi
+
+  if [ ! -f "$DECRYPTION_WASM" ]; then
+    echo "ERROR: decryption wasm not found. Run 'bash scripts/compile.sh' first."
     exit 1
   fi
 
@@ -156,32 +169,74 @@ if [ "$SETUP_BACKEND" = "rust" ]; then
   RUST_VERIFYING_KEY="$KEYS_DIR/tally_verifier_rust.vk.bin"
   VKEY="$KEYS_DIR/verification_key.json"
 
+  DECRYPTION_RUST_PROVING_KEY="$KEYS_DIR/decryption_verifier_rust.pk.bin"
+  DECRYPTION_RUST_VERIFYING_KEY="$KEYS_DIR/decryption_verifier_rust.vk.bin"
+  DECRYPTION_VKEY="$KEYS_DIR/verification_key_decryption.json"
+  EXPORT_SOLIDITY_VERIFIER="${EXPORT_SOLIDITY_VERIFIER:-1}"
+  SOLIDITY_VERIFIER_CONTRACT_NAME="${SOLIDITY_VERIFIER_CONTRACT_NAME:-Groth16Verifier}"
+  SOLIDITY_VERIFIER_OUT="${SOLIDITY_VERIFIER_OUT:-$PKG_DIR/../contracts/contracts/Groth16Verifier.sol}"
+
+  export_solidity_verifier_with_rust_backend() {
+    if [ "$EXPORT_SOLIDITY_VERIFIER" != "1" ]; then
+      echo ""
+      echo "=== Skipping Solidity verifier export (EXPORT_SOLIDITY_VERIFIER=$EXPORT_SOLIDITY_VERIFIER) ==="
+      return
+    fi
+
+    if [ ! -x "$RUST_BACKEND_BIN" ] || ! "$RUST_BACKEND_BIN" --help 2>/dev/null | grep -q "export-solidity-verifier"; then
+      echo ""
+      echo "=== Rebuilding Rust backend for Solidity verifier export ==="
+      run_with_heartbeat "cargo build --release (rust backend)" "$RUST_BACKEND_BIN" \
+        cargo build --release --manifest-path "$RUST_BACKEND_CARGO"
+    fi
+
+    echo ""
+    echo "=== Exporting Solidity Verifier (Rust Backend) ==="
+    run_with_heartbeat "rust export-solidity-verifier" "$SOLIDITY_VERIFIER_OUT" \
+      "$RUST_BACKEND_BIN" export-solidity-verifier \
+        --verifying-key "$RUST_VERIFYING_KEY" \
+        --output "$SOLIDITY_VERIFIER_OUT" \
+        --contract-name "$SOLIDITY_VERIFIER_CONTRACT_NAME"
+
+    echo "  Solidity verifier: $SOLIDITY_VERIFIER_OUT"
+  }
+
   if [ ! -f "$RUST_BACKEND_CARGO" ]; then
     echo "ERROR: rust backend not found at $RUST_BACKEND_CARGO"
     exit 1
   fi
 
   R1CS_SHA256="$(sha256_file "$R1CS")"
+  DECRYPTION_R1CS_SHA256="$(sha256_file "$DECRYPTION_R1CS")"
 
-  if [ "${FORCE_PHASE2_REBUILD:-0}" != "1" ] && [ -f "$RUST_PROVING_KEY" ] && [ -f "$RUST_VERIFYING_KEY" ] && [ -f "$VKEY" ] && [ -f "$SETUP_META_FILE" ]; then
+  if [ "${FORCE_PHASE2_REBUILD:-0}" != "1" ] && [ -f "$RUST_PROVING_KEY" ] && [ -f "$RUST_VERIFYING_KEY" ] && [ -f "$VKEY" ] && [ -f "$DECRYPTION_RUST_PROVING_KEY" ] && [ -f "$DECRYPTION_RUST_VERIFYING_KEY" ] && [ -f "$DECRYPTION_VKEY" ] && [ -f "$SETUP_META_FILE" ] && [ -f "$DECRYPTION_SETUP_META_FILE" ]; then
     SAVED_BACKEND="$(awk -F= '/^BACKEND=/{print $2; exit}' "$SETUP_META_FILE")"
     SAVED_R1CS_SHA256="$(awk -F= '/^R1CS_SHA256=/{print $2; exit}' "$SETUP_META_FILE")"
 
-    if [ "$SAVED_BACKEND" = "rust" ] && [ "$SAVED_R1CS_SHA256" = "$R1CS_SHA256" ]; then
+    SAVED_DEC_BACKEND="$(awk -F= '/^BACKEND=/{print $2; exit}' "$DECRYPTION_SETUP_META_FILE")"
+    SAVED_DEC_R1CS_SHA256="$(awk -F= '/^R1CS_SHA256=/{print $2; exit}' "$DECRYPTION_SETUP_META_FILE")"
+
+    if [ "$SAVED_BACKEND" = "rust" ] && [ "$SAVED_R1CS_SHA256" = "$R1CS_SHA256" ] && [ "$SAVED_DEC_BACKEND" = "rust" ] && [ "$SAVED_DEC_R1CS_SHA256" = "$DECRYPTION_R1CS_SHA256" ]; then
       echo ""
-      echo "=== Reusing existing Rust Groth16 keys (hash match) ==="
+      echo "=== Reusing existing Rust Groth16 keys (hash match, both circuits) ==="
       echo "  Proving key:      $RUST_PROVING_KEY"
       echo "  Verification key: $RUST_VERIFYING_KEY"
       echo "  Audit key json:   $VKEY"
+      echo "  Decryption pk:    $DECRYPTION_RUST_PROVING_KEY"
+      echo "  Decryption vk:    $DECRYPTION_RUST_VERIFYING_KEY"
+      echo "  Decryption json:  $DECRYPTION_VKEY"
       echo ""
       echo "Use FORCE_PHASE2_REBUILD=1 to force key regeneration."
       echo "Verification key hash:"
       sha256sum "$VKEY"
+      echo "Decryption verification key hash:"
+      sha256sum "$DECRYPTION_VKEY"
+      export_solidity_verifier_with_rust_backend
       exit 0
     fi
 
     echo ""
-    echo "=== Existing Rust keys do not match current r1cs hash; regenerating ==="
+    echo "=== Existing Rust keys do not match current r1cs hash for one or both circuits; regenerating ==="
   fi
 
   if [ ! -x "$RUST_BACKEND_BIN" ] || [ "${FORCE_RUST_BACKEND_REBUILD:-0}" = "1" ]; then
@@ -192,7 +247,7 @@ if [ "$SETUP_BACKEND" = "rust" ]; then
   fi
 
   echo ""
-  echo "=== Rust Groth16 Setup ==="
+  echo "=== Rust Groth16 Setup (tally_verifier) ==="
   run_with_heartbeat "rust setup" "$RUST_PROVING_KEY" \
     "$RUST_BACKEND_BIN" setup \
       --wasm "$WASM" \
@@ -201,6 +256,16 @@ if [ "$SETUP_BACKEND" = "rust" ]; then
       --verifying-key-out "$RUST_VERIFYING_KEY" \
       --vkey-json-out "$VKEY"
 
+  echo ""
+  echo "=== Rust Groth16 Setup (decryption_verifier) ==="
+  run_with_heartbeat "rust setup (decryption)" "$DECRYPTION_RUST_PROVING_KEY" \
+    "$RUST_BACKEND_BIN" setup \
+      --wasm "$DECRYPTION_WASM" \
+      --r1cs "$DECRYPTION_R1CS" \
+      --proving-key-out "$DECRYPTION_RUST_PROVING_KEY" \
+      --verifying-key-out "$DECRYPTION_RUST_VERIFYING_KEY" \
+      --vkey-json-out "$DECRYPTION_VKEY"
+
   cat > "$SETUP_META_FILE" <<EOF
 BACKEND=rust
 R1CS_SHA256=$R1CS_SHA256
@@ -208,14 +273,28 @@ VKEY_SHA256=$(sha256_file "$VKEY")
 GENERATED_AT_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
+  cat > "$DECRYPTION_SETUP_META_FILE" <<EOF
+BACKEND=rust
+R1CS_SHA256=$DECRYPTION_R1CS_SHA256
+VKEY_SHA256=$(sha256_file "$DECRYPTION_VKEY")
+GENERATED_AT_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+
+  export_solidity_verifier_with_rust_backend
+
   echo ""
   echo "=== Setup Complete (Rust Backend) ==="
   echo "  Proving key:      $RUST_PROVING_KEY"
   echo "  Verification key: $RUST_VERIFYING_KEY"
   echo "  Audit key json:   $VKEY"
+  echo "  Decryption pk:    $DECRYPTION_RUST_PROVING_KEY"
+  echo "  Decryption vk:    $DECRYPTION_RUST_VERIFYING_KEY"
+  echo "  Decryption json:  $DECRYPTION_VKEY"
   echo ""
   echo "Verification key hash:"
   sha256sum "$VKEY"
+  echo "Decryption verification key hash:"
+  sha256sum "$DECRYPTION_VKEY"
   exit 0
 fi
 

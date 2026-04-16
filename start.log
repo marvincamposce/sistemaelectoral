@@ -1,0 +1,353 @@
+▶ 1. Iniciando PostgreSQL (Docker)...
+no configuration file provided: not found
+▶ 2. Iniciando nodo Hardhat local...
+  [!] Esperando 5 segundos para que la red se estabilice...
+▶ 3. Compilando y Desplegando Contratos...
+
+> blockurna-monorepo@ build /home/marvinc/projects/sistemaelectoral
+> turbo build
+
+• turbo 2.9.6
+
+   • Packages in scope: @blockurna/audit-cli, @blockurna/authority-console, @blockurna/contracts, @blockurna/crypto, @blockurna/evidence-api, @blockurna/evidence-indexer, @blockurna/mrd-relayer, @blockurna/observer-portal, @blockurna/sdk, @blockurna/shared, @blockurna/tally-board, @blockurna/voter-portal, @blockurna/zk-tally
+   • Running build in 13 packages
+   • Remote caching disabled
+
+@blockurna/zk-tally:build: cache miss, executing dbfa56ea0376352b
+@blockurna/shared:build: cache hit, replaying logs 0352508e6b071f71
+@blockurna/shared:build: 
+@blockurna/shared:build: 
+@blockurna/shared:build: > @blockurna/shared@0.0.0 build /home/marvinc/projects/sistemaelectoral/packages/shared
+@blockurna/shared:build: > tsc -p tsconfig.json
+@blockurna/shared:build: 
+@blockurna/crypto:build: cache miss, executing 8f1435a7c4305658
+@blockurna/crypto:build: 
+@blockurna/crypto:build: > @blockurna/crypto@0.0.0 build /home/marvinc/projects/sistemaelectoral/packages/crypto
+@blockurna/crypto:build: > tsc -p tsconfig.json
+@blockurna/crypto:build: 
+@blockurna/zk-tally:build: 
+@blockurna/zk-tally:build: > @blockurna/zk-tally@0.0.0 build /home/marvinc/projects/sistemaelectoral/packages/zk-tally
+@blockurna/zk-tally:build: > tsc -p tsconfig.json
+@blockurna/zk-tally:build: 
+@blockurna/sdk:build: cache miss, executing 57b3eff0d38aff42
+@blockurna/contracts:build: cache miss, executing be872b452611d6a4
+@blockurna/evidence-api:build: cache miss, executing eb7f9aa85e97660f
+@blockurna/authority-console:build: cache miss, executing 7ff713793176aa62
+@blockurna/sdk:build: 
+@blockurna/sdk:build: > @blockurna/sdk@0.0.0 build /home/marvinc/projects/sistemaelectoral/packages/sdk
+@blockurna/sdk:build: > tsc -p tsconfig.json
+@blockurna/sdk:build: 
+@blockurna/contracts:build: 
+@blockurna/contracts:build: > @blockurna/contracts@0.0.0 build /home/marvinc/projects/sistemaelectoral/packages/contracts
+@blockurna/contracts:build: > hardhat compile
+@blockurna/contracts:build: 
+@blockurna/authority-console:build: 
+@blockurna/authority-console:build: > @blockurna/authority-console@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/authority-console
+@blockurna/authority-console:build: > next build
+@blockurna/authority-console:build: 
+@blockurna/evidence-api:build: 
+@blockurna/evidence-api:build: > @blockurna/evidence-api@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/evidence-api
+@blockurna/evidence-api:build: > tsc -p tsconfig.json
+@blockurna/evidence-api:build: 
+@blockurna/authority-console:build: ▲ Next.js 16.2.3 (Turbopack)
+@blockurna/authority-console:build: - Environments: .env.local
+@blockurna/authority-console:build: 
+@blockurna/authority-console:build:   Creating an optimized production build ...
+@blockurna/contracts:build: No contracts to compile
+@blockurna/contracts:build: No Solidity tests to compile
+@blockurna/tally-board:build: cache miss, executing f3b75dfc7771fb0c
+@blockurna/evidence-indexer:build: cache miss, executing dd472f3c8f972e85
+@blockurna/observer-portal:build: cache miss, executing b346f8a4e9a8aaac
+@blockurna/voter-portal:build: cache miss, executing 029521a8c874c211
+@blockurna/audit-cli:build: cache miss, executing 2b6e8285056d8cd8
+@blockurna/mrd-relayer:build: cache miss, executing 4ae2b3b7a55c87c7
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: > @blockurna/tally-board@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/tally-board
+@blockurna/tally-board:build: > next build
+@blockurna/tally-board:build: 
+@blockurna/mrd-relayer:build: 
+@blockurna/mrd-relayer:build: > @blockurna/mrd-relayer@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/mrd-relayer
+@blockurna/mrd-relayer:build: > tsc -p tsconfig.json
+@blockurna/mrd-relayer:build: 
+@blockurna/voter-portal:build: 
+@blockurna/voter-portal:build: > @blockurna/voter-portal@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/voter-portal
+@blockurna/voter-portal:build: > next build
+@blockurna/voter-portal:build: 
+@blockurna/audit-cli:build: 
+@blockurna/audit-cli:build: > @blockurna/audit-cli@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/audit-cli
+@blockurna/audit-cli:build: > tsc -p tsconfig.json
+@blockurna/audit-cli:build: 
+@blockurna/evidence-indexer:build: 
+@blockurna/evidence-indexer:build: > @blockurna/evidence-indexer@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/evidence-indexer
+@blockurna/evidence-indexer:build: > tsc -p tsconfig.json
+@blockurna/evidence-indexer:build: 
+@blockurna/observer-portal:build: 
+@blockurna/observer-portal:build: > @blockurna/observer-portal@0.0.0 build /home/marvinc/projects/sistemaelectoral/apps/observer-portal
+@blockurna/observer-portal:build: > next build
+@blockurna/observer-portal:build: 
+@blockurna/voter-portal:build: ▲ Next.js 16.2.3 (Turbopack)
+@blockurna/voter-portal:build: - Environments: .env.local
+@blockurna/voter-portal:build: 
+@blockurna/tally-board:build: ▲ Next.js 16.2.3 (Turbopack)
+@blockurna/tally-board:build: - Environments: .env.local
+@blockurna/tally-board:build: 
+@blockurna/voter-portal:build:   Creating an optimized production build ...
+@blockurna/tally-board:build:   Creating an optimized production build ...
+@blockurna/observer-portal:build: ▲ Next.js 16.2.3 (Turbopack)
+@blockurna/observer-portal:build: - Environments: .env.local
+@blockurna/observer-portal:build: 
+@blockurna/observer-portal:build:   Creating an optimized production build ...
+@blockurna/authority-console:build: ✓ Compiled successfully in 11.0s
+@blockurna/authority-console:build:   Running TypeScript ...
+@blockurna/observer-portal:build: ✓ Compiled successfully in 7.2s
+@blockurna/observer-portal:build:   Running TypeScript ...
+@blockurna/voter-portal:build: ✓ Compiled successfully in 12.3s
+@blockurna/voter-portal:build:   Running TypeScript ...
+@blockurna/tally-board:build: Turbopack build encountered 1 warnings:
+@blockurna/tally-board:build: ./apps/tally-board/next.config.ts
+@blockurna/tally-board:build: Encountered unexpected file in NFT list
+@blockurna/tally-board:build: A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+@blockurna/tally-board:build: - filesystem operations (like path.join, path.resolve or fs.readFile), or
+@blockurna/tally-board:build: - very dynamic requires (like require('./' + foo)).
+@blockurna/tally-board:build: To resolve this, you can
+@blockurna/tally-board:build: - remove them if possible, or
+@blockurna/tally-board:build: - only use them in development, or
+@blockurna/tally-board:build: - make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+@blockurna/tally-board:build: - add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: Import traces:
+@blockurna/tally-board:build:   Server Component:
+@blockurna/tally-board:build:     ./apps/tally-board/next.config.ts
+@blockurna/tally-board:build:     ./packages/zk-tally/dist/index.js
+@blockurna/tally-board:build:     ./apps/tally-board/src/app/actions.ts
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build:   App Route:
+@blockurna/tally-board:build:     ./apps/tally-board/next.config.ts
+@blockurna/tally-board:build:     ./packages/zk-tally/dist/index.js
+@blockurna/tally-board:build:     ./apps/tally-board/src/app/actions.ts
+@blockurna/tally-board:build:     ./apps/tally-board/src/app/api/decryption-shares/signing-message/route.ts
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: ✓ Compiled successfully in 12.5s
+@blockurna/tally-board:build:   Running TypeScript ...
+@blockurna/authority-console:build:   Finished TypeScript in 5.4s ...
+@blockurna/authority-console:build:   Collecting page data using 7 workers ...
+@blockurna/observer-portal:build:   Finished TypeScript in 5.2s ...
+@blockurna/observer-portal:build:   Collecting page data using 8 workers ...
+@blockurna/observer-portal:build:   Generating static pages using 8 workers (0/2) ...
+@blockurna/authority-console:build:   Generating static pages using 7 workers (0/2) ...
+@blockurna/observer-portal:build: ✓ Generating static pages using 8 workers (2/2) in 454ms
+@blockurna/observer-portal:build:   Finalizing page optimization ...
+@blockurna/observer-portal:build: 
+@blockurna/observer-portal:build: Route (app)
+@blockurna/observer-portal:build: ┌ ƒ /
+@blockurna/observer-portal:build: ├ ○ /_not-found
+@blockurna/observer-portal:build: ├ ƒ /elections/[id]/acts/[actId]
+@blockurna/observer-portal:build: ├ ƒ /elections/[id]/ballots
+@blockurna/observer-portal:build: ├ ƒ /elections/[id]/signups
+@blockurna/observer-portal:build: └ ƒ /elections/[id]/signups/[txHash]/[logIndex]
+@blockurna/observer-portal:build: 
+@blockurna/observer-portal:build: 
+@blockurna/observer-portal:build: ○  (Static)   prerendered as static content
+@blockurna/observer-portal:build: ƒ  (Dynamic)  server-rendered on demand
+@blockurna/observer-portal:build: 
+@blockurna/authority-console:build: ✓ Generating static pages using 7 workers (2/2) in 410ms
+@blockurna/authority-console:build:   Finalizing page optimization ...
+@blockurna/authority-console:build: 
+@blockurna/authority-console:build: Route (app)
+@blockurna/authority-console:build: ┌ ƒ /
+@blockurna/authority-console:build: ├ ○ /_not-found
+@blockurna/authority-console:build: ├ ƒ /api/elections/[id]/admin-log
+@blockurna/authority-console:build: ├ ƒ /api/elections/[id]/manifest
+@blockurna/authority-console:build: └ ƒ /elections/[id]
+@blockurna/authority-console:build: 
+@blockurna/authority-console:build: 
+@blockurna/authority-console:build: ○  (Static)   prerendered as static content
+@blockurna/authority-console:build: ƒ  (Dynamic)  server-rendered on demand
+@blockurna/authority-console:build: 
+@blockurna/voter-portal:build:   Finished TypeScript in 3.1s ...
+@blockurna/voter-portal:build:   Collecting page data using 5 workers ...
+@blockurna/voter-portal:build:   Generating static pages using 5 workers (0/3) ...
+@blockurna/tally-board:build:   Finished TypeScript in 3.4s ...
+@blockurna/tally-board:build:   Collecting page data using 10 workers ...
+@blockurna/voter-portal:build: ✓ Generating static pages using 5 workers (3/3) in 612ms
+@blockurna/voter-portal:build:   Finalizing page optimization ...
+@blockurna/voter-portal:build: 
+@blockurna/voter-portal:build: Route (app)
+@blockurna/voter-portal:build: ┌ ○ /
+@blockurna/voter-portal:build: ├ ○ /_not-found
+@blockurna/voter-portal:build: └ ƒ /vote/[electionId]
+@blockurna/voter-portal:build: 
+@blockurna/voter-portal:build: 
+@blockurna/voter-portal:build: ○  (Static)   prerendered as static content
+@blockurna/voter-portal:build: ƒ  (Dynamic)  server-rendered on demand
+@blockurna/voter-portal:build: 
+@blockurna/tally-board:build:   Generating static pages using 10 workers (0/3) ...
+@blockurna/tally-board:build: ✓ Generating static pages using 10 workers (3/3) in 337ms
+@blockurna/tally-board:build:   Finalizing page optimization ...
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: Route (app)
+@blockurna/tally-board:build: ┌ ƒ /
+@blockurna/tally-board:build: ├ ○ /_not-found
+@blockurna/tally-board:build: ├ ƒ /api/decryption-ceremony/close
+@blockurna/tally-board:build: ├ ƒ /api/decryption-ceremony/open
+@blockurna/tally-board:build: ├ ƒ /api/decryption-ceremony/state
+@blockurna/tally-board:build: ├ ƒ /api/decryption-shares
+@blockurna/tally-board:build: ├ ƒ /api/decryption-shares/signing-message
+@blockurna/tally-board:build: └ ƒ /tally/[electionId]
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: 
+@blockurna/tally-board:build: ○  (Static)   prerendered as static content
+@blockurna/tally-board:build: ƒ  (Dynamic)  server-rendered on demand
+@blockurna/tally-board:build: 
+
+ Tasks:    13 successful, 13 total
+Cached:    1 cached, 13 total
+  Time:    25.927s 
+
+
+> @blockurna/contracts@0.0.0 deploy:localhost /home/marvinc/projects/sistemaelectoral/packages/contracts
+> hardhat run --network localhost scripts/deploy.ts
+
+
+{
+  "ok": true,
+  "contract": "BU_PVP_1_ElectionRegistry",
+  "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  "chainId": "31337",
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+}
+▶ 4. Levantando ecosistema completo (Evidence API, Indexer y Frontends)...
+  [!] Logs unificados servidos por Turborepo. Presiona Ctrl+C para apagar todo.
+
+> blockurna-monorepo@ dev /home/marvinc/projects/sistemaelectoral
+> turbo dev
+
+• turbo 2.9.6
+
+   • Packages in scope: @blockurna/audit-cli, @blockurna/authority-console, @blockurna/contracts, @blockurna/crypto, @blockurna/evidence-api, @blockurna/evidence-indexer, @blockurna/mrd-relayer, @blockurna/observer-portal, @blockurna/sdk, @blockurna/shared, @blockurna/tally-board, @blockurna/voter-portal, @blockurna/zk-tally
+   • Running dev in 13 packages
+   • Remote caching disabled
+
+[36m@blockurna/evidence-indexer:dev: [0mcache bypass, force executing [2mf2eb1fe37de2b0f5[0m
+[35m@blockurna/authority-console:dev: [0mcache bypass, force executing [2md61a10ea1ef5726a[0m
+[32m@blockurna/observer-portal:dev: [0mcache bypass, force executing [2mf48e293c99b391eb[0m
+[33m@blockurna/mrd-relayer:dev: [0mcache bypass, force executing [2m3d3c88fe4b9c6e1c[0m
+[34m@blockurna/tally-board:dev: [0mcache bypass, force executing [2m2b927fdb2231456d[0m
+[36m@blockurna/voter-portal:dev: [0mcache bypass, force executing [2mc3e67cc46b15f548[0m
+[35m@blockurna/evidence-api:dev: [0mcache bypass, force executing [2m3acb0cf92fabe9cf[0m
+[32m@blockurna/audit-cli:dev: [0mcache bypass, force executing [2m8ac1f7d35c4aedc4[0m
+[35m@blockurna/authority-console:dev: [0m
+[35m@blockurna/authority-console:dev: [0m> @blockurna/authority-console@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/authority-console
+[35m@blockurna/authority-console:dev: [0m> next dev -p 3012
+[35m@blockurna/authority-console:dev: [0m
+[32m@blockurna/observer-portal:dev: [0m
+[32m@blockurna/observer-portal:dev: [0m> @blockurna/observer-portal@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/observer-portal
+[32m@blockurna/observer-portal:dev: [0m> next dev -p 3011
+[32m@blockurna/observer-portal:dev: [0m
+[33m@blockurna/mrd-relayer:dev: [0m
+[33m@blockurna/mrd-relayer:dev: [0m> @blockurna/mrd-relayer@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/mrd-relayer
+[33m@blockurna/mrd-relayer:dev: [0m> tsx src/index.ts
+[33m@blockurna/mrd-relayer:dev: [0m
+[35m@blockurna/evidence-api:dev: [0m
+[35m@blockurna/evidence-api:dev: [0m> @blockurna/evidence-api@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/evidence-api
+[35m@blockurna/evidence-api:dev: [0m> tsx src/index.ts
+[35m@blockurna/evidence-api:dev: [0m
+[34m@blockurna/tally-board:dev: [0m
+[34m@blockurna/tally-board:dev: [0m> @blockurna/tally-board@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/tally-board
+[34m@blockurna/tally-board:dev: [0m> next dev -p 3005
+[34m@blockurna/tally-board:dev: [0m
+[36m@blockurna/voter-portal:dev: [0m
+[36m@blockurna/voter-portal:dev: [0m> @blockurna/voter-portal@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/voter-portal
+[36m@blockurna/voter-portal:dev: [0m> next dev -p 3004
+[36m@blockurna/voter-portal:dev: [0m
+[36m@blockurna/evidence-indexer:dev: [0m
+[36m@blockurna/evidence-indexer:dev: [0m> @blockurna/evidence-indexer@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/evidence-indexer
+[36m@blockurna/evidence-indexer:dev: [0m> tsx src/index.ts
+[36m@blockurna/evidence-indexer:dev: [0m
+[32m@blockurna/audit-cli:dev: [0m
+[32m@blockurna/audit-cli:dev: [0m> @blockurna/audit-cli@0.0.0 dev /home/marvinc/projects/sistemaelectoral/apps/audit-cli
+[32m@blockurna/audit-cli:dev: [0m> node --watch --enable-source-maps dist/cli.js
+[32m@blockurna/audit-cli:dev: [0m
+[32m@blockurna/observer-portal:dev: [0m[1m[38;2;173;127;168m▲ Next.js 16.2.3[39m[22m (Turbopack)
+[32m@blockurna/observer-portal:dev: [0m- Local:         http://localhost:3011
+[32m@blockurna/observer-portal:dev: [0m- Network:       http://10.255.255.254:3011
+[32m@blockurna/observer-portal:dev: [0m- Environments: .env.local
+[32m@blockurna/observer-portal:dev: [0m[32m[1m✓[22m[39m Ready in 688ms
+[36m@blockurna/voter-portal:dev: [0m[1m[38;2;173;127;168m▲ Next.js 16.2.3[39m[22m (Turbopack)
+[36m@blockurna/voter-portal:dev: [0m- Local:         http://localhost:3004
+[36m@blockurna/voter-portal:dev: [0m- Network:       http://10.255.255.254:3004
+[36m@blockurna/voter-portal:dev: [0m- Environments: .env.local
+[36m@blockurna/voter-portal:dev: [0m[32m[1m✓[22m[39m Ready in 681ms
+[34m@blockurna/tally-board:dev: [0m[1m[38;2;173;127;168m▲ Next.js 16.2.3[39m[22m (Turbopack)
+[34m@blockurna/tally-board:dev: [0m- Local:         http://localhost:3005
+[34m@blockurna/tally-board:dev: [0m- Network:       http://10.255.255.254:3005
+[34m@blockurna/tally-board:dev: [0m- Environments: .env.local
+[34m@blockurna/tally-board:dev: [0m[32m[1m✓[22m[39m Ready in 707ms
+[35m@blockurna/authority-console:dev: [0m[1m[38;2;173;127;168m▲ Next.js 16.2.3[39m[22m (Turbopack)
+[35m@blockurna/authority-console:dev: [0m- Local:         http://localhost:3012
+[35m@blockurna/authority-console:dev: [0m- Network:       http://10.255.255.254:3012
+[35m@blockurna/authority-console:dev: [0m- Environments: .env.local
+[35m@blockurna/authority-console:dev: [0m[32m[1m✓[22m[39m Ready in 715ms
+[32m@blockurna/audit-cli:dev: [0mUsage: blockurna-audit [options] [command]
+[32m@blockurna/audit-cli:dev: [0m
+[32m@blockurna/audit-cli:dev: [0mAudit CLI (BU-PVP-1): verificación de actas digitales y anclajes on-chain
+[32m@blockurna/audit-cli:dev: [0m
+[32m@blockurna/audit-cli:dev: [0mOptions:
+[32m@blockurna/audit-cli:dev: [0m  -V, --version                  output the version number
+[32m@blockurna/audit-cli:dev: [0m  -h, --help                     display help for command
+[32m@blockurna/audit-cli:dev: [0m
+[32m@blockurna/audit-cli:dev: [0mCommands:
+[32m@blockurna/audit-cli:dev: [0m  verify-acta [options]
+[32m@blockurna/audit-cli:dev: [0m  verify-acta-api [options]      Verifica una acta servida por evidence-api
+[32m@blockurna/audit-cli:dev: [0m                                 (firma + hash + anchor + consistencyStatus)
+[32m@blockurna/audit-cli:dev: [0m  export-audit-bundle [options]  Exporta un audit bundle desde evidence-api
+[32m@blockurna/audit-cli:dev: [0m                                 (incluye actas completas)
+[32m@blockurna/audit-cli:dev: [0m  rea-credential [options]       Genera una credencial experimental REA (incluye
+[32m@blockurna/audit-cli:dev: [0m                                 secretHex)
+[32m@blockurna/audit-cli:dev: [0m  rea-issue-permit [options]     Emite un SignupPermit (REA) para una elección y
+[32m@blockurna/audit-cli:dev: [0m                                 lo firma (EIP-191)
+[32m@blockurna/audit-cli:dev: [0m  rea-validate-permit [options]  Verifica un SignupPermit (firma y emisor)
+[32m@blockurna/audit-cli:dev: [0m  rea-signup [options]           Ejecuta signup() on-chain usando un
+[32m@blockurna/audit-cli:dev: [0m                                 SignupPermit y muestra el resultado
+[32m@blockurna/audit-cli:dev: [0m  verify-audit-bundle [options]  Descarga y verifica el audit bundle completo de
+[32m@blockurna/audit-cli:dev: [0m                                 una elección
+[32m@blockurna/audit-cli:dev: [0m  help [command]                 display help for command
+[32m@blockurna/audit-cli:dev: [0m[31mFailed running 'dist/cli.js'. Waiting for file changes before restarting...[39m
+[35m@blockurna/authority-console:dev: [0m[33m[1m⚠[22m[39m Slow filesystem detected. The benchmark took 257ms. If /home/marvinc/projects/sistemaelectoral/apps/authority-console/.next/dev is a network drive, consider moving it to a local folder.
+[35m@blockurna/authority-console:dev: [0mSee more: https://nextjs.org/docs/app/guides/local-development
+[34m@blockurna/tally-board:dev: [0m[33m[1m⚠[22m[39m Slow filesystem detected. The benchmark took 213ms. If /home/marvinc/projects/sistemaelectoral/apps/tally-board/.next/dev is a network drive, consider moving it to a local folder.
+[34m@blockurna/tally-board:dev: [0mSee more: https://nextjs.org/docs/app/guides/local-development
+[32m@blockurna/observer-portal:dev: [0m
+[35m@blockurna/evidence-api:dev: [0mError: listen EADDRINUSE: address already in use 0.0.0.0:3020
+[35m@blockurna/evidence-api:dev: [0m[90m    at Server.setupListenHandle [as _listen2] (node:net:1940:16)[39m
+[35m@blockurna/evidence-api:dev: [0m[90m    at listenInCluster (node:net:1997:12)[39m
+[35m@blockurna/evidence-api:dev: [0m[90m    at node:net:2206:7[39m
+[35m@blockurna/evidence-api:dev: [0m[90m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m {
+[35m@blockurna/evidence-api:dev: [0m  code: [32m'EADDRINUSE'[39m,
+[35m@blockurna/evidence-api:dev: [0m  errno: [33m-98[39m,
+[35m@blockurna/evidence-api:dev: [0m  syscall: [32m'listen'[39m,
+[35m@blockurna/evidence-api:dev: [0m  address: [32m'0.0.0.0'[39m,
+[35m@blockurna/evidence-api:dev: [0m  port: [33m3020[39m
+[35m@blockurna/evidence-api:dev: [0m}
+[36m@blockurna/voter-portal:dev: [0m
+[33m@blockurna/mrd-relayer:dev: [0m{"level":30,"time":1776352721046,"pid":43878,"hostname":"marvin-laptop","msg":"Server listening at http://0.0.0.0:8002"}
+[33m@blockurna/mrd-relayer:dev: [0m{"level":30,"time":1776352721054,"pid":43878,"hostname":"marvin-laptop","msg":"MRD Relayer listening on port 8002"}
+[34m@blockurna/tally-board:dev: [0m
+[35m@blockurna/authority-console:dev: [0m
+[35m@blockurna/evidence-api:dev: [0m[41m[30m ELIFECYCLE [39m[49m [31mCommand failed with exit code 1.[39m
+[32m@blockurna/observer-portal:dev: [0m[?25h
+[36m@blockurna/voter-portal:dev: [0m[?25h
+[34m@blockurna/tally-board:dev: [0m[?25h
+[35m@blockurna/authority-console:dev: [0m[?25h
+[31m[1m ERROR [0m [31m[1m@blockurna/evidence-api#dev: command (/home/marvinc/projects/sistemaelectoral/apps/evidence-api) /home/marvinc/.nvm/versions/node/v24.11.1/bin/pnpm run dev exited (1)[0m
+
+[1m Tasks:    [32m[1m0 successful[0m, 8 total[0m
+[1mCached:    [1m0 cached[0m, 8 total[0m
+[1m  Time:    [1m13.402s[0m [0m
+[1mFailed:    [31m[1m@blockurna/evidence-api#dev[0m[0m
+
+[31;40m ERROR [0m [31;49mrun failed: command  exited (1)[0m
+[41m[30m ELIFECYCLE [39m[49m [31mCommand failed with exit code 1.[39m
+
+🛑 Deteniendo los servicios...

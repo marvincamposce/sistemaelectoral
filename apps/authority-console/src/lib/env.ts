@@ -73,10 +73,6 @@ export type AuthorityEnv = {
 
 function resolveRepoPath(maybeRelativePath: string): string {
   if (path.isAbsolute(maybeRelativePath)) return maybeRelativePath;
-  const initCwd = process.env.INIT_CWD;
-  if (typeof initCwd === "string" && initCwd.length > 0 && path.isAbsolute(initCwd)) {
-    return path.resolve(initCwd, maybeRelativePath);
-  }
   return path.resolve(REPO_ROOT_DIR, maybeRelativePath);
 }
 

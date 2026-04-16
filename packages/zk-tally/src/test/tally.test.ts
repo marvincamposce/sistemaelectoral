@@ -10,7 +10,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildPoseidon } from "circomlibjs";
 import {
+  buildDecryptionWitness,
   buildWitnessFromTranscript,
+  checkArtifactsForCircuit,
   proveTally,
   verifyTallyProof,
   parsePublicSignals,
@@ -122,12 +124,18 @@ describe("TallyVerifier ZK Proof (Groth16)", () => {
   ];
 
   const artifactCheck = checkArtifacts();
+  const decryptionArtifactCheck = checkArtifactsForCircuit("DECRYPTION");
   const proofTestsSkip = artifactCheck.ok
     ? false
     : `Missing artifacts: ${artifactCheck.missing.join(", ")}. Run bash scripts/setup.sh`;
 
   it("should have all build artifacts available", { skip: proofTestsSkip }, () => {
     assert.ok(artifactCheck.ok, `Missing artifacts: ${artifactCheck.missing.join(", ")}`);
+  });
+
+  it("should report decryption artifacts state", () => {
+    assert.equal(typeof decryptionArtifactCheck.ok, "boolean");
+    assert.ok(Array.isArray(decryptionArtifactCheck.missing));
   });
 
   it("should build correct witness from transcript", async () => {
@@ -317,5 +325,38 @@ describe("TallyVerifier ZK Proof (Groth16)", () => {
     assert.throws(() => {
       buildWitnessFromTranscript(transcript, candidateOrder, merkleBundle);
     }, /merkle path index must be 0 or 1/);
+  });
+
+  it("should build decryption witness with active slot padding", () => {
+    const witness = buildDecryptionWitness({
+      summary: {
+        CANDIDATO_A: 1,
+        CANDIDATO_B: 1,
+        CANDIDATO_C: 0,
+        ABSTENCION: 0,
+      },
+      candidateOrder,
+      entries: [
+        {
+          selectionCiphertext: "101",
+          selectionNonce: "11",
+          selectionSharedKey: "21",
+          decryptedSelection: "0",
+        },
+        {
+          selectionCiphertext: "202",
+          selectionNonce: "12",
+          selectionSharedKey: "22",
+          decryptedSelection: "1",
+        },
+      ],
+    });
+
+    assert.strictEqual(witness.activeSlots.length, MAX_BALLOTS);
+    assert.strictEqual(witness.activeSlots[0], "1");
+    assert.strictEqual(witness.activeSlots[1], "1");
+    assert.strictEqual(witness.activeSlots[2], "0");
+    assert.strictEqual(witness.selections[2], String(INVALID_SELECTION));
+    assert.strictEqual(witness.totalValid, "2");
   });
 });

@@ -17,6 +17,7 @@ import { z } from "zod";
 import { getEnv, getEnvResult } from "../lib/env";
 import { ensureSchema, getPool, insertAdminLogEntry, upsertCandidate, upsertElectionManifest } from "../lib/db";
 import { getRegistry, parseElectionCreatedFromReceipt } from "../lib/registry";
+import { CreateElectionForm } from "./CreateElectionForm";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -468,116 +469,8 @@ export default async function Page() {
         </section>
 
         <section className="card p-4 space-y-3">
-          <div className="section-title">Crear elección</div>
-          <form action={createElectionAction} className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-xs text-slate-700" htmlFor="title">
-                Título del manifiesto
-              </label>
-              <input
-                id="title"
-                name="title"
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                placeholder="Elección experimental BU‑PVP‑1"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-slate-700" htmlFor="registryAuthority">
-                REA (registryAuthority) — address
-              </label>
-              <input
-                id="registryAuthority"
-                name="registryAuthority"
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono"
-                placeholder="0x..."
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-slate-700" htmlFor="coordinatorPubKey">
-                coordinatorPubKey (32 bytes)
-              </label>
-              <input
-                id="coordinatorPubKey"
-                name="coordinatorPubKey"
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono"
-                placeholder="0x22..(64 hex)"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-slate-700" htmlFor="notes">
-                Notas (opcional)
-              </label>
-              <textarea
-                id="notes"
-                name="notes"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                rows={3}
-                placeholder="Notas de contexto para auditoría post-electoral"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-slate-700" htmlFor="candidatesJson">
-                Catálogo de candidatos (JSON, opcional)
-              </label>
-              <textarea
-                id="candidatesJson"
-                name="candidatesJson"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs font-mono"
-                rows={9}
-                defaultValue={[
-                  "[",
-                  "  {",
-                  "    \"id\": \"cand-1\",",
-                  "    \"candidateCode\": \"CAND_1\",",
-                  "    \"displayName\": \"Mariana Soto\",",
-                  "    \"shortName\": \"M. Soto\",",
-                  "    \"partyName\": \"Alianza Cívica\",",
-                  "    \"ballotOrder\": 1,",
-                  "    \"status\": \"ACTIVE\",",
-                  "    \"colorHex\": \"#1D4ED8\"",
-                  "  },",
-                  "  {",
-                  "    \"id\": \"cand-2\",",
-                  "    \"candidateCode\": \"CAND_2\",",
-                  "    \"displayName\": \"Tomás Rivas\",",
-                  "    \"shortName\": \"T. Rivas\",",
-                  "    \"partyName\": \"Movimiento Federal\",",
-                  "    \"ballotOrder\": 2,",
-                  "    \"status\": \"ACTIVE\",",
-                  "    \"colorHex\": \"#0F766E\"",
-                  "  },",
-                  "  {",
-                  "    \"id\": \"cand-3\",",
-                  "    \"candidateCode\": \"CAND_3\",",
-                  "    \"displayName\": \"Lucía Peña\",",
-                  "    \"shortName\": \"L. Peña\",",
-                  "    \"partyName\": \"Pacto Social\",",
-                  "    \"ballotOrder\": 3,",
-                  "    \"status\": \"ACTIVE\",",
-                  "    \"colorHex\": \"#B45309\"",
-                  "  }",
-                  "]",
-                ].join("\n")}
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="rounded-md bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 text-sm font-semibold"
-            >
-              Crear (on-chain)
-            </button>
-          </form>
-          <div className="text-xs text-slate-600">
-            La consola genera un manifiesto firmado (ed25519) y usa su hash como <span className="font-mono">manifestHash</span>.
-          </div>
+          <div className="section-title">Instanciar Nueva Elección</div>
+          <CreateElectionForm createElectionAction={createElectionAction} />
         </section>
       </div>
     </main>

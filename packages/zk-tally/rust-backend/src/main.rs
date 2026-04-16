@@ -10,8 +10,10 @@ use num_bigint::{BigInt, BigUint};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, Read};
+use std::fmt::Write as FmtWrite;
+use std::fs::{self, File};
+use std::io::{self, Read, Write};
+use std::path::Path;
 use std::str::FromStr;
 
 // Workaround: some Linux toolchains miss the expected stack-probe symbol when
@@ -53,6 +55,14 @@ enum Commands {
     Verify {
         #[arg(long)]
         verifying_key: String,
+    },
+    ExportSolidityVerifier {
+        #[arg(long)]
+        verifying_key: String,
+        #[arg(long)]
+        output: String,
+        #[arg(long, default_value = "Groth16Verifier")]
+        contract_name: String,
     },
 }
 
@@ -108,6 +118,11 @@ fn main() -> Result<()> {
             proving_key,
         } => cmd_prove(&wasm, &r1cs, &proving_key),
         Commands::Verify { verifying_key } => cmd_verify(&verifying_key),
+        Commands::ExportSolidityVerifier {
+            verifying_key,
+            output,
+            contract_name,
+        } => cmd_export_solidity_verifier(&verifying_key, &output, &contract_name),
     }
 }
 
@@ -220,6 +235,350 @@ fn cmd_verify(verifying_key_path: &str) -> Result<()> {
         .context("failed to verify proof")?;
 
     println!("{{\"valid\":{}}}", if valid { "true" } else { "false" });
+    Ok(())
+}
+
+fn cmd_export_solidity_verifier(
+    verifying_key_path: &str,
+    output_path: &str,
+    contract_name: &str,
+) -> Result<()> {
+    validate_solidity_identifier(contract_name)?;
+
+    let mut vk_file = File::open(verifying_key_path)
+        .with_context(|| format!("failed to open verifying key: {verifying_key_path}"))?;
+    let vk = VerifyingKey::<Bn254>::deserialize_compressed(&mut vk_file)
+        .context("failed to deserialize verifying key")?;
+
+    let solidity_source = render_solidity_verifier(&vk, contract_name)?;
+
+    if let Some(parent) = Path::new(output_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create output directory: {}", parent.display())
+            })?;
+        }
+    }
+
+    let mut output_file = File::create(output_path)
+        .with_context(|| format!("failed to create output file: {output_path}"))?;
+    output_file
+        .write_all(solidity_source.as_bytes())
+        .with_context(|| format!("failed to write output file: {output_path}"))?;
+
+    println!(
+        "{{\"ok\":true,\"output\":\"{}\",\"contract\":\"{}\"}}",
+        output_path, contract_name
+    );
+
+    Ok(())
+}
+
+fn validate_solidity_identifier(name: &str) -> Result<()> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(anyhow!("contract_name cannot be empty"));
+    };
+
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return Err(anyhow!(
+            "contract_name must start with ASCII letter or underscore"
+        ));
+    }
+
+    if !chars.all(|c| c == '_' || c.is_ascii_alphanumeric()) {
+        return Err(anyhow!(
+            "contract_name must contain only ASCII letters, digits, or underscore"
+        ));
+    }
+
+    Ok(())
+}
+
+fn render_solidity_verifier(vk: &VerifyingKey<Bn254>, contract_name: &str) -> Result<String> {
+    validate_solidity_identifier(contract_name)?;
+
+    let input_count = vk
+        .gamma_abc_g1
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| anyhow!("verifying key has no gamma_abc_g1 entries"))?;
+
+    let mut out = String::new();
+
+    out.push_str(
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+library Pairing {
+    uint256 internal constant PRIME_Q =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
+    struct G1Point {
+        uint256 X;
+        uint256 Y;
+    }
+
+    struct G2Point {
+        uint256[2] X;
+        uint256[2] Y;
+    }
+
+    function negate(G1Point memory p) internal pure returns (G1Point memory) {
+        if (p.X == 0 && p.Y == 0) {
+            return G1Point(0, 0);
+        }
+        return G1Point(p.X, PRIME_Q - (p.Y % PRIME_Q));
+    }
+
+    function addition(
+        G1Point memory p1,
+        G1Point memory p2
+    ) internal view returns (G1Point memory r) {
+        uint256[4] memory input;
+        input[0] = p1.X;
+        input[1] = p1.Y;
+        input[2] = p2.X;
+        input[3] = p2.Y;
+
+        bool success;
+        assembly {
+            success := staticcall(gas(), 6, input, 0x80, r, 0x40)
+        }
+        require(success, "pairing-add-failed");
+    }
+
+    function scalar_mul(
+        G1Point memory p,
+        uint256 s
+    ) internal view returns (G1Point memory r) {
+        uint256[3] memory input;
+        input[0] = p.X;
+        input[1] = p.Y;
+        input[2] = s;
+
+        bool success;
+        assembly {
+            success := staticcall(gas(), 7, input, 0x60, r, 0x40)
+        }
+        require(success, "pairing-mul-failed");
+    }
+
+    function pairing(
+        G1Point[] memory p1,
+        G2Point[] memory p2
+    ) internal view returns (bool) {
+        require(p1.length == p2.length, "pairing-length-mismatch");
+
+        uint256 elements = p1.length;
+        uint256 inputSize = elements * 6;
+        uint256[] memory input = new uint256[](inputSize);
+
+        for (uint256 i = 0; i < elements; i++) {
+            uint256 offset = i * 6;
+            input[offset] = p1[i].X;
+            input[offset + 1] = p1[i].Y;
+            input[offset + 2] = p2[i].X[0];
+            input[offset + 3] = p2[i].X[1];
+            input[offset + 4] = p2[i].Y[0];
+            input[offset + 5] = p2[i].Y[1];
+        }
+
+        uint256[1] memory out;
+        bool success;
+        assembly {
+            success := staticcall(
+                gas(),
+                8,
+                add(input, 0x20),
+                mul(inputSize, 0x20),
+                out,
+                0x20
+            )
+        }
+
+        require(success, "pairing-opcode-failed");
+        return out[0] != 0;
+    }
+
+    function pairingProd4(
+        G1Point memory a1,
+        G2Point memory a2,
+        G1Point memory b1,
+        G2Point memory b2,
+        G1Point memory c1,
+        G2Point memory c2,
+        G1Point memory d1,
+        G2Point memory d2
+    ) internal view returns (bool) {
+        G1Point[] memory p1 = new G1Point[](4);
+        G2Point[] memory p2 = new G2Point[](4);
+
+        p1[0] = a1;
+        p1[1] = b1;
+        p1[2] = c1;
+        p1[3] = d1;
+
+        p2[0] = a2;
+        p2[1] = b2;
+        p2[2] = c2;
+        p2[3] = d2;
+
+        return pairing(p1, p2);
+    }
+}
+
+"#,
+    );
+
+    {
+        macro_rules! pushln {
+            ($($arg:tt)*) => {{
+                writeln!(out, $($arg)*)
+                    .map_err(|_| anyhow!("failed to render Solidity verifier"))?;
+            }};
+        }
+
+        pushln!("contract {} {{", contract_name);
+        pushln!(
+            "    uint256 internal constant SNARK_SCALAR_FIELD = {};",
+            "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+        );
+        pushln!("    uint256 internal constant INPUT_COUNT = {};", input_count);
+        pushln!("");
+        pushln!("    struct VerifyingKey {{");
+        pushln!("        Pairing.G1Point alfa1;");
+        pushln!("        Pairing.G2Point beta2;");
+        pushln!("        Pairing.G2Point gamma2;");
+        pushln!("        Pairing.G2Point delta2;");
+        pushln!("        Pairing.G1Point[] IC;");
+        pushln!("    }}");
+        pushln!("");
+        pushln!("    struct Proof {{");
+        pushln!("        Pairing.G1Point A;");
+        pushln!("        Pairing.G2Point B;");
+        pushln!("        Pairing.G1Point C;");
+        pushln!("    }}");
+        pushln!("");
+        pushln!("    error InvalidPublicInputLength(uint256 expected, uint256 received);");
+        pushln!("    error PublicInputOutOfRange(uint256 index);");
+        pushln!("");
+    }
+
+    append_verifier_key(&mut out, vk)?;
+
+    out.push_str(
+        r#"
+
+    function _verify(
+        uint256[] memory input,
+        Proof memory proof
+    ) internal view returns (bool) {
+        VerifyingKey memory vk = verifyingKey();
+
+        if (input.length + 1 != vk.IC.length) {
+            revert InvalidPublicInputLength(vk.IC.length - 1, input.length);
+        }
+
+        Pairing.G1Point memory vk_x = Pairing.G1Point(0, 0);
+        for (uint256 i = 0; i < input.length; i++) {
+            if (input[i] >= SNARK_SCALAR_FIELD) {
+                revert PublicInputOutOfRange(i);
+            }
+            vk_x = Pairing.addition(vk_x, Pairing.scalar_mul(vk.IC[i + 1], input[i]));
+        }
+        vk_x = Pairing.addition(vk_x, vk.IC[0]);
+
+        return Pairing.pairingProd4(
+            proof.A,
+            proof.B,
+            Pairing.negate(vk_x),
+            vk.gamma2,
+            Pairing.negate(proof.C),
+            vk.delta2,
+            Pairing.negate(vk.alfa1),
+            vk.beta2
+        );
+    }
+
+    function verifyProof(
+        uint256[2] calldata a,
+        uint256[2][2] calldata b,
+        uint256[2] calldata c,
+        uint256[] calldata input
+    ) external view returns (bool) {
+        Proof memory proof;
+        proof.A = Pairing.G1Point(a[0], a[1]);
+        proof.B = Pairing.G2Point([b[0][0], b[0][1]], [b[1][0], b[1][1]]);
+        proof.C = Pairing.G1Point(c[0], c[1]);
+
+        uint256[] memory copiedInput = new uint256[](input.length);
+        for (uint256 i = 0; i < input.length; i++) {
+            copiedInput[i] = input[i];
+        }
+
+        return _verify(copiedInput, proof);
+    }
+}
+"#,
+    );
+
+    Ok(out)
+}
+
+fn append_verifier_key(out: &mut String, vk: &VerifyingKey<Bn254>) -> Result<()> {
+    macro_rules! pushln {
+        ($($arg:tt)*) => {{
+            writeln!(out, $($arg)*)
+                .map_err(|_| anyhow!("failed to render Solidity verifier"))?;
+        }};
+    }
+
+    pushln!("    function verifyingKey() internal pure returns (VerifyingKey memory vk) {{");
+    append_g1_point(out, "        vk.alfa1", &vk.alpha_g1)?;
+    append_g2_point(out, "        vk.beta2", &vk.beta_g2)?;
+    append_g2_point(out, "        vk.gamma2", &vk.gamma_g2)?;
+    append_g2_point(out, "        vk.delta2", &vk.delta_g2)?;
+
+    pushln!(
+        "        vk.IC = new Pairing.G1Point[]({});",
+        vk.gamma_abc_g1.len()
+    );
+    for (index, point) in vk.gamma_abc_g1.iter().enumerate() {
+        append_g1_point(out, &format!("        vk.IC[{index}]"), point)?;
+    }
+
+    pushln!("    }}");
+    Ok(())
+}
+
+fn append_g1_point(out: &mut String, lhs: &str, point: &G1Affine) -> Result<()> {
+    writeln!(
+        out,
+        "{} = Pairing.G1Point(uint256({}), uint256({}));",
+        lhs,
+        field_to_dec_string(&point.x),
+        field_to_dec_string(&point.y)
+    )
+    .map_err(|_| anyhow!("failed to render G1 point"))?;
+
+    Ok(())
+}
+
+fn append_g2_point(out: &mut String, lhs: &str, point: &G2Affine) -> Result<()> {
+    // EVM pairing precompile expects Fq2 coefficients as [c1, c0].
+    let x_c0 = field_to_dec_string(&point.x.c0);
+    let x_c1 = field_to_dec_string(&point.x.c1);
+    let y_c0 = field_to_dec_string(&point.y.c0);
+    let y_c1 = field_to_dec_string(&point.y.c1);
+
+    writeln!(
+        out,
+        "{} = Pairing.G2Point([uint256({}), uint256({})], [uint256({}), uint256({})]);",
+        lhs, x_c1, x_c0, y_c1, y_c0
+    )
+    .map_err(|_| anyhow!("failed to render G2 point"))?;
+
     Ok(())
 }
 

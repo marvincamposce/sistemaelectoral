@@ -1,6 +1,6 @@
 # 📖 Manual de Usuario: BlockUrna (Escrutinio Criptográfico Experimental)
 
-Este manual documenta el paso a paso estructurado para desplegar, operar y auditar una elección digital completa utilizando la plataforma **BlockUrna**, actualizada hasta la **Fase 8.1**. Esta fase se caracteriza por incluir firmas de Actas **ECDSA SECP256K1 Reales** mapeadas por roles estancos (AEA y JED) asegurando transacciones y content hashes exactos on-chain y off-chain.
+Este manual documenta el paso a paso estructurado para desplegar, operar y auditar una elección digital completa utilizando la plataforma **BlockUrna**, actualizada hasta la **Fase 9C**. Esta fase incorpora pruebas **Zero-Knowledge con backend de alto desempeño en Rust**, **pruebas de inclusión Merkle de Poseidon**, verificación **on-chain** de la proof Groth16 y firmas de Actas **ECDSA SECP256K1 Reales** mapeadas por roles estancos (AEA y JED), asegurando transacciones y content hashes exactos on-chain y off-chain.
 
 ---
 
@@ -24,42 +24,45 @@ Se requiere que haya una base conectable. Usa el `docker-compose` de la raíz si
 docker-compose up -d postgres
 ```
 
-### 1.3 Arrancar la Blockchain y Desplegar el Registro
+### 1.3 Inicio Rápido Centralizado (Recomendado)
+Para evitar la apertura de múltiples terminales, hemos diseñado un script orquestador que inicia en background la base de datos, el nodo Blockchain (con sus despliegues) y todos los subsistemas a la vez usando Turborepo.
+
+Ejecuta el script de desarrollo desde la raíz:
+```bash
+./start-dev.sh
+```
+> [!TIP]
+> Todos los logs se centralizarán en tu consola actual de manera colorizada. Para apagar todo de manera limpia, solamente debes presionar `Ctrl+C`.
+
+---
+
+## 2. Iniciar Servicios del Ecosistema (Modo Manual Separado)
+
+> [!NOTE]
+> Sólo usa esto si no estás corriendo el `start-dev.sh` recomendado arriba, si necesitas debugear el proceso manual.
+
+### 2.1 Arrancar la Blockchain y Desplegar el Registro
 En una terminal aislada, prende el simulador blockchain:
 ```bash
 pnpm -F @blockurna/contracts run node
 ```
-A partir de ahí (en otra terminal), compilar y desplegar los contratos.
+Y desde otra terminal, realiza la compilación y despliegue del registro:
 ```bash
 pnpm build
 pnpm -F @blockurna/contracts deploy:localhost
 ```
-> [!IMPORTANT]
-> Debes re-desplegar si apagas el nodo de hardhat, para que la dirección `0x5FbDB23...` coincida permanentemente con los env.
 
----
-
-## 2. Iniciar Servicios del Ecosistema
-
-Es necesario poner en marcha al unísono las piezas del sistema. Cada uno necesita preferiblemente su propia pestaña de terminal, aunque puedes agruparlos si lo deseas.
-
-### Indexador y API Base (Motor de Evidencia)
-Levanta la ingesta on-chain y la API local en `http://localhost:3020`
+### 2.2 Levantar los submódulos usando Turborepo
+En otra pestaña:
 ```bash
-pnpm -F @blockurna/evidence-indexer dev
-pnpm -F @blockurna/evidence-api dev
+pnpm dev
 ```
-
-### Interfaces de Operación y Observación
-Existen 4 vistas principales para distintos actores del ciclo:
-```bash
-pnpm -F @blockurna/authority-console dev   # Puerto 3013
-pnpm -F @blockurna/tally-board dev         # Puerto 3005
-pnpm -F @blockurna/observer-portal dev     # Puerto 3011
-pnpm -F @blockurna/voter-portal dev        # Puerto 3000
-```
-> [!TIP]
-> Si deseas iniciar todo velozmente, puedes crear scripts `turborepo` que apunten a los comandos `dev` de NextJS si cuentas con recursos, o abrirlos individualmente para leer sus Logs nativos.
+Esto levantará simultáneamente:
+- Indexador de evidencia y API base en el Puerto `3020`
+- Authority Console (Puerto `3013`)
+- Tally Board (Puerto `3005`)
+- Observer Portal (Puerto `3011`)
+- Voter Portal (Puerto `3000`)
 
 ---
 
@@ -80,13 +83,14 @@ pnpm -F @blockurna/voter-portal dev        # Puerto 3000
 ### C. Cierre (AEA)
 De vuelta en **Authority Console**, publica el `ACTA_CIERRE` avanzando a fase **`VOTING_CLOSED`**.
 
-### D. Escrutinio Experimental (JED)
+### D. Escrutinio Experimental ZK (JED)
 1. Entra al **Tally Board** [http://localhost:3005](http://localhost:3005).
 2. Ingresa al ID de tu elección finalizada.
-3. Lanza el escrutinio (Tally Simulation Mode). Actualmente el procesamiento de boletas y el descifrado es un mock ZK (Zero-Knowledge Pending); **sin embargo**, podrás apreciar que al finalizar genera:
-   - `ACTA_ESCRUTINIO`
-   - `ACTA_RESULTADOS`
-4. Revisa los terminales: **Tally-board ha cifrado con verdaderas firmas ECDSA y el Evidence API ha corroborado las mismas integridades del rol esperado**.
+3. Lanza el escrutinio. Con la Fase 9B actual, el sistema desencadena el **motor ZK impulsado por Rust (`zk_tally_rs`)**. 
+4. El procesamiento computará la prueba ZK de recuento en tu máquina local (~8 a 15 segundos para 64 boletas simulando los Poseidon Merkle Verifiers) y publicará criptográficamente:
+   - `ACTA_ESCRUTINIO` (Con la validación de inclusión Merkle)
+   - `ACTA_RESULTADOS` 
+5. Revisa los terminales: **Tally-board ha emparejado las firmas ECDSA y la Inclusión lógica (ZKP). Por su parte, la Evidence API corroboró que las raíces computadas sean honestas de acuerdo a la cadena.**
 
 ---
 
@@ -94,7 +98,8 @@ De vuelta en **Authority Console**, publica el `ACTA_CIERRE` avanzando a fase **
 
 Una vez el ciclo ha finalizado, BlockUrna emite actas criptográficamente selladas bajo la política (AEA / JED). Entra al **Observer Portal** [http://localhost:3011](http://localhost:3011).
     - En el visor de **Actas (Referencias Ancladas)** certificarás que las validaciones figuran `VALID`.
-    - Podrás diseccionar la transformación formal: *contentHash -> signingDigest -> anchoredHash*.
+    - Podrás verificar de forma pública los **Poseidon Roots** y la confirmación de la prueba criptográfica de "Inclusión de Merkle ZK" que avala que los votos contabilizados estaban originalmente en la bóveda inalterada.
+    - Disecciona libremente la transformación formal: *contentHash -> signingDigest -> anchoredHash*.
 
 ### Verificación mediante Terminal (Audit CLI)
 Si eres auditor institucional, se espera que no confíes en el Observer Portal a ciegas. Puedes rearmar las comprobaciones sin usar un navegador.

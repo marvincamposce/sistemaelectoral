@@ -229,6 +229,20 @@ type ZkProofResponse = {
     provingCompletedAt: string | null;
     createdAt: string | null;
   };
+  decryptionProof?: null | {
+    jobId: string;
+    tallyJobId: string;
+    proofSystem: string;
+    circuitId: string;
+    status: string;
+    verificationKeyHash: string | null;
+    verifiedOffchain: boolean;
+    verifiedOnchain: boolean;
+    errorMessage: string | null;
+    provingStartedAt: string | null;
+    provingCompletedAt: string | null;
+    createdAt: string | null;
+  };
   honesty: {
     whatIsProved: string;
     whatIsNotProved: string[];
@@ -346,6 +360,38 @@ function IconCheck() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  );
+}
+
+function IconGitCommit(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#6366f1" }} {...props}>
+      <circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/>
+    </svg>
+  );
+}
+
+function IconActivity(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  );
+}
+
+function IconHash(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>
+    </svg>
+  );
+}
+
+function IconClock(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
     </svg>
   );
 }
@@ -486,6 +532,7 @@ export default async function Page() {
         bundleHash: auditBundleRes.bundleHash,
         bundleExportStatus: auditBundleRes.exportStatus,
         zkProof: zkProofRes.zkProof,
+        decryptionProof: zkProofRes.decryptionProof ?? null,
         zkProofHonesty: zkProofRes.honesty,
       };
     }),
@@ -678,34 +725,36 @@ export default async function Page() {
                       </span>
                     </div>
 
-                    <div className="stat-card">
-                      <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <div className="stat-card" style={{ borderLeft: "4px solid #10b981" }}>
+                      <span className="flex items-center gap-2" style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#10b981" }}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
                         Registros
                       </span>
-                      <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
+                      <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "#0f172a" }}>
                         {e.counts.signups}
                       </span>
-                      <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-                        {e.signupsSummary.uniqueNullifiers} únicos
+                      <span className="badge" style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", alignSelf: "flex-start", marginTop: "0.25rem", fontSize: "0.65rem", padding: "0.15rem 0.5rem" }}>
+                        {e.signupsSummary.uniqueNullifiers} identidades únicas
                       </span>
                       <a
                         className="btn-subtle"
                         href={`/elections/${encodeURIComponent(String(e.electionId))}/signups`}
-                        style={{ marginTop: "0.5rem", alignSelf: "flex-start" }}
+                        style={{ marginTop: "0.75rem", alignSelf: "flex-start", background: "#f8fafc", border: "1px solid #e2e8f0", color: "#64748b" }}
                       >
-                        Ver registros <IconExternalLink />
+                        Auditar Registros <IconExternalLink />
                       </a>
                     </div>
 
-                    <div className="stat-card">
-                      <span style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <div className="stat-card" style={{ borderLeft: "4px solid #3b82f6" }}>
+                      <span className="flex items-center gap-2" style={{ fontSize: "0.6875rem", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#3b82f6" }}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
                         Boletas
                       </span>
-                      <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
+                      <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "#0f172a" }}>
                         {e.counts.ballots}
                       </span>
-                      <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-                        {e.ballotsSummary.uniqueBallotIndexes} índices únicos
+                      <span className="badge" style={{ background: "#eff6ff", color: "#1e3a8a", border: "1px solid #bfdbfe", alignSelf: "flex-start", marginTop: "0.25rem", fontSize: "0.65rem", padding: "0.15rem 0.5rem" }}>
+                        {e.ballotsSummary.uniqueBallotIndexes} pruebas zk únicas
                       </span>
                     </div>
 
@@ -907,43 +956,57 @@ export default async function Page() {
                     </div>
                   )}
 
-                  {/* ─── Timeline ─── */}
                   <section style={{ marginBottom: "2.5rem" }}>
-                    <h3 className="section-title">Línea de tiempo</h3>
+                    <div className="flex items-center gap-2" style={{ marginBottom: "1rem" }}>
+                       <IconGitCommit />
+                       <h3 className="section-title" style={{ marginBottom: 0, border: "none" }}>Línea de Tiempo del Escrutinio Ciego</h3>
+                    </div>
                     {timeline.length === 0 ? (
-                      <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin eventos indexados.</p>
+                      <div className="card p-8 text-center bg-slate-50 border-slate-200">
+                        <IconActivity style={{ margin: "0 auto", color: "#94a3b8", width: "24px", height: "24px" }} />
+                        <p style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.5rem" }}>Aún no hay interacciones con el Blockchain.</p>
+                      </div>
                     ) : (
-                      <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
+                      <div className="card" style={{ padding: "1.5rem", background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
                           {timeline.map((ev) => (
-                            <div key={ev.key} className={`timeline-item ${ev.type}`} style={{ paddingBottom: "1rem" }}>
-                              <div className="flex items-start justify-between gap-3">
+                            <div key={ev.key} className={`timeline-item ${ev.type} group relative`} style={{ paddingBottom: "1.5rem" }}>
+                              <div className="flex items-start justify-between gap-4 p-3 rounded-lg transition-colors group-hover:bg-slate-50">
                                 <div>
-                                  <div style={{ fontSize: "0.8125rem", fontWeight: 500, color: "#1e293b" }}>
-                                    {ev.label}
+                                  <div className="flex items-center gap-2">
+                                    <div style={{ fontSize: "0.875rem", fontWeight: 700, color: "#1e293b" }}>
+                                      {ev.label}
+                                    </div>
+                                    <span className="badge badge-neutral" style={{ fontSize: "0.55rem", padding: "0.1rem 0.4rem" }}>
+                                      EVT: {ev.type.toUpperCase()}
+                                    </span>
                                   </div>
                                   {ev.detail && (
-                                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.125rem" }}>
+                                    <div style={{ fontSize: "0.75rem", color: "#475569", marginTop: "0.25rem", fontWeight: 500 }}>
                                       {ev.detail}
+                                    </div>
+                                  )}
+                                  {ev.txHash && (
+                                    <div style={{ marginTop: "0.5rem" }}>
+                                      <span className="hash-display" title={ev.txHash} style={{ background: "#f8fafc", color: "#3b82f6", border: "1px solid #bfdbfe", padding: "0.25rem 0.5rem" }}>
+                                        <IconHash style={{ display: "inline", width: "12px", height: "12px", marginRight: "2px", position: "relative", top: "-1px" }}/>
+                                        {fullHash(ev.txHash)}
+                                      </span>
                                     </div>
                                   )}
                                 </div>
                                 <div style={{ textAlign: "right", flexShrink: 0 }}>
-                                  <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-                                    Bloque {ev.blockNumber}
+                                  <div style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6366f1", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                                    ETH Block {ev.blockNumber}
                                   </div>
                                   {ev.blockTimestamp && (
-                                    <div style={{ fontSize: "0.6875rem", color: "#cbd5e1" }}>
+                                    <div style={{ fontSize: "0.7rem", color: "#94a3b8", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.25rem", marginTop: "0.2rem" }}>
+                                      <IconClock style={{ width: "12px", height: "12px" }}/>
                                       {formatTimestamp(ev.blockTimestamp)}
                                     </div>
                                   )}
                                 </div>
                               </div>
-                              {ev.txHash && (
-                                <div style={{ marginTop: "0.25rem" }}>
-                                  <span className="hash-display" title={ev.txHash}>{fullHash(ev.txHash)}</span>
-                                </div>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -1000,9 +1063,21 @@ export default async function Page() {
                                   </div>
                                 </div>
                                 <div>
-                                  <span style={{ color: "#94a3b8", fontWeight: 500 }}>Esquema</span>
-                                  <div style={{ color: "#475569", marginTop: "0.125rem" }}>
-                                    {a.signatureScheme || "—"}
+                                  <span style={{ color: "#94a3b8", fontWeight: 500 }}>Esquema Criptográfico</span>
+                                  <div style={{ marginTop: "0.25rem" }}>
+                                    {a.signatureScheme === "ECDSA_SECP256K1" ? (
+                                      <span className="badge" style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", fontSize: "0.65rem", padding: "0.15rem 0.6rem" }}>
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px" }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                                        FIRMA ECDSA SECP256K1
+                                      </span>
+                                    ) : a.signatureScheme === "GROTH16_BN128" ? (
+                                      <span className="badge" style={{ background: "#fdf4ff", color: "#86198f", border: "1px solid #fbcfe8", fontSize: "0.65rem", padding: "0.15rem 0.6rem" }}>
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px" }}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                        PRUEBA ZK-SNARK GROTH16
+                                      </span>
+                                    ) : (
+                                      <span className="badge badge-neutral" style={{ fontSize: "0.65rem" }}>{a.signatureScheme || "—"}</span>
+                                    )}
                                   </div>
                                 </div>
                                 <div>
@@ -1147,6 +1222,38 @@ export default async function Page() {
                           {e.zkProofHonesty?.auditabilityNote && (
                             <div style={{ marginTop: "0.5rem", fontSize: "0.6875rem", color: "#64748b", fontStyle: "italic" }}>
                               {e.zkProofHonesty.auditabilityNote}
+                            </div>
+                          )}
+
+                          {e.decryptionProof && (
+                            <div
+                              style={{
+                                marginTop: "0.75rem",
+                                paddingTop: "0.75rem",
+                                borderTop: "1px dashed #e2e8f0",
+                              }}
+                            >
+                              <div style={{ fontSize: "0.75rem", color: "#334155", fontWeight: 600 }}>
+                                Estado prueba de descifrado (9D): {e.decryptionProof.status}
+                              </div>
+                              <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.25rem" }}>
+                                {e.decryptionProof.proofSystem} · {e.decryptionProof.circuitId} · Job {e.decryptionProof.jobId}
+                              </div>
+                              {e.decryptionProof.errorMessage && (
+                                <div
+                                  style={{
+                                    marginTop: "0.5rem",
+                                    fontSize: "0.6875rem",
+                                    color: "#b45309",
+                                    background: "#fffbeb",
+                                    border: "1px solid #fde68a",
+                                    borderRadius: "6px",
+                                    padding: "0.375rem 0.5rem",
+                                  }}
+                                >
+                                  {e.decryptionProof.errorMessage}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

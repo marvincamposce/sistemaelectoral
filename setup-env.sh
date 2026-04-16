@@ -8,7 +8,8 @@ echo "========================================================="
 # Defaults fijos de Hardhat Local Node
 AEA_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 JED_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-CONTRACT_ADDR="0x5FbDB2315678afecb367f032d93F642f64180aa3"
+CONTRACT_ADDR="0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
+TALLY_VERIFIER_ADDR="0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 DB_URL="postgresql://blockurna:blockurna@127.0.0.1:5432/blockurna"
 
 echo "1. Configurando variables compartidas..."
@@ -50,6 +51,7 @@ EOF
 cat <<EOF > apps/tally-board/.env.local
 RPC_URL=http://127.0.0.1:8545
 ELECTION_REGISTRY_ADDRESS=$CONTRACT_ADDR
+TALLY_VERIFIER_ADDRESS=$TALLY_VERIFIER_ADDR
 AE_PRIVATE_KEY=$AEA_PK
 JED_PRIVATE_KEY=$JED_PK
 NEXT_PUBLIC_EVIDENCE_API_URL=http://127.0.0.1:3020

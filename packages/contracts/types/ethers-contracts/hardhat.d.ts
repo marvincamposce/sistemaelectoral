@@ -11,12 +11,24 @@ import * as Contracts from "./index.js";
 declare module "@nomicfoundation/hardhat-ethers/types" {
   interface HardhatEthersHelpers extends HardhatEthersHelpersBase {
   getContractFactory(name: 'BU_PVP_1_ElectionRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.BU_PVP_1_ElectionRegistry__factory>
+getContractFactory(name: 'BU_PVP_1_TallyVerifier', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.BU_PVP_1_TallyVerifier__factory>
+getContractFactory(name: 'IGroth16Verifier', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IGroth16Verifier__factory>
+getContractFactory(name: 'Groth16Verifier', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.Groth16Verifier__factory>
 
   getContractAt(name: 'BU_PVP_1_ElectionRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.BU_PVP_1_ElectionRegistry>
+getContractAt(name: 'BU_PVP_1_TallyVerifier', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.BU_PVP_1_TallyVerifier>
+getContractAt(name: 'IGroth16Verifier', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IGroth16Verifier>
+getContractAt(name: 'Groth16Verifier', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.Groth16Verifier>
 
   deployContract(name: 'BU_PVP_1_ElectionRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.BU_PVP_1_ElectionRegistry>
+deployContract(name: 'BU_PVP_1_TallyVerifier', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.BU_PVP_1_TallyVerifier>
+deployContract(name: 'IGroth16Verifier', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IGroth16Verifier>
+deployContract(name: 'Groth16Verifier', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.Groth16Verifier>
 
   deployContract(name: 'BU_PVP_1_ElectionRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.BU_PVP_1_ElectionRegistry>
+deployContract(name: 'BU_PVP_1_TallyVerifier', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.BU_PVP_1_TallyVerifier>
+deployContract(name: 'IGroth16Verifier', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IGroth16Verifier>
+deployContract(name: 'Groth16Verifier', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.Groth16Verifier>
 
     // default types
     getContractFactory(

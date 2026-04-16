@@ -21,7 +21,8 @@ import {
   createResultPayloadAction,
   openAuditWindowAction,
   persistAuditBundleAction,
-  generateZkProofAction
+  generateZkProofAction,
+  submitOnchainZkProofAction,
 } from "../../actions";
 
 // Recreate public env inline for simplicity
@@ -82,6 +83,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
   const [shareSubmitting, setShareSubmitting] = useState(false);
   const [zkProofStatus, setZkProofStatus] = useState<string | null>(null);
   const [zkProofJobId, setZkProofJobId] = useState<string | null>(null);
+  const [onchainVerifyTx, setOnchainVerifyTx] = useState<string | null>(null);
+  const [onchainSubmitting, setOnchainSubmitting] = useState(false);
 
   const addLog = (msg: string) => setLogs(l => [...l, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
@@ -495,7 +498,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         <h2 className="text-lg font-semibold text-amber-700 mb-2">Advertencia Oficial JED</h2>
         <p className="text-sm text-amber-700">
           Esta consola ejecuta descifrado y conteo reales con compromiso de transcript verificable publicado on-chain.
-          La prueba ZK completa aún está pendiente de integración; mientras tanto, la auditoría debe validar transcript y hashes.
+          La prueba ZK incluye conteo + inclusion Merkle (Fase 9B) y puede validarse on-chain (Fase 9C) desde esta misma consola.
         </p>
       </div>
 
@@ -679,81 +682,167 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
           </div>
         </div>
 
-        <div className="mt-6 flex flex-col space-y-4">
+        <div className="mt-8 flex flex-col space-y-5 border-t border-slate-200 pt-6">
           <button 
             disabled={status !== "IDLE" || ceremonyLoading}
             onClick={handleStartTally}
-            className={`px-4 py-3 rounded-md font-bold text-sm tracking-wide ${
+            className={`w-full px-6 py-4 rounded-xl font-extrabold tracking-widest text-sm flex items-center justify-center gap-3 transition-all ${
               status === "IDLE" && !ceremonyLoading
-              ? "bg-indigo-600 hover:bg-indigo-700 text-white" 
+              ? "bg-slate-900 hover:bg-black text-white shadow-lg hover:shadow-xl ring-2 ring-transparent focus:ring-slate-400" 
               : "bg-slate-200 text-slate-500 cursor-not-allowed"
             }`}
           >
-            {status === "IDLE" ? "INICIAR PROCESAMIENTO TALLY (Batch Job)" : "EJECUTANDO..."}
+            {status === "IDLE" ? (
+              <>
+                <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                INICIAR DESENCRIPTACIÓN CIENTÍFICA (BATCH JOB)
+              </>
+            ) : (
+              <>
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-400 border-t-slate-600" />
+                EJECUTANDO ALGORITMOS DE CONTEO...
+              </>
+            )}
           </button>
+          
           {status === "DONE" && (
-            <>
-              <button 
-                onClick={handlePublishResults}
-                className={`px-4 py-3 rounded-md font-bold text-sm tracking-wide bg-indigo-600 hover:bg-indigo-700 text-white mt-4`}
-              >
-                PUBLICAR RESULTADOS Y ABRIR AUDITORÍA
-              </button>
-              {tallyComputation && !zkProofStatus && (
-                <button
-                  onClick={async () => {
-                    try {
-                      setErrorMsg("");
-                      setZkProofStatus("BUILDING");
-                      addLog("Generando Prueba ZK (Groth16 BN-128)...");
-                      const res = await generateZkProofAction(
-                        electionId,
-                        tallyComputation.transcript as any,
-                        lastJobId ?? "unknown",
-                      );
-                      if (!res.ok) {
-                        setZkProofStatus("FAILED");
-                        throw new Error(res.error ?? "ZK proof generation failed");
-                      }
-                      setZkProofJobId(res.jobId ?? null);
-                      setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
-                      addLog(`ZK Proof generada y verificada off-chain. JobId: ${res.jobId}`);
-                      addLog(`  Proof system: ${res.proofSystem} | Circuit: ${res.circuitId}`);
-                      addLog(`  VKey hash: ${res.verificationKeyHash}`);
-                      addLog(`  Status: ${res.status}`);
-                      if (res.honesty) {
-                        addLog(`  Prueba: ${res.honesty.whatIsProved}`);
-                        addLog(`  Pendiente: ${(res.honesty.whatIsNotProved as string[]).join("; ")}`);
-                      }
-                    } catch (err: any) {
-                      setErrorMsg(err.message || String(err));
-                    }
-                  }}
-                  className="px-4 py-3 rounded-md font-bold text-sm tracking-wide bg-violet-600 hover:bg-violet-700 text-white mt-2"
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+              
+              <div className="space-y-2">
+                <button 
+                  onClick={handlePublishResults}
+                  className="w-full px-6 py-4 rounded-xl font-bold tracking-widest text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2"
                 >
-                  GENERAR PRUEBA ZK (Groth16)
+                  <svg className="w-5 h-5 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                  PUBLICAR RESULTADOS & ABRIR AUDITORÍA PÚBLICA
                 </button>
-              )}
-              {zkProofStatus && (
-                <div className={`mt-2 px-4 py-2 rounded-md text-xs font-mono ${
-                  zkProofStatus === "VERIFIED_OFFCHAIN" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                  zkProofStatus === "BUILDING" ? "bg-amber-50 text-amber-700 border border-amber-200" :
-                  "bg-rose-50 text-rose-700 border border-rose-200"
-                }`}>
-                  ZK Proof: {zkProofStatus}
-                  {zkProofJobId && <span className="ml-2">| Job: {zkProofJobId}</span>}
+                <p className="text-center text-xs text-slate-500 font-medium">Publica el acta matemática y abre la ventana temporal para impugnaciones públicas.</p>
+              </div>
+
+              <div className="h-px w-full bg-slate-200" />
+
+              <div className="bg-violet-50 border border-violet-100 rounded-xl p-5">
+                <div className="flex items-start gap-3">
+                  <svg className="w-6 h-6 text-violet-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                  <div>
+                    <h3 className="text-sm font-bold text-violet-900 uppercase tracking-wide">Capa Zero-Knowledge (Pruebas de Conocimiento Cero)</h3>
+                    <p className="text-xs text-violet-700 mt-1 mb-4">
+                      Comprueba matemáticamente que el sistema contó bien sin des-anonimizar o mostrar los votos individuales, usando curvas elípticas.
+                    </p>
+
+                    {tallyComputation && !zkProofStatus && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            setErrorMsg("");
+                            setZkProofStatus("BUILDING");
+                            setOnchainVerifyTx(null);
+                            addLog("Generando Prueba ZK (Groth16 BN-128)...");
+                            const res = await generateZkProofAction(
+                              electionId,
+                              tallyComputation.transcript as any,
+                              lastJobId ?? "unknown",
+                            );
+                            if (!res.ok) {
+                              setZkProofStatus("FAILED");
+                              throw new Error(res.error ?? "ZK proof generation failed");
+                            }
+                            setZkProofJobId(res.jobId ?? null);
+                            setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
+                            addLog(`ZK Proof generada y verificada off-chain. JobId: ${res.jobId}`);
+                          } catch (err: any) {
+                            setErrorMsg(err.message || String(err));
+                          }
+                        }}
+                        className="w-full px-5 py-3.5 rounded-xl font-bold tracking-wide text-sm bg-violet-600 hover:bg-violet-700 text-white transition-all shadow-md group border border-violet-700"
+                      >
+                        GENERAR PRUEBA ZK (Groth16 Local)
+                      </button>
+                    )}
+
+                    {zkProofStatus && (
+                      <div className={`mt-3 px-4 py-3 rounded-xl text-xs font-mono font-bold flex items-center gap-3 ${
+                        zkProofStatus === "VERIFIED_OFFCHAIN" || zkProofStatus === "VERIFIED_ONCHAIN" 
+                          ? "bg-emerald-100 text-emerald-800 border-2 border-emerald-300" :
+                        zkProofStatus === "BUILDING" 
+                          ? "bg-amber-100 text-amber-800 border-2 border-amber-300" :
+                        "bg-rose-100 text-rose-800 border-2 border-rose-300"
+                      }`}>
+                        {zkProofStatus === "BUILDING" && <div className="h-4 w-4 animate-spin rounded-full border-2 border-amber-500 border-t-amber-800" />}
+                        {zkProofStatus === "VERIFIED_OFFCHAIN" && <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
+                        
+                        <div>
+                          Estado SNARK: <span className="uppercase">{zkProofStatus}</span>
+                          {zkProofJobId && <div className="text-[10px] font-normal text-emerald-700/80 mt-0.5">Proof ID: {zkProofJobId}</div>}
+                        </div>
+                      </div>
+                    )}
+
+                    {zkProofStatus === "VERIFIED_OFFCHAIN" && (
+                      <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                         <h4 className="text-sm font-bold text-emerald-800 mb-2 flex items-center gap-2">
+                           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                           Sellar Prueba en Blockchain
+                         </h4>
+                         <p className="text-xs text-emerald-700 mb-4 font-medium">
+                           Remitir el Groth16 zk-SNARK al Smart Contract (TallyVerifier.sol) para que verifique la autenticidad matemática públicamente, sin depender del servidor.
+                         </p>
+                         <button
+                          onClick={async () => {
+                            try {
+                              setErrorMsg("");
+                              setOnchainSubmitting(true);
+                              addLog("Enviando proof al verificador on-chain...");
+                              const res = await submitOnchainZkProofAction(electionId, { jobId: zkProofJobId ?? undefined });
+                              if (!res.ok) throw new Error(res.error ?? "On-chain verification failed");
+                              setZkProofStatus("VERIFIED_ONCHAIN");
+                              setOnchainVerifyTx(res.txHash ?? null);
+                            } catch (err: any) {
+                              setErrorMsg(err.message || String(err));
+                            } finally {
+                              setOnchainSubmitting(false);
+                            }
+                          }}
+                          disabled={onchainSubmitting}
+                          className="w-full px-5 py-3.5 rounded-xl font-bold tracking-wide text-sm bg-emerald-700 hover:bg-emerald-800 text-white transition-all shadow-md border border-emerald-900 flex items-center justify-center gap-3 disabled:bg-emerald-300"
+                        >
+                          {onchainSubmitting ? (
+                            <>
+                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                              EJECUTANDO TRANSACCIÓN ON-CHAIN...
+                            </>
+                          ) : (
+                            "VERIFICAR PRUEBA ON-CHAIN (FASE 9C)"
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {onchainVerifyTx && (
+                      <div className="mt-3 text-[11px] font-mono text-emerald-800 bg-emerald-100/50 p-2 rounded-lg border border-emerald-200">
+                        Blockchain Tx: {onchainVerifyTx}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </>
+              </div>
+            </div>
           )}
         </div>
 
         {logs.length > 0 && (
-          <div className="mt-6">
-            <h3 className="text-sm font-semibold text-slate-500 mb-2">Bitácora de Operaciones Tally</h3>
-            <div className="bg-white border border-slate-200 rounded-md p-4 space-y-1 h-64 overflow-y-auto">
+          <div className="mt-8 bg-slate-900 rounded-2xl overflow-hidden shadow-xl border border-slate-700">
+            <div className="bg-slate-800 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-rose-500" />
+              <div className="w-3 h-3 rounded-full bg-amber-500" />
+              <div className="w-3 h-3 rounded-full bg-emerald-500" />
+              <span className="ml-2 text-xs font-semibold text-slate-300 uppercase tracking-widest">Protocol Logger</span>
+            </div>
+            <div className="p-5 space-y-2 h-64 overflow-y-auto custom-scrollbar">
               {logs.map((L, i) => (
-                <div key={i} className="text-xs font-mono text-emerald-700">{L}</div>
+                <div key={i} className="text-xs font-mono text-emerald-400 break-all leading-relaxed">
+                  <span className="text-slate-500 select-none mr-2">{'>'}</span>{L}
+                </div>
               ))}
             </div>
           </div>

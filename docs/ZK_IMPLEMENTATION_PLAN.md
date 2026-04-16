@@ -1,7 +1,7 @@
 # BlockUrna — Plan de Implementación ZK por Fases
 
 > Documento de transferencia para el asesor de integración ZK.  
-> Última actualización: 2026-04-15  
+> Última actualización: 2026-04-16  
 > Protocolo: BU-PVP-1  
 > Repositorio: monorepo `blockurna-monorepo` (pnpm + turbo)
 
@@ -10,10 +10,10 @@
 ## Tabla de Contenidos
 
 1. [Contexto del Sistema](#1-contexto-del-sistema)
-2. [Estado Actual (Post Fase 9A)](#2-estado-actual-post-fase-9a)
+2. [Estado Actual (Post Fase 9C)](#2-estado-actual-post-fase-9c)
 3. [Fase 9A — Completada: Proof de Conteo Correcto](#3-fase-9a--completada-proof-de-conteo-correcto)
-4. [Fase 9B — Merkle Inclusion Proof](#4-fase-9b--merkle-inclusion-proof)
-5. [Fase 9C — Verificador On-Chain (Solidity)](#5-fase-9c--verificador-on-chain-solidity)
+4. [Fase 9B — Completada: Merkle Inclusion Proof](#4-fase-9b--completada-merkle-inclusion-proof)
+5. [Fase 9C — Completada: Verificador On-Chain (Solidity)](#5-fase-9c--completada-verificador-on-chain-solidity)
 6. [Fase 9D — Proof de Descifrado Correcto](#6-fase-9d--proof-de-descifrado-correcto)
 7. [Fase 9E — MPC Trusted Setup y Producción](#7-fase-9e--mpc-trusted-setup-y-producción)
 8. [Mapa de Archivos Clave](#8-mapa-de-archivos-clave)
@@ -55,20 +55,20 @@ Votante → cifra boleta (X25519 + XChaCha20-Poly1305)
 
 ---
 
-## 2. Estado Actual (Post Fase 9A)
+## 2. Estado Actual (Post Fase 9D)
 
 ### Qué está probado por ZK
 
 | Propiedad | Status |
 |---|---|
 | Conteo correcto (sum selections == voteCounts) | ✅ ZK Groth16 off-chain |
-| Boletas pertenecen al Merkle tree | ❌ Pendiente (Fase 9B) |
-| Descifrado correcto de ciphertexts | ❌ Pendiente (Fase 9D) |
-| Verificación on-chain | ❌ Pendiente (Fase 9C) |
+| Boletas pertenecen al Merkle tree | ✅ Verificado (Fase 9B) |
+| Descifrado correcto de ciphertexts | ✅ ZK Groth16 off-chain (Fase 9D, flujo V2) |
+| Verificación on-chain | ✅ Verificado (Fase 9C) |
 
-### Qué sigue dependiendo del transcript
+### Qué sigue disponible en el transcript (auditoría adicional)
 
-- Cualquier auditor puede repetir el descifrado con las shares para verificar
+- Cualquier auditor puede repetir el descifrado con las shares para verificación independiente
 - El transcript completo está disponible vía evidence-api
 - El commitment on-chain (merkle root + transcript hash) permite verificar integridad
 
@@ -79,7 +79,7 @@ Votante → cifra boleta (X25519 + XChaCha20-Poly1305)
 ### Stack
 
 ```
-Circom 2.2.3 + snarkjs 0.7.6 + Groth16 sobre BN-128
+Circom 2.2.3 + Groth16 sobre BN-128 (backend principal Rust `zk_tally_rs`, con fallback snarkjs)
 ```
 
 ### Circuito: `TallyVerifier_4x64`
@@ -176,10 +176,12 @@ checkArtifacts() → { ok: boolean, missing: string[] }
 
 ---
 
-## 4. Fase 9B — Merkle Inclusion Proof
+## 4. Fase 9B — Completada: Merkle Inclusion Proof
 
 ### Objetivo
 Probar que **cada boleta procesada pertenece al árbol Merkle** cuyo root está publicado on-chain.
+
+**Estado:** completado. El witness ahora incluye `ballotHashes`, `merkleProofs` y `merklePathIndices`, y el circuito valida inclusión contra `merkleRoot` Poseidon.
 
 ### Cambios al circuito
 
@@ -226,20 +228,23 @@ circomlib  — para poseidon.circom
 
 ---
 
-## 5. Fase 9C — Verificador On-Chain (Solidity)
+## 5. Fase 9C — Completada: Verificador On-Chain (Solidity)
 
 ### Objetivo
 Desplegar un contrato Solidity que verifique la Groth16 proof directamente en la blockchain.
+
+**Estado:** completado. Se exporta `Groth16Verifier.sol` desde el backend Rust y se usa `BU_PVP_1_TallyVerifier` para ejecutar la verificación on-chain y registrar `VERIFIED_ONCHAIN`.
 
 ### Pasos
 
 1. **Exportar verificador Solidity**:
    ```bash
-   npx snarkjs zkey export solidityverifier keys/tally_verifier_final.zkey Verifier.sol
+  SETUP_BACKEND=rust bash scripts/setup.sh
+  bash scripts/export-verifier.sh
    ```
    Esto genera un contrato `Groth16Verifier` con función `verifyProof(uint[2] a, uint[2][2] b, uint[2] c, uint[N] input)`.
 
-2. **Contrato wrapper** `TallyVerifier.sol`:
+2. **Contrato wrapper** `BU_PVP_1_TallyVerifier.sol`:
    ```solidity
    contract TallyVerifier {
      Groth16Verifier immutable verifier;
@@ -262,7 +267,7 @@ Desplegar un contrato Solidity que verifique la Groth16 proof directamente en la
    }
    ```
 
-3. **Integrar con `ElectionRegistry`**: Añadir referencia al `TallyVerifier` o hacer que el registro consulte la verificación.
+3. **Integrar con `tally-board`**: Ejecutar la verificación on-chain desde `submitOnchainZkProofAction()` y persistir el resultado.
 
 4. **Actualizar `zk_proof_jobs`**: Cambiar status a `VERIFIED_ONCHAIN` con tx hash y verifier address.
 
@@ -278,10 +283,10 @@ Desplegar un contrato Solidity que verifique la Groth16 proof directamente en la
 
 | Archivo | Cambio |
 |---|---|
-| `packages/contracts/contracts/TallyVerifier.sol` | [NEW] Wrapper de verificación |
-| `packages/contracts/contracts/Groth16Verifier.sol` | [NEW] Generado por snarkjs |
+| `packages/contracts/contracts/BU_PVP_1_TallyVerifier.sol` | [NEW] Wrapper de verificación |
+| `packages/contracts/contracts/Groth16Verifier.sol` | [NEW] Generado desde backend Rust |
 | `packages/zk-tally/scripts/export-verifier.sh` | [NEW] Script de exportación |
-| `apps/tally-board/src/app/actions.ts` | Añadir `submitOnchainProofAction()` |
+| `apps/tally-board/src/app/actions.ts` | Añadir `submitOnchainZkProofAction()` |
 | `apps/evidence-api/src/index.ts` | Actualizar endpoint zk-proof |
 | `apps/observer-portal/src/app/page.tsx` | Mostrar tx de verificación on-chain |
 
@@ -291,6 +296,16 @@ Desplegar un contrato Solidity que verifique la Groth16 proof directamente en la
 
 ### Objetivo
 Probar en ZK que **el descifrado de cada ciphertext produce la selección declarada**, sin revelar la clave privada del coordinador.
+
+**Estado actual (2026-04-16): completada para flujo V2 con verificación off-chain.**
+- Se implementó un nuevo sobre de cifrado `BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2` con `BABYJUB_ECDH + POSEIDON_FIELD_ADDITION`.
+- El sobre V2 incluye `selectionCiphertext` para habilitar constraints directas de descifrado en circuito.
+- El `voter-portal` ya emite boletas con V2 para elecciones nuevas.
+- `tally-board` descifra V2 y mantiene compatibilidad con V1 (`BU-PVP-1_BALLOT_X25519_XCHACHA20_V1`) para transición.
+- Se integró `packages/zk-tally/circuits/decryption_verifier.circom` en el pipeline de witness/proof/verify (`buildDecryptionWitness`, `proveDecryption`, `verifyDecryptionProof`).
+- `tally-board` genera y persiste jobs `DecryptionVerifier_4x64` (best effort, no bloqueante para el flujo de tally 9C).
+- `evidence-api` expone `decryptionProof` y `observer-portal` muestra el estado operativo de 9D.
+- Alcance actual: la prueba 9D aplica al flujo V2; V1 sigue soportado por compatibilidad operativa durante transición.
 
 ### Complejidad
 
@@ -311,9 +326,9 @@ Probar en ZK que **el descifrado de cada ciphertext produce la selección declar
 
 ### Recomendación
 
-**Opción D primero, luego migrar a B**:
-1. En el corto plazo: hacer un commitment del plaintext (hash del decrypted ballot) y probar que el hash del plaintext corresponde a la selección declarada. Esto no prueba descifrado correcto pero sí vincula el plaintext con los votos.
-2. En el mediano plazo: migrar el cifrado a un esquema ZK-friendly (ElGamal sobre BN254 + Poseidon hash).
+**Ruta actual: B (migración de cifrado) en paralelo con D (honestidad operativa)**:
+1. Mantener despliegue dual V1/V2 durante transición para no invalidar elecciones históricas.
+2. Priorizar circuito de descifrado para V2 (BabyJub ECDH + Poseidon stream) y luego retirar V1.
 
 ---
 
@@ -367,7 +382,8 @@ blockurna-monorepo/
 │   │
 │   ├── zk-tally/               # ← PAQUETE ZK (Fase 9A)
 │   │   ├── circuits/
-│   │   │   └── tally_verifier.circom    # Circuito principal
+│   │   │   ├── tally_verifier.circom    # Circuito principal
+│   │   │   └── decryption_verifier.circom  # Fundación Fase 9D (descifrado zk-friendly)
 │   │   ├── scripts/
 │   │   │   ├── compile.sh               # circom → r1cs + wasm
 │   │   │   └── setup.sh                 # ptau + zkey
@@ -421,19 +437,21 @@ blockurna-monorepo/
 | pnpm | 9.15.4 | Package manager |
 | Turbo | 2.5.6 | Build orchestrator |
 
-### Para Fase 9B (pendientes)
+### Fase 9B (completada)
 
 ```bash
-# Instalar circomlib para Poseidon
+# Build de circuito + witness con inclusión Merkle Poseidon
 cd packages/zk-tally
-pnpm add circomlib
+bash scripts/compile.sh
 ```
 
-### Para Fase 9C (pendientes)
+### Fase 9C (completada)
 
 ```bash
-# El verificador Solidity se genera con snarkjs:
-npx snarkjs zkey export solidityverifier keys/tally_verifier_final.zkey contracts/Groth16Verifier.sol
+# Export del verificador Solidity vía backend Rust
+cd packages/zk-tally
+SETUP_BACKEND=rust bash scripts/setup.sh
+bash scripts/export-verifier.sh
 ```
 
 ---
@@ -489,21 +507,21 @@ Response: {
     jobId: "uuid",
     proofSystem: "GROTH16_BN128",
     circuitId: "TallyVerifier_4x64",
-    status: "VERIFIED_OFFCHAIN",
+    status: "VERIFIED_ONCHAIN",
     publicInputs: { signals: ["3","4","2","1","10"], candidateOrder: [...] },
     verificationKeyHash: "147ee2bb...",
     verifiedOffchain: true,
-    verifiedOnchain: false,
+    verifiedOnchain: true,
+    onchainVerifierAddress: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    onchainVerificationTx: "0xabc123...",
     ...
   },
   honesty: {
-    whatIsProved: "Vote counts are the correct sum of individual ballot selections",
+    whatIsProved: "Vote counts are the correct sum of individual ballot selections and ballot inclusion in Poseidon Merkle tree (ZK verified on-chain)",
     whatIsNotProved: [
-      "Ballot inclusion in Merkle tree (Phase 9B)",
-      "Correct decryption of ciphertexts (requires decryption circuit)",
-      "On-chain verification (Phase 9C)"
+      "Correct decryption of ciphertexts (requires decryption circuit)"
     ],
-    auditabilityNote: "Full transcript remains available for independent off-chain audit"
+    auditabilityNote: "Full transcript remains available for independent off-chain audit regardless of ZK proof status."
   }
 }
 ```
@@ -532,7 +550,7 @@ generateZkProofAction(
 1. **No romper el flujo actual del tally real**. La ZK es una capa adicional, no un reemplazo.
 2. **No eliminar el transcript commitment on-chain**. El commitment (merkle root + transcript hash) permanece como fallback.
 3. **Lenguaje honesto obligatorio**. Nunca decir "VERIFIED" si solo es off-chain. Usar:
-   - `VERIFIED_OFFCHAIN` — snarkjs verificó la proof en Node.js
+  - `VERIFIED_OFFCHAIN` — backend ZK verificó la proof fuera de cadena
    - `VERIFIED_ONCHAIN` — un contrato Solidity verificó la proof en la blockchain
 4. **Documentar qué se prueba y qué no** en cada fase. El observer portal y la evidence-api siempre exponen `honesty.whatIsNotProved`.
 5. **Los build artifacts (r1cs, zkey, wasm, ptau) NO van al repositorio**. Se regeneran con `compile.sh` + `setup.sh`.
