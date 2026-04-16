@@ -14,6 +14,15 @@ import {
 
 import { pool } from "@/lib/db";
 import crypto from "crypto";
+import {
+  buildWitnessFromTranscript,
+  proveTally,
+  verifyTallyProof,
+  checkArtifacts as checkZkArtifacts,
+  CIRCUIT_ID as ZK_CIRCUIT_ID,
+  PROOF_SYSTEM as ZK_PROOF_SYSTEM,
+  NUM_CANDIDATES as ZK_NUM_CANDIDATES,
+} from "@blockurna/zk-tally";
 
 function getContract() {
   const env = getEnv();
@@ -1273,5 +1282,139 @@ export async function persistAuditBundleAction(electionId: string) {
     return { ok: true, bundleId, bundleHash };
   } catch (err: any) {
     return { ok: false, error: err.message || String(err) };
+  }
+}
+
+/**
+ * Phase 9A — Generate and verify a Groth16 ZK proof for a tally transcript.
+ *
+ * PROVES: The published vote counts are the correct aggregation of
+ *         individual ballot selections.
+ *
+ * DOES NOT PROVE (yet):
+ *   - Ballot inclusion in the Merkle tree (Phase 9B)
+ *   - Correct decryption (requires decryption circuit)
+ *   - On-chain verification (Phase 9C)
+ */
+export async function generateZkProofAction(
+  electionId: string,
+  transcript: {
+    summary: Record<string, number>;
+    ballots: Array<{ selection: string }>;
+    ballotsCount: number;
+    decryptedValidCount: number;
+    invalidCount: number;
+  },
+  tallyJobId: string,
+) {
+  const jobId = crypto.randomUUID();
+
+  try {
+    const { chainId, contractAddress } = await resolveRuntimeContext();
+
+    // Check ZK artifacts exist
+    const artifactCheck = checkZkArtifacts();
+    if (!artifactCheck.ok) {
+      return {
+        ok: false,
+        error: `ZK artifacts missing: ${artifactCheck.missing.join(", ")}. Run setup.sh in packages/zk-tally.`,
+      };
+    }
+
+    // Determine candidate ordering (must be deterministic and match what the observer sees)
+    const candidateKeys = Object.keys(transcript.summary).sort();
+    if (candidateKeys.length > ZK_NUM_CANDIDATES) {
+      return {
+        ok: false,
+        error: `Circuit supports max ${ZK_NUM_CANDIDATES} candidates, election has ${candidateKeys.length}`,
+      };
+    }
+
+    // Pad candidate keys to NUM_CANDIDATES with placeholders
+    while (candidateKeys.length < ZK_NUM_CANDIDATES) {
+      candidateKeys.push(`__UNUSED_${candidateKeys.length}`);
+    }
+
+    // Create job record
+    await pool.query(
+      `INSERT INTO zk_proof_jobs (
+        job_id, chain_id, contract_address, election_id, tally_job_id,
+        proof_system, circuit_id, status, proving_started_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUILDING',NOW())`,
+      [jobId, chainId, contractAddress, electionId, tallyJobId, ZK_PROOF_SYSTEM, ZK_CIRCUIT_ID],
+    );
+
+    // Build witness from transcript
+    const witness = buildWitnessFromTranscript(transcript, candidateKeys);
+
+    // Generate proof
+    const proofResult = await proveTally(witness);
+
+    // Update with proof data
+    await pool.query(
+      `UPDATE zk_proof_jobs SET
+        status='PROVED',
+        public_inputs=$2,
+        proof_json=$3,
+        verification_key_hash=$4,
+        proving_completed_at=NOW()
+      WHERE job_id=$1`,
+      [
+        jobId,
+        JSON.stringify({ signals: proofResult.publicSignals, candidateOrder: candidateKeys }),
+        JSON.stringify(proofResult.proof),
+        proofResult.verificationKeyHash,
+      ],
+    );
+
+    // Verify off-chain
+    const verifyResult = await verifyTallyProof(proofResult.proof, proofResult.publicSignals);
+
+    if (!verifyResult.valid) {
+      await pool.query(
+        `UPDATE zk_proof_jobs SET status='FAILED', error_message='Off-chain verification failed' WHERE job_id=$1`,
+        [jobId],
+      );
+      return { ok: false, error: "ZK proof generated but off-chain verification FAILED", jobId };
+    }
+
+    // Update to VERIFIED_OFFCHAIN
+    await pool.query(
+      `UPDATE zk_proof_jobs SET status='VERIFIED_OFFCHAIN', verified_offchain=true WHERE job_id=$1`,
+      [jobId],
+    );
+
+    return {
+      ok: true,
+      jobId,
+      proofSystem: ZK_PROOF_SYSTEM,
+      circuitId: ZK_CIRCUIT_ID,
+      verificationKeyHash: proofResult.verificationKeyHash,
+      publicSignals: proofResult.publicSignals,
+      candidateOrder: candidateKeys,
+      verifiedOffchain: true,
+      verifiedOnchain: false,
+      status: "VERIFIED_OFFCHAIN",
+      honesty: {
+        whatIsProved: "Vote counts are the correct sum of individual ballot selections",
+        whatIsNotProved: [
+          "Ballot inclusion in Merkle tree (Phase 9B)",
+          "Correct decryption of ciphertexts (requires decryption circuit)",
+          "On-chain verification (Phase 9C)",
+        ],
+        auditabilityNote: "Full transcript remains available for independent off-chain audit",
+      },
+    };
+  } catch (err: any) {
+    // Update job status to FAILED
+    try {
+      await pool.query(
+        `UPDATE zk_proof_jobs SET status='FAILED', error_message=$2 WHERE job_id=$1`,
+        [jobId, String(err.message || err).slice(0, 1000)],
+      );
+    } catch {
+      // ignore secondary failure
+    }
+    return { ok: false, error: err.message || String(err), jobId };
   }
 }

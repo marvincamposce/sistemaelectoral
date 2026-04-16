@@ -375,6 +375,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS result_summary_items_result_candidate_uniq
 
 CREATE INDEX IF NOT EXISTS result_summary_items_result_idx
   ON result_summary_items(chain_id, contract_address, election_id, result_payload_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS zk_proof_jobs (
+  job_id TEXT PRIMARY KEY,
+  chain_id TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  election_id BIGINT NOT NULL,
+  tally_job_id TEXT,
+  proof_system TEXT NOT NULL,
+  circuit_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'NOT_STARTED',
+  public_inputs JSONB,
+  proof_json JSONB,
+  verification_key_hash TEXT,
+  verified_offchain BOOLEAN NOT NULL DEFAULT false,
+  verified_onchain BOOLEAN NOT NULL DEFAULT false,
+  onchain_verifier_address TEXT,
+  onchain_verification_tx TEXT,
+  error_message TEXT,
+  proving_started_at TIMESTAMPTZ,
+  proving_completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS zk_proof_jobs_election_idx
+  ON zk_proof_jobs(chain_id, contract_address, election_id, created_at DESC);
 `;
 
 export function createPool(databaseUrl: string): Pool {

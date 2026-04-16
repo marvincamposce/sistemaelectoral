@@ -20,7 +20,8 @@ import {
   logIncidentAction,
   createResultPayloadAction,
   openAuditWindowAction,
-  persistAuditBundleAction
+  persistAuditBundleAction,
+  generateZkProofAction
 } from "../../actions";
 
 // Recreate public env inline for simplicity
@@ -78,6 +79,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
   const [signingMessage, setSigningMessage] = useState("");
   const [signingMessageLoading, setSigningMessageLoading] = useState(false);
   const [shareSubmitting, setShareSubmitting] = useState(false);
+  const [zkProofStatus, setZkProofStatus] = useState<string | null>(null);
+  const [zkProofJobId, setZkProofJobId] = useState<string | null>(null);
 
   const addLog = (msg: string) => setLogs(l => [...l, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
@@ -682,12 +685,59 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
             {status === "IDLE" ? "INICIAR PROCESAMIENTO TALLY (Batch Job)" : "EJECUTANDO..."}
           </button>
           {status === "DONE" && (
-            <button 
-              onClick={handlePublishResults}
-              className={`px-4 py-3 rounded-md font-bold text-sm tracking-wide bg-indigo-600 hover:bg-indigo-700 text-white mt-4`}
-            >
-              PUBLICAR RESULTADOS Y ABRIR AUDITORÍA
-            </button>
+            <>
+              <button 
+                onClick={handlePublishResults}
+                className={`px-4 py-3 rounded-md font-bold text-sm tracking-wide bg-indigo-600 hover:bg-indigo-700 text-white mt-4`}
+              >
+                PUBLICAR RESULTADOS Y ABRIR AUDITORÍA
+              </button>
+              {tallyComputation && !zkProofStatus && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setErrorMsg("");
+                      setZkProofStatus("BUILDING");
+                      addLog("Generando Prueba ZK (Groth16 BN-128)...");
+                      const res = await generateZkProofAction(
+                        electionId,
+                        tallyComputation.transcript as any,
+                        lastJobId ?? "unknown",
+                      );
+                      if (!res.ok) {
+                        setZkProofStatus("FAILED");
+                        throw new Error(res.error ?? "ZK proof generation failed");
+                      }
+                      setZkProofJobId(res.jobId ?? null);
+                      setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
+                      addLog(`ZK Proof generada y verificada off-chain. JobId: ${res.jobId}`);
+                      addLog(`  Proof system: ${res.proofSystem} | Circuit: ${res.circuitId}`);
+                      addLog(`  VKey hash: ${res.verificationKeyHash}`);
+                      addLog(`  Status: ${res.status}`);
+                      if (res.honesty) {
+                        addLog(`  Prueba: ${res.honesty.whatIsProved}`);
+                        addLog(`  Pendiente: ${(res.honesty.whatIsNotProved as string[]).join("; ")}`);
+                      }
+                    } catch (err: any) {
+                      setErrorMsg(err.message || String(err));
+                    }
+                  }}
+                  className="px-4 py-3 rounded-md font-bold text-sm tracking-wide bg-violet-600 hover:bg-violet-700 text-white mt-2"
+                >
+                  GENERAR PRUEBA ZK (Groth16)
+                </button>
+              )}
+              {zkProofStatus && (
+                <div className={`mt-2 px-4 py-2 rounded-md text-xs font-mono ${
+                  zkProofStatus === "VERIFIED_OFFCHAIN" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                  zkProofStatus === "BUILDING" ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                  "bg-rose-50 text-rose-700 border border-rose-200"
+                }`}>
+                  ZK Proof: {zkProofStatus}
+                  {zkProofJobId && <span className="ml-2">| Job: {zkProofJobId}</span>}
+                </div>
+              )}
+            </>
           )}
         </div>
 

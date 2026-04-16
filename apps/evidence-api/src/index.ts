@@ -2312,6 +2312,97 @@ async function main() {
       return { ok: false, error: (err as Error).message };
     }
   });
+  // --- Phase 9A: ZK Proof Status ---
+  app.get<{ Params: { id: string } }>(
+    "/v1/elections/:id/zk-proof",
+    async (req, reply) => {
+      try {
+        const electionId = BigInt(req.params.id);
+        const res = await pool.query<{
+          jobId: string;
+          tallyJobId: string;
+          proofSystem: string;
+          circuitId: string;
+          status: string;
+          publicInputs: object;
+          verificationKeyHash: string;
+          verifiedOffchain: boolean;
+          verifiedOnchain: boolean;
+          onchainVerifierAddress: string;
+          onchainVerificationTx: string;
+          errorMessage: string;
+          provingStartedAt: Date;
+          provingCompletedAt: Date;
+          createdAt: Date;
+        }>(
+          `SELECT
+            job_id AS "jobId",
+            tally_job_id AS "tallyJobId",
+            proof_system AS "proofSystem",
+            circuit_id AS "circuitId",
+            status,
+            public_inputs AS "publicInputs",
+            verification_key_hash AS "verificationKeyHash",
+            verified_offchain AS "verifiedOffchain",
+            verified_onchain AS "verifiedOnchain",
+            onchain_verifier_address AS "onchainVerifierAddress",
+            onchain_verification_tx AS "onchainVerificationTx",
+            error_message AS "errorMessage",
+            proving_started_at AS "provingStartedAt",
+            proving_completed_at AS "provingCompletedAt",
+            created_at AS "createdAt"
+          FROM zk_proof_jobs
+          WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+          ORDER BY created_at DESC
+          LIMIT 1`,
+          [chainId, contractAddress, electionId.toString()],
+        );
+
+        const job = res.rows[0] ?? null;
+
+        return {
+          ok: true,
+          electionId: electionId.toString(),
+          zkProof: job
+            ? {
+                jobId: job.jobId,
+                tallyJobId: job.tallyJobId,
+                proofSystem: job.proofSystem,
+                circuitId: job.circuitId,
+                status: job.status,
+                publicInputs: job.publicInputs,
+                verificationKeyHash: job.verificationKeyHash,
+                verifiedOffchain: job.verifiedOffchain,
+                verifiedOnchain: job.verifiedOnchain,
+                onchainVerifierAddress: job.onchainVerifierAddress,
+                onchainVerificationTx: job.onchainVerificationTx,
+                errorMessage: job.errorMessage,
+                provingStartedAt: job.provingStartedAt?.toISOString(),
+                provingCompletedAt: job.provingCompletedAt?.toISOString(),
+                createdAt: job.createdAt?.toISOString(),
+              }
+            : null,
+          honesty: {
+            whatIsProved: job?.status === "VERIFIED_OFFCHAIN"
+              ? "Vote counts are the correct sum of individual ballot selections (ZK verified off-chain)"
+              : job?.status === "VERIFIED_ONCHAIN"
+                ? "Vote counts are the correct sum of individual ballot selections (ZK verified on-chain)"
+                : "No ZK proof generated yet. Auditability depends on transcript verification.",
+            whatIsNotProved: [
+              "Ballot inclusion in Merkle tree (Phase 9B)",
+              "Correct decryption of ciphertexts (requires decryption circuit)",
+              ...(job?.verifiedOnchain ? [] : ["On-chain verification (Phase 9C)"]),
+            ],
+            auditabilityNote: "Full transcript remains available for independent off-chain audit regardless of ZK proof status.",
+          },
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
   await app.listen({ host: env.HOST, port: env.PORT });
 }
 

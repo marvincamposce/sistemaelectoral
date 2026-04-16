@@ -13,6 +13,7 @@
     "@blockurna/crypto": "workspace:*",
     "@blockurna/sdk": "workspace:*",
     "@blockurna/shared": "workspace:*",
+    "@blockurna/zk-tally": "workspace:*",
     "ethers": "^6.16.0",
     "next": "16.2.3",
     "pg": "^8.16.3",

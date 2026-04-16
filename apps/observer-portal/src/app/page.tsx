@@ -206,6 +206,33 @@ type AuditBundleResponse = {
   exportStatus: string;
 };
 
+type ZkProofResponse = {
+  ok: boolean;
+  electionId: string;
+  zkProof: null | {
+    jobId: string;
+    tallyJobId: string;
+    proofSystem: string;
+    circuitId: string;
+    status: string;
+    publicInputs: { signals?: string[]; candidateOrder?: string[] } | null;
+    verificationKeyHash: string | null;
+    verifiedOffchain: boolean;
+    verifiedOnchain: boolean;
+    onchainVerifierAddress: string | null;
+    onchainVerificationTx: string | null;
+    errorMessage: string | null;
+    provingStartedAt: string | null;
+    provingCompletedAt: string | null;
+    createdAt: string | null;
+  };
+  honesty: {
+    whatIsProved: string;
+    whatIsNotProved: string[];
+    auditabilityNote: string;
+  };
+};
+
 /* ─── Helpers (logic unchanged) ─── */
 
 function isCriticalSeverity(severity: string): boolean {
@@ -373,6 +400,7 @@ export default async function Page() {
         resultsRes,
         auditWindowRes,
         auditBundleRes,
+        zkProofRes,
       ] = await Promise.all([
         safeFetchJson<PhaseChangesResponse>(
           `${apiBase}/v1/elections/${id}/phase-changes`,
@@ -425,6 +453,16 @@ export default async function Page() {
           bundleHash: null,
           exportStatus: "NOT_MATERIALIZED",
         }),
+        safeFetchJson<ZkProofResponse>(`${apiBase}/v1/elections/${id}/zk-proof`, {
+          ok: true,
+          electionId: id,
+          zkProof: null,
+          honesty: {
+            whatIsProved: "No ZK proof endpoint available",
+            whatIsNotProved: [],
+            auditabilityNote: "",
+          },
+        }),
       ]);
 
       return {
@@ -444,6 +482,8 @@ export default async function Page() {
         auditWindow: auditWindowRes.auditWindow,
         bundleHash: auditBundleRes.bundleHash,
         bundleExportStatus: auditBundleRes.exportStatus,
+        zkProof: zkProofRes.zkProof,
+        zkProofHonesty: zkProofRes.honesty,
       };
     }),
   );
@@ -1030,6 +1070,82 @@ export default async function Page() {
                         ))}
                       </div>
                     )}
+                  </section>
+
+                  {/* ─── ZK Proof Status ─── */}
+                  <section style={{ marginBottom: "2.5rem" }}>
+                    <h3 className="section-title">Prueba ZK</h3>
+                    <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
+                      {e.zkProof ? (
+                        <div>
+                          <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
+                            <div>
+                              <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a" }}>
+                                {e.zkProof.circuitId}
+                              </span>
+                              <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.125rem" }}>
+                                {e.zkProof.proofSystem} · Job {e.zkProof.jobId}
+                              </div>
+                            </div>
+                            <span className={`badge ${
+                              e.zkProof.status === "VERIFIED_OFFCHAIN" ? "badge-valid" :
+                              e.zkProof.status === "VERIFIED_ONCHAIN" ? "badge-valid" :
+                              e.zkProof.status === "BUILDING" ? "badge-warning" :
+                              e.zkProof.status === "FAILED" ? "badge-critical" :
+                              "badge-neutral"
+                            }`}>
+                              {e.zkProof.status === "VERIFIED_OFFCHAIN" ? "✓ Verificada off-chain" :
+                               e.zkProof.status === "VERIFIED_ONCHAIN" ? "✓ Verificada on-chain" :
+                               e.zkProof.status === "BUILDING" ? "⏳ Generando..." :
+                               e.zkProof.status === "FAILED" ? "✗ Fallida" :
+                               e.zkProof.status}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: "0.75rem", color: "#475569", marginBottom: "0.5rem" }}>
+                            <strong>Qué prueba:</strong> {e.zkProofHonesty?.whatIsProved}
+                          </div>
+
+                          {e.zkProof.verificationKeyHash && (
+                            <div style={{ fontSize: "0.6875rem", color: "#94a3b8", fontFamily: "monospace", wordBreak: "break-all", marginBottom: "0.5rem" }}>
+                              VKey hash: {e.zkProof.verificationKeyHash}
+                            </div>
+                          )}
+
+                          {e.zkProofHonesty?.whatIsNotProved && e.zkProofHonesty.whatIsNotProved.length > 0 && (
+                            <div style={{
+                              marginTop: "0.75rem",
+                              padding: "0.625rem 0.75rem",
+                              background: "#fefce8",
+                              border: "1px solid #fef08a",
+                              borderRadius: "6px",
+                              fontSize: "0.6875rem",
+                              color: "#854d0e",
+                            }}>
+                              <strong>Pendiente de prueba ZK:</strong>
+                              <ul style={{ margin: "0.25rem 0 0 1rem", padding: 0 }}>
+                                {e.zkProofHonesty.whatIsNotProved.map((item: string, idx: number) => (
+                                  <li key={idx}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {e.zkProofHonesty?.auditabilityNote && (
+                            <div style={{ marginTop: "0.5rem", fontSize: "0.6875rem", color: "#64748b", fontStyle: "italic" }}>
+                              {e.zkProofHonesty.auditabilityNote}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>
+                          No se ha generado prueba ZK para esta elección.
+                          <div style={{ marginTop: "0.375rem", fontSize: "0.6875rem", color: "#cbd5e1" }}>
+                            La auditabilidad depende actualmente de la verificación del transcript completo.
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </section>
 
                   {/* ─── Consistency & Incidents ─── */}
