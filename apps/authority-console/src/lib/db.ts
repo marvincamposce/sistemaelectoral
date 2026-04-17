@@ -234,7 +234,7 @@ export type HondurasCensusStatus = "HABILITADO" | "INHABILITADO" | "SUSPENDIDO" 
 
 export type HondurasWalletLinkStatus = "ACTIVE" | "PENDING" | "REVOKED";
 
-export type HondurasWalletVerificationMethod = "MANUAL_AEA" | "SELF_ATTESTED" | "CENSUS_VERIFIED" | "DEMO_SYSTEM" | "SYSTEM_MANAGED";
+export type HondurasWalletVerificationMethod = "MANUAL_AEA" | "SELF_ATTESTED" | "CENSUS_VERIFIED" | "SYSTEM_MANAGED";
 
 export type HondurasVoterRegistryRow = {
   dni: string;

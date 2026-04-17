@@ -17,7 +17,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 // Workaround: some Linux toolchains miss the expected stack-probe symbol when
-// linking wasmer_vm. Provide a no-op fallback so the binary can link.
+// linking wasmer_vm. Provide a no-op shim so the binary can link.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[no_mangle]
 pub extern "C" fn __rust_probestack() {}

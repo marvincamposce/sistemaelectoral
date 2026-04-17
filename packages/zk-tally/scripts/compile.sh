@@ -28,14 +28,6 @@ circom "$PKG_DIR/circuits/decryption_verifier.circom" \
   -o "$BUILD_DIR"
 
 echo ""
-echo "=== Circuit info (tally_verifier) ==="
-npx snarkjs r1cs info "$BUILD_DIR/tally_verifier.r1cs"
-
-echo ""
-echo "=== Circuit info (decryption_verifier) ==="
-npx snarkjs r1cs info "$BUILD_DIR/decryption_verifier.r1cs"
-
-echo ""
 echo "=== Build artifacts ==="
 ls -la "$BUILD_DIR"/tally_verifier*
 ls -la "$BUILD_DIR"/decryption_verifier*

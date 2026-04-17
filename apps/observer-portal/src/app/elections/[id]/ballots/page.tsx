@@ -39,11 +39,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   try {
     return await fetchJson<T>(url);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -73,10 +73,7 @@ export default async function BallotsPage({
   const electionId = String(resolvedParams.id);
   const cursor = typeof resolvedSearchParams.cursor === "string" ? resolvedSearchParams.cursor : null;
 
-  const election = await safeFetchJson<PhasesResponse | null>(
-    `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/phases`,
-    null,
-  );
+  const election = await fetchJsonOrNull<PhasesResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/phases`);
 
   if (!election || !election.ok) {
     return (
@@ -94,17 +91,12 @@ export default async function BallotsPage({
   }
 
   const [summary, list] = await Promise.all([
-    safeFetchJson<BallotsSummaryResponse>(
-      `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/ballots/summary`,
-      { ok: true, summary: { total: 0 } },
-    ),
-    safeFetchJson<BallotsListResponse>(
-      `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/ballots?order=desc&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-      { ok: true, electionId, page: { limit: 50, order: "desc", nextCursor: null }, ballots: [] },
-    ),
+    fetchJsonOrNull<BallotsSummaryResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/ballots/summary`),
+    fetchJsonOrNull<BallotsListResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/ballots?order=desc&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
   ]);
 
-  const page = list.page;
+  const dataUnavailable = summary == null || list == null;
+  const page = list?.page ?? null;
   const nextCursor = page?.nextCursor ?? null;
 
   return (
@@ -144,7 +136,7 @@ export default async function BallotsPage({
               Total publicadas
             </span>
             <span style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>
-              {summary.summary.total}
+              {summary?.summary.total ?? "N/D"}
             </span>
           </div>
           {page && (
@@ -161,7 +153,13 @@ export default async function BallotsPage({
 
         {/* Ballots Table */}
         <h2 className="section-title">Evidencia pública de publicación</h2>
-        {list.ballots.length === 0 ? (
+        {dataUnavailable ? (
+          <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
+            <p style={{ fontSize: "0.8125rem", color: "#b45309" }}>
+              La evidencia de boletas no está disponible. Esta vista no sustituye fallos de consulta por ceros.
+            </p>
+          </div>
+        ) : list.ballots.length === 0 ? (
           <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
             <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin boletas publicadas.</p>
           </div>
@@ -214,12 +212,12 @@ export default async function BallotsPage({
             {cursor && <span className="hash-display" style={{ fontSize: "0.625rem" }}>cursor: {cursor}</span>}
           </div>
           <div className="flex items-center gap-3">
-            {cursor && (
+            {cursor && !dataUnavailable && (
               <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/ballots`}>
                 ← Inicio
               </Link>
             )}
-            {nextCursor ? (
+            {nextCursor && !dataUnavailable ? (
               <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/ballots?cursor=${encodeURIComponent(nextCursor)}`}>
                 Siguiente →
               </Link>
@@ -233,7 +231,7 @@ export default async function BallotsPage({
       {/* Footer */}
       <footer style={{ borderTop: "1px solid #e2e8f0", background: "white", padding: "1.5rem", textAlign: "center" }}>
         <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Evidencia verificable
         </p>
       </footer>
     </main>

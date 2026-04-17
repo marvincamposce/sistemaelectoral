@@ -8,8 +8,14 @@ describe("BU_PVP_1_TallyVerifier", function () {
     const [deployer] = await ethers.getSigners();
     if (!deployer) throw new Error("Missing deployer signer");
 
+    const RegistryFactory = await ethers.getContractFactory("BU_PVP_1_ElectionRegistry");
+    const registry = (await RegistryFactory.connect(deployer).deploy()) as any;
+    await registry.waitForDeployment();
+
     const Factory = await ethers.getContractFactory("BU_PVP_1_TallyVerifier");
-    await expect(Factory.connect(deployer).deploy(ethers.ZeroAddress)).to.be.revert(ethers);
+    await expect(
+      Factory.connect(deployer).deploy(ethers.ZeroAddress, await registry.getAddress()),
+    ).to.be.revert(ethers);
   });
 
   it("rejects empty job ids", async function () {
@@ -20,9 +26,17 @@ describe("BU_PVP_1_TallyVerifier", function () {
     const groth = (await GrothFactory.connect(deployer).deploy()) as any;
     await groth.waitForDeployment();
 
+    const RegistryFactory = await ethers.getContractFactory("BU_PVP_1_ElectionRegistry");
+    const registry = (await RegistryFactory.connect(deployer).deploy()) as any;
+    await registry.waitForDeployment();
+
     const TallyFactory = await ethers.getContractFactory("BU_PVP_1_TallyVerifier");
-    const tallyVerifier = (await TallyFactory.connect(deployer).deploy(await groth.getAddress())) as any;
+    const tallyVerifier = (await TallyFactory.connect(deployer).deploy(
+      await groth.getAddress(),
+      await registry.getAddress(),
+    )) as any;
     await tallyVerifier.waitForDeployment();
+    await (await registry.connect(deployer).setTallyVerifier(await tallyVerifier.getAddress())).wait();
 
     await expect(
       tallyVerifier.verifyTallyProof(0n, "", [0n, 0n], [[0n, 0n], [0n, 0n]], [0n, 0n], []),
@@ -37,9 +51,17 @@ describe("BU_PVP_1_TallyVerifier", function () {
     const groth = (await GrothFactory.connect(deployer).deploy()) as any;
     await groth.waitForDeployment();
 
+    const RegistryFactory = await ethers.getContractFactory("BU_PVP_1_ElectionRegistry");
+    const registry = (await RegistryFactory.connect(deployer).deploy()) as any;
+    await registry.waitForDeployment();
+
     const TallyFactory = await ethers.getContractFactory("BU_PVP_1_TallyVerifier");
-    const tallyVerifier = (await TallyFactory.connect(deployer).deploy(await groth.getAddress())) as any;
+    const tallyVerifier = (await TallyFactory.connect(deployer).deploy(
+      await groth.getAddress(),
+      await registry.getAddress(),
+    )) as any;
     await tallyVerifier.waitForDeployment();
+    await (await registry.connect(deployer).setTallyVerifier(await tallyVerifier.getAddress())).wait();
 
     await expect(
       tallyVerifier.verifyTallyProof(0n, "job-invalid", [0n, 0n], [[0n, 0n], [0n, 0n]], [0n, 0n], [0n, 0n]),

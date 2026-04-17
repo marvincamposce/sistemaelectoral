@@ -49,11 +49,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   try {
     return await fetchJson<T>(url);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -115,7 +115,7 @@ function resolveDefaultRegistryAuthority(aeaPrivateKey: string): string {
     try {
       return ethers.getAddress(fromEnv);
     } catch {
-      // Ignore invalid override and fallback to the AEA address.
+      // Ignore invalid override and keep the AEA address as the effective default.
     }
   }
 
@@ -432,10 +432,7 @@ export default async function Page() {
     coordinatorPubKey: resolveDefaultCoordinatorPubKey(),
   };
 
-  const electionsRes = await safeFetchJson<ElectionsApiResponse | null>(
-    `${env.EVIDENCE_API_URL}/v1/elections`,
-    null,
-  );
+  const electionsRes = await fetchJsonOrNull<ElectionsApiResponse>(`${env.EVIDENCE_API_URL}/v1/elections`);
   const elections = electionsRes?.elections ?? [];
   const totalSignups = elections.reduce((acc, e) => acc + Number(e.counts?.signups ?? 0), 0);
   const totalBallots = elections.reduce((acc, e) => acc + Number(e.counts?.ballots ?? 0), 0);
@@ -458,6 +455,11 @@ export default async function Page() {
           <div className="text-xs text-slate-500 break-all">
             chainId={env.CHAIN_ID} · contract={env.CONTRACT_ADDRESS} · API={env.EVIDENCE_API_URL}
           </div>
+          {!electionsRes ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              La consola no pudo consultar la Evidence API. No se está mostrando una lista vacía como si fuera real.
+            </div>
+          ) : null}
           {latestElection ? (
             <div className="rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
               Última elección indexada: #{latestElection.electionId} · fase {phaseLabelEs(latestElection.phaseLabel, latestElection.phase)} · {formatTimestamp(latestElection.createdAtTimestamp)}

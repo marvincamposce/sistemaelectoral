@@ -12,7 +12,6 @@
     "node": "hardhat node",
     "node:lan": "hardhat node --hostname 0.0.0.0",
     "deploy:localhost": "hardhat run --network localhost scripts/deploy.ts",
-    "demo:localhost": "hardhat run --network localhost scripts/seed.ts",
     "seed:localhost": "hardhat run --network localhost scripts/seed.ts"
   },
   "dependencies": {

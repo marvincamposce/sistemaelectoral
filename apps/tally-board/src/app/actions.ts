@@ -33,7 +33,6 @@ import {
   DECRYPTION_CIRCUIT_ID as ZK_DECRYPTION_CIRCUIT_ID,
   PROOF_SYSTEM as ZK_PROOF_SYSTEM,
   NUM_CANDIDATES as ZK_NUM_CANDIDATES,
-  ZK_BACKEND,
 } from "@blockurna/zk-tally";
 
 function getContract() {
@@ -59,8 +58,6 @@ function mapProofStateToResultMode(proofState: string): string {
   if (state === "VERIFIED") return "VERIFIED";
   if (state === "TALLY_VERIFIED_ONCHAIN") return "PENDING_ZK_DECRYPTION";
   if (state === "TRANSCRIPT_COMMITTED") return "PENDING";
-  if (state === "TRANSCRIPT_VERIFIED") return "TRANSCRIPT_VERIFIED";
-  if (state === "SIMULATED") return "LEGACY_SIMULATED";
   if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
   return state;
 }
@@ -83,11 +80,6 @@ type ZkPublicationGateState = {
   };
   blockers: string[];
 };
-
-function decodeLegacyBallot(ciphertext: string): unknown {
-  const text = ethers.toUtf8String(ciphertext);
-  return JSON.parse(text) as unknown;
-}
 
 type CandidateCatalogRow = {
   id: string;
@@ -512,7 +504,7 @@ async function resolveCoordinatorPrivateKeyForTally(params: {
   | {
       ok: true;
       keyHex: string;
-      keySource: "THRESHOLD_2_OF_3" | "LEGACY_ENV";
+      keySource: "THRESHOLD_2_OF_3";
       ceremonyId: string | null;
       shareCount: number;
     }
@@ -559,21 +551,9 @@ async function resolveCoordinatorPrivateKeyForTally(params: {
     }
   }
 
-  const env = getEnv();
-  if (env.ALLOW_LEGACY_COORDINATOR_KEY && /^0x[0-9a-fA-F]{64}$/.test(env.COORDINATOR_PRIVATE_KEY)) {
-    return {
-      ok: true,
-      keyHex: env.COORDINATOR_PRIVATE_KEY,
-      keySource: "LEGACY_ENV",
-      ceremonyId: null,
-      shareCount: 0,
-    };
-  }
-
   return {
     ok: false,
-    error:
-      "No hay ceremonia 2-de-3 activa con suficientes shares. Carga al menos 2 shares o habilita ALLOW_LEGACY_COORDINATOR_KEY para modo transicional.",
+    error: "No hay ceremonia 2-de-3 cerrada con suficientes shares válidas para descifrar el escrutinio.",
   };
 }
 
@@ -979,9 +959,8 @@ export async function computeRealTallyAction(electionId: string) {
       return { ok: false, error: "No active candidates found for this election." };
     }
 
-    // Fetch ciphertexts directly from DB on server side to avoid payload limits
-    // Bug 1.1 fix: Use ballot_records (canonical table) instead of legacy ballots table
-    // to ensure consistency with ZK proof generation which also reads from ballot_records.
+    // Fetch ciphertexts directly from the canonical ballot_records table on the server side
+    // to keep tally execution aligned with ZK proof generation.
     const ballotsRes = await pool.query<{ ciphertext: string }>(
       "SELECT ciphertext FROM ballot_records WHERE chain_id = $1 AND contract_address = $2 AND election_id = $3 ORDER BY ballot_index ASC",
       [runtime.chainId, runtime.contractAddress, BigInt(electionId)],
@@ -1006,7 +985,7 @@ export async function computeRealTallyAction(electionId: string) {
       ballotIndex: number;
       ballotHash: string;
       selection: string;
-      format: "X25519_XCHACHA20" | "BABYJUB_POSEIDON_V2" | "LEGACY_RAW_HEX";
+      format: "BABYJUB_POSEIDON_V2";
     }> = [];
     const errors: Array<{ ballotIndex: number; error: string }> = [];
 
@@ -1016,27 +995,11 @@ export async function computeRealTallyAction(electionId: string) {
 
       try {
         let decrypted: unknown;
-        let format: "X25519_XCHACHA20" | "BABYJUB_POSEIDON_V2" | "LEGACY_RAW_HEX" =
-          "X25519_XCHACHA20";
-        let envelopeVersion: string | null = null;
-        try {
-          envelopeVersion = decodeBallotCiphertextEnvelope(ciphertext).version;
-        } catch {
-          envelopeVersion = null;
-        }
+        const format: "BABYJUB_POSEIDON_V2" = "BABYJUB_POSEIDON_V2";
         try {
           decrypted = await decryptBallotPayload(ciphertext, keyResolution.keyHex);
-          if (envelopeVersion === "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2") {
-            format = "BABYJUB_POSEIDON_V2";
-          }
         } catch {
-          if (keyResolution.keySource === "LEGACY_ENV") {
-            // Transitional compatibility while old ballots are drained from the system.
-            decrypted = decodeLegacyBallot(ciphertext);
-            format = "LEGACY_RAW_HEX";
-          } else {
-            throw new Error("decryption_failed");
-          }
+          throw new Error("decryption_failed");
         }
 
         const selectionRaw =
@@ -1114,10 +1077,10 @@ export async function computeRealTallyAction(electionId: string) {
   }
 }
 
-export async function publishProofAction(electionId: string, proofPayload: string) {
+export async function publishTranscriptCommitmentAction(electionId: string, commitmentPayload: string) {
   try {
     const contract = getContract();
-    const tx = await contract.publishTallyProof(BigInt(electionId), proofPayload);
+    const tx = await contract.publishTallyTranscriptCommitment(BigInt(electionId), commitmentPayload);
     const receipt = await tx.wait();
     return { ok: true, txHash: receipt.hash };
   } catch (err: unknown) {
@@ -1353,11 +1316,12 @@ export async function createResultPayloadAction(
     const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
-    const proofState = options?.proofState ?? "NOT_IMPLEMENTED";
-    if (String(proofState).toUpperCase() === "SIMULATED") {
-      return { ok: false, error: "SIMULATED proofState is no longer accepted for result payloads" };
+    const proofState = options?.proofState ?? "TRANSCRIPT_COMMITTED";
+    const normalizedProofState = String(proofState).toUpperCase();
+    if (!["VERIFIED", "TALLY_VERIFIED_ONCHAIN", "TRANSCRIPT_COMMITTED", "NOT_IMPLEMENTED"].includes(normalizedProofState)) {
+      return { ok: false, error: `Unsupported proofState for result payloads: ${proofState}` };
     }
-    if (String(proofState).toUpperCase() === "VERIFIED") {
+    if (normalizedProofState === "VERIFIED") {
       const gate = await loadZkPublicationGateState({
         chainId,
         contractAddress,
@@ -1557,10 +1521,6 @@ export async function persistAuditBundleAction(electionId: string) {
               ? "La prueba de tally ya fue verificada en cadena, pero falta cerrar la verificación ZK complementaria requerida para publicar resultados finales."
               : latestProofState === "TRANSCRIPT_COMMITTED"
                 ? "Existe compromiso de transcript en cadena, pero la publicación final está bloqueada hasta completar la verificación ZK."
-            : latestProofState === "TRANSCRIPT_VERIFIED"
-              ? "Descifrado y conteo reales con transcript comprometido en cadena; la verificación ZK sigue en un flujo separado."
-              : latestProofState === "SIMULATED"
-                ? "Resultado legacy marcado como simulado."
                 : "Resultado aún no verificado.",
       },
     };
@@ -2062,30 +2022,17 @@ export async function submitOnchainZkProofAction(
       toBigIntValue(proof.a[1], "proof.a[1]"),
     ] as [bigint, bigint];
 
-    // Bug R3-2: Rust backend serializes Fq2 coordinates as [c0, c1], but the
-    // Solidity verifier expects [c1, c0]. snarkjs already outputs the correct order,
-    // so swapping should only happen for the Rust backend.
-    const b = ZK_BACKEND === "rust"
-      ? [
-          [
-            toBigIntValue(proof.b[0][1], "proof.b[0][1]"),
-            toBigIntValue(proof.b[0][0], "proof.b[0][0]"),
-          ],
-          [
-            toBigIntValue(proof.b[1][1], "proof.b[1][1]"),
-            toBigIntValue(proof.b[1][0], "proof.b[1][0]"),
-          ],
-        ] as [[bigint, bigint], [bigint, bigint]]
-      : [
-          [
-            toBigIntValue(proof.b[0][0], "proof.b[0][0]"),
-            toBigIntValue(proof.b[0][1], "proof.b[0][1]"),
-          ],
-          [
-            toBigIntValue(proof.b[1][0], "proof.b[1][0]"),
-            toBigIntValue(proof.b[1][1], "proof.b[1][1]"),
-          ],
-        ] as [[bigint, bigint], [bigint, bigint]];
+    // Rust backend serializes Fq2 coordinates as [c0, c1], while the Solidity verifier expects [c1, c0].
+    const b = [
+      [
+        toBigIntValue(proof.b[0][1], "proof.b[0][1]"),
+        toBigIntValue(proof.b[0][0], "proof.b[0][0]"),
+      ],
+      [
+        toBigIntValue(proof.b[1][1], "proof.b[1][1]"),
+        toBigIntValue(proof.b[1][0], "proof.b[1][0]"),
+      ],
+    ] as [[bigint, bigint], [bigint, bigint]];
 
     const c = [
       toBigIntValue(proof.c[0], "proof.c[0]"),

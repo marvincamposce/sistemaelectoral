@@ -4,3 +4,4 @@
 export * as buPvp1TallyVerifierSol from './BU_PVP_1_TallyVerifier.sol/index.js';
 export { BU_PVP_1_ElectionRegistry__factory } from './BU_PVP_1_ElectionRegistry__factory.js';
 export { Groth16Verifier__factory } from './Groth16Verifier__factory.js';
+export { MockAlwaysValidGroth16Verifier__factory } from './MockAlwaysValidGroth16Verifier__factory.js';

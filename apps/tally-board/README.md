@@ -23,7 +23,6 @@ La app queda en `http://localhost:3005`.
 - `AE_PRIVATE_KEY`
 - `JED_PRIVATE_KEY`
 - `COORDINATOR_PRIVATE_KEY`
-- `ALLOW_LEGACY_COORDINATOR_KEY`
 - `DATABASE_URL`
 
 Seguridad de endpoints remotos para trustees:
@@ -75,4 +74,4 @@ Todos son `POST` y devuelven JSON.
 
 - API_SIGNED verifica ECDSA sobre mensaje canónico de share (dominio `BU-PVP-1_DECRYPTION_SHARE_SUBMISSION_V1`).
 - Ceremonias cerradas no aceptan nuevas shares.
-- El tally usa preferentemente clave reconstruida por threshold 2-de-3; el fallback legacy depende de `ALLOW_LEGACY_COORDINATOR_KEY`.
+- El tally requiere clave reconstruida por threshold 2-de-3; sin shares válidas suficientes, el escrutinio queda bloqueado.

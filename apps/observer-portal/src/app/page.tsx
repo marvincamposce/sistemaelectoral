@@ -331,11 +331,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   try {
     return await fetchJson<T>(url);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -477,10 +477,7 @@ export default async function Page() {
   const env = getPublicEnv();
   const apiBase = env.NEXT_PUBLIC_EVIDENCE_API_URL.replace(/\/$/, "");
 
-  const electionsRes = await safeFetchJson<ElectionsApiResponse | null>(
-    `${apiBase}/v1/elections`,
-    null,
-  );
+  const electionsRes = await fetchJsonOrNull<ElectionsApiResponse>(`${apiBase}/v1/elections`);
   const elections = electionsRes?.elections ?? [];
 
   const electionsDetailed = await Promise.all(
@@ -503,104 +500,63 @@ export default async function Page() {
         auditBundleRes,
         zkProofRes,
       ] = await Promise.all([
-        safeFetchJson<PhaseChangesResponse>(
-          `${apiBase}/v1/elections/${id}/phase-changes`,
-          { ok: true, phaseChanges: [] },
-        ),
-        safeFetchJson<ActsResponse>(`${apiBase}/v1/elections/${id}/acts`, { ok: true, acts: [] }),
-        safeFetchJson<AnchorsResponse>(
-          `${apiBase}/v1/elections/${id}/anchors`,
-          { ok: true, anchors: [] },
-        ),
-        safeFetchJson<CandidatesResponse>(`${apiBase}/v1/elections/${id}/candidates`, {
-          ok: true,
-          candidates: [],
-        }),
-        safeFetchJson<ManifestResponse>(`${apiBase}/v1/elections/${id}/manifest`, {
-          ok: true,
-          manifest: undefined,
-          source: "desconocido",
-        }),
-        safeFetchJson<SignupsSummaryResponse>(
-          `${apiBase}/v1/elections/${id}/signups/summary`,
-          { ok: true, summary: { total: 0, uniqueNullifiers: 0 } },
-        ),
-        safeFetchJson<BallotsSummaryResponse>(
-          `${apiBase}/v1/elections/${id}/ballots/summary`,
-          { ok: true, summary: { total: 0, uniqueBallotIndexes: 0 } },
-        ),
-        safeFetchJson<BallotsResponse>(`${apiBase}/v1/elections/${id}/ballots`, {
-          ok: true,
-          ballots: [],
-        }),
-        safeFetchJson<ConsistencyResponse>(
-          `${apiBase}/v1/elections/${id}/consistency`,
-          { ok: true, consistency: null },
-        ),
-        safeFetchJson<IncidentsResponse>(`${apiBase}/v1/elections/${id}/incidents`, {
-          ok: true,
-          incidents: [],
-        }),
-        safeFetchJson<ResultsResponse>(`${apiBase}/v1/elections/${id}/results`, {
-          ok: true,
-          results: [],
-        }),
-        safeFetchJson<ElectionEnrollmentResponse>(`${apiBase}/v1/elections/${id}/enrollment`, {
-          ok: true,
-          summary: {
-            totalRequests: 0,
-            pendingReview: 0,
-            approvedRequests: 0,
-            rejectedRequests: 0,
-            totalAuthorizations: 0,
-            activeAuthorizations: 0,
-            activeWalletCoverage: 0,
-          },
-          requests: [],
-          authorizations: [],
-        }),
-        safeFetchJson<AuditWindowResponse>(`${apiBase}/v1/elections/${id}/audit-window`, {
-          ok: true,
-          auditWindow: null,
-        }),
-        safeFetchJson<AuditBundleResponse>(`${apiBase}/v1/elections/${id}/audit-bundle`, {
-          ok: true,
-          bundleHash: null,
-          exportStatus: "NOT_MATERIALIZED",
-        }),
-        safeFetchJson<ZkProofResponse>(`${apiBase}/v1/elections/${id}/zk-proof`, {
-          ok: true,
-          electionId: id,
-          zkProof: null,
-          honesty: {
-            whatIsProved: "No hay endpoint de prueba ZK disponible",
-            whatIsNotProved: [],
-            auditabilityNote: "",
-          },
-        }),
+        fetchJsonOrNull<PhaseChangesResponse>(`${apiBase}/v1/elections/${id}/phase-changes`),
+        fetchJsonOrNull<ActsResponse>(`${apiBase}/v1/elections/${id}/acts`),
+        fetchJsonOrNull<AnchorsResponse>(`${apiBase}/v1/elections/${id}/anchors`),
+        fetchJsonOrNull<CandidatesResponse>(`${apiBase}/v1/elections/${id}/candidates`),
+        fetchJsonOrNull<ManifestResponse>(`${apiBase}/v1/elections/${id}/manifest`),
+        fetchJsonOrNull<SignupsSummaryResponse>(`${apiBase}/v1/elections/${id}/signups/summary`),
+        fetchJsonOrNull<BallotsSummaryResponse>(`${apiBase}/v1/elections/${id}/ballots/summary`),
+        fetchJsonOrNull<BallotsResponse>(`${apiBase}/v1/elections/${id}/ballots`),
+        fetchJsonOrNull<ConsistencyResponse>(`${apiBase}/v1/elections/${id}/consistency`),
+        fetchJsonOrNull<IncidentsResponse>(`${apiBase}/v1/elections/${id}/incidents`),
+        fetchJsonOrNull<ResultsResponse>(`${apiBase}/v1/elections/${id}/results`),
+        fetchJsonOrNull<ElectionEnrollmentResponse>(`${apiBase}/v1/elections/${id}/enrollment`),
+        fetchJsonOrNull<AuditWindowResponse>(`${apiBase}/v1/elections/${id}/audit-window`),
+        fetchJsonOrNull<AuditBundleResponse>(`${apiBase}/v1/elections/${id}/audit-bundle`),
+        fetchJsonOrNull<ZkProofResponse>(`${apiBase}/v1/elections/${id}/zk-proof`),
       ]);
+
+      const unavailableSources = [
+        phaseChangesRes ? null : "phase-changes",
+        actsRes ? null : "acts",
+        anchorsRes ? null : "anchors",
+        candidatesRes ? null : "candidates",
+        manifestRes ? null : "manifest",
+        signupsSummaryRes ? null : "signups-summary",
+        ballotsSummaryRes ? null : "ballots-summary",
+        ballotsRes ? null : "ballots",
+        consistencyRes ? null : "consistency",
+        incidentsRes ? null : "incidents",
+        resultsRes ? null : "results",
+        enrollmentRes ? null : "enrollment",
+        auditWindowRes ? null : "audit-window",
+        auditBundleRes ? null : "audit-bundle",
+        zkProofRes ? null : "zk-proof",
+      ].filter((value): value is string => value != null);
 
       return {
         ...e,
-        phaseChanges: phaseChangesRes.phaseChanges,
-        acts: actsRes.acts,
-        anchors: anchorsRes.anchors,
-        candidates: candidatesRes.candidates,
-        manifest: manifestRes.manifest ?? null,
-        manifestSource: manifestRes.source ?? null,
-        signupsSummary: signupsSummaryRes.summary,
-        ballotsSummary: ballotsSummaryRes.summary,
-        ballots: ballotsRes.ballots,
-        consistency: consistencyRes.consistency,
-        incidents: incidentsRes.incidents,
-        results: resultsRes.results,
-        enrollment: enrollmentRes,
-        auditWindow: auditWindowRes.auditWindow,
-        bundleHash: auditBundleRes.bundleHash,
-        bundleExportStatus: auditBundleRes.exportStatus,
-        zkProof: zkProofRes.zkProof,
-        decryptionProof: zkProofRes.decryptionProof ?? null,
-        zkProofHonesty: zkProofRes.honesty,
+        phaseChanges: phaseChangesRes?.phaseChanges ?? [],
+        acts: actsRes?.acts ?? [],
+        anchors: anchorsRes?.anchors ?? [],
+        candidates: candidatesRes?.candidates ?? [],
+        manifest: manifestRes?.manifest ?? null,
+        manifestSource: manifestRes?.source ?? null,
+        signupsSummary: signupsSummaryRes?.summary ?? { total: 0, uniqueNullifiers: 0 },
+        ballotsSummary: ballotsSummaryRes?.summary ?? { total: 0, uniqueBallotIndexes: 0 },
+        ballots: ballotsRes?.ballots ?? [],
+        consistency: consistencyRes?.consistency ?? null,
+        incidents: incidentsRes?.incidents ?? [],
+        results: resultsRes?.results ?? [],
+        enrollment: enrollmentRes ?? null,
+        auditWindow: auditWindowRes?.auditWindow ?? null,
+        bundleHash: auditBundleRes?.bundleHash ?? null,
+        bundleExportStatus: auditBundleRes?.exportStatus ?? "UNAVAILABLE",
+        zkProof: zkProofRes?.zkProof ?? null,
+        decryptionProof: zkProofRes?.decryptionProof ?? null,
+        zkProofHonesty: zkProofRes?.honesty ?? null,
+        unavailableSources,
       };
     }),
   );
@@ -772,6 +728,22 @@ export default async function Page() {
                       <span style={{ color: "#cbd5e1" }}>·</span>
                       <span>Creada: {formatTimestamp(e.createdAtTimestamp)}</span>
                     </div>
+                    {e.unavailableSources.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: "0.75rem",
+                          padding: "0.625rem 0.75rem",
+                          background: "#fffbeb",
+                          border: "1px solid #fcd34d",
+                          borderRadius: "8px",
+                          fontSize: "0.6875rem",
+                          color: "#92400e",
+                        }}
+                      >
+                        Evidencia no disponible para esta vista: {e.unavailableSources.join(", ")}.
+                        El observatorio no está interpretando estas ausencias como valores válidos.
+                      </div>
+                    )}
                   </div>
 
                   {/* ─── Stat Cards ─── */}
@@ -937,19 +909,19 @@ export default async function Page() {
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
                         <div className="stat-card">
                           <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Solicitudes</span>
-                          <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment.summary.totalRequests}</span>
+                          <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment?.summary.totalRequests ?? "N/D"}</span>
                         </div>
                         <div className="stat-card">
                           <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Pendientes</span>
-                          <span className="badge badge-warning" style={{ alignSelf: "flex-start" }}>{e.enrollment.summary.pendingReview}</span>
+                          <span className="badge badge-warning" style={{ alignSelf: "flex-start" }}>{e.enrollment?.summary.pendingReview ?? "N/D"}</span>
                         </div>
                         <div className="stat-card">
                           <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Autorizados</span>
-                          <span className="badge badge-valid" style={{ alignSelf: "flex-start" }}>{e.enrollment.summary.activeAuthorizations}</span>
+                          <span className="badge badge-valid" style={{ alignSelf: "flex-start" }}>{e.enrollment?.summary.activeAuthorizations ?? "N/D"}</span>
                         </div>
                         <div className="stat-card">
                           <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Wallet activa</span>
-                          <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment.summary.activeWalletCoverage}</span>
+                          <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment?.summary.activeWalletCoverage ?? "N/D"}</span>
                         </div>
                       </div>
 
@@ -958,7 +930,9 @@ export default async function Page() {
                           <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#334155", marginBottom: "0.5rem" }}>
                             Solicitudes recientes
                           </div>
-                          {e.enrollment.requests.length === 0 ? (
+                          {!e.enrollment ? (
+                            <p style={{ fontSize: "0.75rem", color: "#b45309" }}>No se pudo consultar el estado de enrolamiento.</p>
+                          ) : e.enrollment.requests.length === 0 ? (
                             <p style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Sin solicitudes ligadas a esta elección.</p>
                           ) : (
                             <div style={{ display: "grid", gap: "0.5rem" }}>
@@ -988,7 +962,9 @@ export default async function Page() {
                           <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#334155", marginBottom: "0.5rem" }}>
                             Autorizaciones activas
                           </div>
-                          {e.enrollment.authorizations.length === 0 ? (
+                          {!e.enrollment ? (
+                            <p style={{ fontSize: "0.75rem", color: "#b45309" }}>No se pudo consultar el estado de autorizaciones.</p>
+                          ) : e.enrollment.authorizations.length === 0 ? (
                             <p style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Sin autorizaciones registradas para esta elección.</p>
                           ) : (
                             <div style={{ display: "grid", gap: "0.5rem" }}>
@@ -1028,7 +1004,7 @@ export default async function Page() {
                       <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "2rem", borderLeft: "3px solid #6366f1" }}>
                         <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
                           <h3 style={{ fontSize: "0.875rem", fontWeight: 600, color: "#0f172a" }}>
-                            Resultados experimentales publicados
+                            Resultados publicados
                           </h3>
                           <span className="badge badge-info">{r.resultMode}</span>
                         </div>
@@ -1613,7 +1589,7 @@ export default async function Page() {
         }}
       >
         <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Evidencia verificable
         </p>
       </footer>
     </main>

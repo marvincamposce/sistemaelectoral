@@ -6,14 +6,16 @@ import type { TypedContractEvent, TypedDeferredTopicFilter, TypedEventLog, Typed
   
 
   export interface BU_PVP_1_TallyVerifierInterface extends Interface {
-    getFunction(nameOrSignature: "groth16Verifier" | "verifyTallyProof"): FunctionFragment;
+    getFunction(nameOrSignature: "electionRegistry" | "groth16Verifier" | "verifyTallyProof"): FunctionFragment;
 
     getEvent(nameOrSignatureOrTopic: "TallyProofVerifiedOnChain"): EventFragment;
 
-    encodeFunctionData(functionFragment: 'groth16Verifier', values?: undefined): string;
+    encodeFunctionData(functionFragment: 'electionRegistry', values?: undefined): string;
+encodeFunctionData(functionFragment: 'groth16Verifier', values?: undefined): string;
 encodeFunctionData(functionFragment: 'verifyTallyProof', values: [BigNumberish, string, [BigNumberish, BigNumberish], [[BigNumberish, BigNumberish], [BigNumberish, BigNumberish]], [BigNumberish, BigNumberish], BigNumberish[]]): string;
 
-    decodeFunctionResult(functionFragment: 'groth16Verifier', data: BytesLike): Result;
+    decodeFunctionResult(functionFragment: 'electionRegistry', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'groth16Verifier', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'verifyTallyProof', data: BytesLike): Result;
   }
 
@@ -64,6 +66,14 @@ decodeFunctionResult(functionFragment: 'verifyTallyProof', data: BytesLike): Res
 
     
     
+    electionRegistry: TypedContractMethod<
+      [],
+      [string],
+      'view'
+    >
+    
+
+    
     groth16Verifier: TypedContractMethod<
       [],
       [string],
@@ -82,7 +92,12 @@ decodeFunctionResult(functionFragment: 'verifyTallyProof', data: BytesLike): Res
 
     getFunction<T extends ContractMethod = ContractMethod>(key: string | FunctionFragment): T;
 
-    getFunction(nameOrSignature: 'groth16Verifier'): TypedContractMethod<
+    getFunction(nameOrSignature: 'electionRegistry'): TypedContractMethod<
+      [],
+      [string],
+      'view'
+    >;
+getFunction(nameOrSignature: 'groth16Verifier'): TypedContractMethod<
       [],
       [string],
       'view'

@@ -32,9 +32,54 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     await expect(registry.connect(aea).closeVoting(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).startProcessing(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).finalizeProcessing(0)).to.not.be.revert(ethers);
+    await expect(registry.connect(aea).publishResults(0)).to.be.revert(ethers);
+    await expect(registry.connect(aea).setTallyVerifier(await rea.getAddress())).to.not.be.revert(ethers);
+    await expect(registry.connect(rea).recordTallyProofVerification(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).publishResults(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).openAuditWindow(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).archiveElection(0)).to.not.be.revert(ethers);
+  });
+
+  it("only allows final publication after verifier callback records proof verification", async function () {
+    const [aea, rea] = await ethers.getSigners();
+    if (!aea || !rea) throw new Error("Missing signers");
+
+    const RegistryFactory = await ethers.getContractFactory("BU_PVP_1_ElectionRegistry");
+    const registry = (await RegistryFactory.connect(aea).deploy()) as any;
+    await registry.waitForDeployment();
+
+    const GrothFactory = await ethers.getContractFactory("MockAlwaysValidGroth16Verifier");
+    const groth = (await GrothFactory.connect(aea).deploy()) as any;
+    await groth.waitForDeployment();
+
+    const TallyFactory = await ethers.getContractFactory("BU_PVP_1_TallyVerifier");
+    const tallyVerifier = (await TallyFactory.connect(aea).deploy(
+      await groth.getAddress(),
+      await registry.getAddress(),
+    )) as any;
+    await tallyVerifier.waitForDeployment();
+
+    await (await registry.connect(aea).setTallyVerifier(await tallyVerifier.getAddress())).wait();
+    await (
+      await registry
+        .connect(aea)
+        .createElection("0x" + "11".repeat(32), await rea.getAddress(), "0x" + "22".repeat(32))
+    ).wait();
+    await (await registry.connect(aea).openRegistry(0)).wait();
+    await (await registry.connect(aea).closeRegistry(0)).wait();
+    await (await registry.connect(aea).openVoting(0)).wait();
+    await (await registry.connect(aea).closeVoting(0)).wait();
+    await (await registry.connect(aea).startProcessing(0)).wait();
+    await (await registry.connect(aea).finalizeProcessing(0)).wait();
+
+    await expect(registry.connect(aea).publishResults(0)).to.be.revert(ethers);
+
+    await expect(
+      tallyVerifier.verifyTallyProof(0n, "job-ok", [0n, 0n], [[0n, 0n], [0n, 0n]], [0n, 0n], []),
+    ).to.not.be.revert(ethers);
+
+    expect(await registry.tallyProofVerified(0)).to.equal(true);
+    await expect(registry.connect(aea).publishResults(0)).to.not.be.revert(ethers);
   });
 
   it("records signup with REA permit signature and prevents nullifier reuse", async function () {

@@ -5,7 +5,7 @@
     "generatedAt": "2026-04-15T03:26:20.602Z",
     "chainId": "31337",
     "contractAddress": "0x59b670e9fa9d0a427751af201d676719a970857b",
-    "title": "Elección experimental Grupo A - Abril 2026",
+    "title": "Elección Grupo A - Abril 2026",
     "authority": {
       "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
     },
@@ -13,7 +13,7 @@
       "address": "0x1234567890AbcdEF1234567890aBcdef12345678"
     },
     "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
-    "notes": "Instancia experimental local para pruebas de actas, anclaje y observación."
+    "notes": "Instancia local para pruebas de actas, anclaje y observación."
   },
   "signature": {
     "algorithm": "ed25519-sha256-jcs",

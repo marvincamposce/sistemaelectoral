@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
-import { x25519 } from "@noble/curves/ed25519.js";
 
 import {
   decodeBallotCiphertextEnvelope,
@@ -59,20 +58,13 @@ test("decryptBallotPayload fails with tampered ciphertext (V2)", async () => {
   });
 });
 
-test("encryptBallotPayload/decryptBallotPayload fallback legacy V1 with X25519 key", async () => {
-  const privateKey = x25519.utils.randomSecretKey();
-  const publicKey = x25519.getPublicKey(privateKey);
-
-  const coordinator = {
-    privateKey: ethers.hexlify(privateKey),
-    publicKey: ethers.hexlify(publicKey),
-  };
-
-  const payload = { electionId: "7", selection: "CANDIDATO_LEGACY" };
+test("encryptBallotPayload defaults to zk-friendly V2", async () => {
+  const coordinator = await generateExperimentalVotingKeypair();
+  const payload = { electionId: "7", selection: "CANDIDATO_A", selectionIndex: 0 };
   const ciphertext = await encryptBallotPayload(payload, coordinator.publicKey);
   const envelope = decodeBallotCiphertextEnvelope(ciphertext);
 
-  assert.equal(envelope.version, "BU-PVP-1_BALLOT_X25519_XCHACHA20_V1");
+  assert.equal(envelope.version, "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2");
 
   const decrypted = await decryptBallotPayload(ciphertext, coordinator.privateKey);
   assert.deepEqual(decrypted, payload);

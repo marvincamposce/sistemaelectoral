@@ -14,15 +14,12 @@
     "build:rust-backend": "cargo build --release --manifest-path rust-backend/Cargo.toml",
     "setup": "SETUP_BACKEND=rust bash scripts/setup.sh",
     "setup:rust": "SETUP_BACKEND=rust bash scripts/setup.sh",
-    "setup:snarkjs": "SETUP_BACKEND=snarkjs bash scripts/setup.sh",
     "export:solidity-verifier": "bash scripts/export-verifier.sh",
     "test": "node --test dist/test/*.test.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {
-    "snarkjs": "^0.7.5"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.19.17",
     "circomlib": "^2.0.5",

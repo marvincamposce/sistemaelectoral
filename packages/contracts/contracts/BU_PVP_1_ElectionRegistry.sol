@@ -6,8 +6,8 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @title BU-PVP-1 Election Registry (TPE core)
-/// @notice Research reference implementation: phase machine + evidence events + acta anchoring.
-/// @dev Proof verification is stubbed behind verifier interfaces; production requires real verifiers.
+/// @notice Phase machine + evidence events + acta anchoring for BU-PVP-1 elections.
+/// @dev Final publication is gated by a dedicated tally verifier callback; transcript commitments are recorded separately from proof verification.
 contract BU_PVP_1_ElectionRegistry is Ownable {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -42,6 +42,7 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     }
 
     Election[] private _elections;
+    address public tallyVerifier;
 
     // electionId => nullifier used
     mapping(uint256 => mapping(bytes32 => bool)) public registryNullifierUsed;
@@ -53,6 +54,7 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     // electionId => counters
     mapping(uint256 => uint256) public signupCount;
     mapping(uint256 => uint256) public ballotCount;
+    mapping(uint256 => bool) public tallyProofVerified;
 
     event ElectionCreated(
         uint256 indexed electionId,
@@ -83,11 +85,15 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         bytes32 indexed snapshotHash
     );
 
-    event TallyProofPublished(
+    event TallyTranscriptCommitmentPublished(
         uint256 indexed electionId,
-        bytes32 indexed proofHash,
-        bytes proofPayload
+        bytes32 indexed commitmentHash,
+        bytes commitmentPayload
     );
+
+    event TallyVerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
+
+    event TallyProofVerificationRecorded(uint256 indexed electionId, address indexed verifier);
 
     error NotElectionAuthority(uint256 electionId, address caller);
     error WrongPhase(uint256 electionId, Phase expected, Phase actual);
@@ -98,6 +104,9 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     error VotingAddressNotRegistered(uint256 electionId, address votingAddress);
     error BallotAlreadyCast(uint256 electionId, address votingAddress);
     error InvalidBallotSignature(uint256 electionId, address votingAddress);
+    error InvalidTallyVerifier();
+    error NotTallyVerifier(address caller);
+    error TallyProofNotVerified(uint256 electionId);
 
     modifier onlyElectionAuthority(uint256 electionId) {
         if (_elections[electionId].authority != msg.sender) {
@@ -114,7 +123,24 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         _;
     }
 
+    modifier onlyTallyVerifier() {
+        if (msg.sender != tallyVerifier) {
+            revert NotTallyVerifier(msg.sender);
+        }
+        _;
+    }
+
     constructor() Ownable(msg.sender) {}
+
+    function setTallyVerifier(address verifier) external onlyOwner {
+        if (verifier == address(0)) {
+            revert InvalidTallyVerifier();
+        }
+
+        address previousVerifier = tallyVerifier;
+        tallyVerifier = verifier;
+        emit TallyVerifierUpdated(previousVerifier, verifier);
+    }
 
     function electionCount() external view returns (uint256) {
         return _elections.length;
@@ -204,7 +230,19 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         onlyElectionAuthority(electionId)
         inPhase(electionId, Phase.TALLYING)
     {
+        if (!tallyProofVerified[electionId]) {
+            revert TallyProofNotVerified(electionId);
+        }
         _setPhase(electionId, Phase.RESULTS_PUBLISHED);
+    }
+
+    function recordTallyProofVerification(uint256 electionId)
+        external
+        onlyTallyVerifier
+        inPhase(electionId, Phase.TALLYING)
+    {
+        tallyProofVerified[electionId] = true;
+        emit TallyProofVerificationRecorded(electionId, msg.sender);
     }
 
     function openAuditWindow(uint256 electionId)
@@ -281,14 +319,14 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         emit ActaPublished(electionId, kind, snapshotHash);
     }
 
-    /// @notice Publishes a tally proof / batch proof stub.
-    /// @dev In full ZK implementations, this is parsed by a verifier. Currently an abstract evidence stub.
-    function publishTallyProof(
+    /// @notice Publishes the transcript commitment used as the pre-proof anchor for tally verification.
+    /// @dev This does not verify the proof. Final publication remains gated by the dedicated tally verifier callback.
+    function publishTallyTranscriptCommitment(
         uint256 electionId,
-        bytes calldata proofPayload
+        bytes calldata commitmentPayload
     ) external onlyElectionAuthority(electionId) inPhase(electionId, Phase.TALLYING) {
-        bytes32 proofHash = keccak256(proofPayload);
-        emit TallyProofPublished(electionId, proofHash, proofPayload);
+        bytes32 commitmentHash = keccak256(commitmentPayload);
+        emit TallyTranscriptCommitmentPublished(electionId, commitmentHash, commitmentPayload);
     }
 
     function _setPhase(uint256 electionId, Phase newPhase) private {

@@ -1,18 +1,11 @@
-import fs from "node:fs/promises";
-
 import { z } from "zod";
 
 import { getEnvResult } from "../../../../../lib/env";
-import { ensureSchema, getCurrentElectionManifest, getPool, listAdminLogEntries } from "../../../../../lib/db";
+import { ensureSchema, getCurrentElectionManifest, getPool } from "../../../../../lib/db";
 
 export const runtime = "nodejs";
 
 const ParamsSchema = z.object({ id: z.string().regex(/^\d+$/) }).strict();
-
-type CreateElectionDetails = {
-  manifestFilePath?: string;
-  manifestHashHex?: string;
-};
 
 export async function GET(
   _req: Request,
@@ -69,46 +62,8 @@ export async function GET(
       },
     });
   }
-
-  // Backward-compatible fallback for old elections created before manifest materialization.
-
-  const entries = await listAdminLogEntries({
-    pool,
-    chainId: env.CHAIN_ID,
-    contractAddress: env.CONTRACT_ADDRESS,
-    electionId,
-    limit: 50,
-  });
-
-  const create = entries.find((e) => e.code === "CREATE_ELECTION");
-  const details = (create?.details ?? {}) as CreateElectionDetails;
-  const manifestFilePath = typeof details.manifestFilePath === "string" ? details.manifestFilePath : null;
-  const manifestHashHex = typeof details.manifestHashHex === "string" ? details.manifestHashHex : null;
-
-  if (!manifestFilePath) {
-    return new Response(JSON.stringify({ ok: false, error: "manifest_not_available" }), {
-      status: 404,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
-  let raw: string;
-  try {
-    raw = await fs.readFile(manifestFilePath, "utf8");
-  } catch {
-    return new Response(JSON.stringify({ ok: false, error: "manifest_file_missing" }), {
-      status: 404,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
-  const fileName = manifestHashHex ? `manifest_${manifestHashHex}.signed.json` : `manifest.election-${electionId}.signed.json`;
-
-  return new Response(raw, {
-    status: 200,
-    headers: {
-      "content-type": "application/json",
-      "content-disposition": `attachment; filename=${fileName}`,
-    },
+  return new Response(JSON.stringify({ ok: false, error: "manifest_not_materialized" }), {
+    status: 404,
+    headers: { "content-type": "application/json" },
   });
 }

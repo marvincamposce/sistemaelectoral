@@ -432,7 +432,7 @@ program
 
 program
   .command("rea-credential")
-  .description("Genera una credencial experimental REA (incluye secretHex)")
+  .description("Genera una credencial REA (incluye secretHex)")
   .option("--registry-authority <address>", "Address del REA (opcional)")
   .option("--subject <label>", "Etiqueta del sujeto (opcional)")
   .option("--out <path>", "Ruta de salida (JSON)")
@@ -938,7 +938,7 @@ program
           resultMode: result.resultMode,
           proofState: result.proofState,
           payloadHash: result.payloadHash,
-          isSimulated: result.resultMode === "SIMULATED",
+          isSimulated: false,
         } : null,
         candidateCatalog: {
           count: candidates.length,
@@ -968,7 +968,7 @@ program
         } : null,
         honesty: bundle.honesty,
         warnings: [
-          ...(result?.resultMode === "SIMULATED" ? ["resultSummary es estático, no proviene de descifrado real"] : []),
+          ...([]),
           ...(candidates.length === 0 ? ["No hay catálogo de candidatos publicado en Evidence API"] : []),
           ...(!dbCatalogMatchesManifest ? ["El catálogo DB no coincide con el manifiesto vigente"] : []),
           ...(Boolean(detailedResult?.hasUnresolvedCandidateLabels) ? ["El resultado reporta etiquetas de candidato no resueltas"] : []),

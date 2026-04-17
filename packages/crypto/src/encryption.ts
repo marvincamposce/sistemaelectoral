@@ -1,7 +1,5 @@
 import { ethers } from "ethers";
 
-import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { x25519 } from "@noble/curves/ed25519.js";
 import * as circomlibjs from "circomlibjs";
 
 import {
@@ -9,7 +7,6 @@ import {
   type BallotCiphertextEnvelope,
 } from "@blockurna/shared";
 
-const BALLOT_AAD = ethers.toUtf8Bytes("BU-PVP-1:ballot:v1");
 const FIELD_PRIME = BigInt(
   "21888242871839275222246405745257275088548364400416034343698204186575808495617",
 );
@@ -17,10 +14,7 @@ const CHUNK_BYTES = 30;
 const MAX_PAYLOAD_BYTES = 4096;
 const SELECTION_MASK_DOMAIN = 0n;
 
-export type BallotEncryptionScheme =
-  | "LEGACY_X25519_V1"
-  | "ZK_FRIENDLY_V2"
-  | "AUTO";
+export type BallotEncryptionScheme = "ZK_FRIENDLY_V2";
 
 type PoseidonFn = ((inputs: bigint[]) => unknown) & {
   F: {
@@ -216,8 +210,8 @@ function requireFixedHexBytes(hex: string, expectedLen: number, label: string): 
 }
 
 /**
- * Creates an experimental Vote Keypair for the Voter Portal.
- * Uses BabyJub scalar/public point pair for zk-friendly ballot encryption.
+ * Creates a Vote Keypair for the voter flow.
+ * Uses a BabyJub scalar/public point pair for zk-friendly ballot encryption.
  */
 export async function generateExperimentalVotingKeypair(): Promise<{ publicKey: string; privateKey: string }> {
   const babyJub = await getBabyJub();
@@ -241,46 +235,6 @@ export function decodeBallotCiphertextEnvelope(ciphertextHex: string): BallotCip
     return BallotCiphertextEnvelopeSchema.parse(JSON.parse(raw) as unknown);
   } catch (err: unknown) {
     throw new Error(`Invalid ballot ciphertext envelope: ${(err as Error).message}`);
-  }
-}
-
-function encryptBallotPayloadLegacy(payload: unknown, coordinatorPubKeyHex: string): string {
-  const coordinatorPubKey = requireFixedHexBytes(coordinatorPubKeyHex, 32, "coordinatorPubKey");
-  const ephemeralPrivateKey = x25519.utils.randomSecretKey();
-  const ephemeralPublicKey = x25519.getPublicKey(ephemeralPrivateKey);
-  const sharedSecret = x25519.getSharedSecret(ephemeralPrivateKey, coordinatorPubKey);
-  const nonce = ethers.randomBytes(24);
-
-  const plaintext = ethers.toUtf8Bytes(JSON.stringify(payload));
-  const ciphertext = xchacha20poly1305(sharedSecret, nonce, BALLOT_AAD).encrypt(plaintext);
-
-  return encodeBallotCiphertextEnvelope({
-    version: "BU-PVP-1_BALLOT_X25519_XCHACHA20_V1",
-    kdf: "X25519",
-    aead: "XCHACHA20POLY1305",
-    ephemeralPublicKeyHex: ethers.hexlify(ephemeralPublicKey),
-    nonceHex: ethers.hexlify(nonce),
-    ciphertextHex: ethers.hexlify(ciphertext),
-  });
-}
-
-function decryptBallotPayloadLegacy(
-  envelope: Extract<BallotCiphertextEnvelope, { version: "BU-PVP-1_BALLOT_X25519_XCHACHA20_V1" }>,
-  coordinatorPrivateKeyHex: string,
-): unknown {
-  const coordinatorPrivateKey = requireFixedHexBytes(coordinatorPrivateKeyHex, 32, "coordinatorPrivateKey");
-  const ephemeralPublicKey = requireFixedHexBytes(envelope.ephemeralPublicKeyHex, 32, "ephemeralPublicKey");
-  const nonce = requireFixedHexBytes(envelope.nonceHex, 24, "nonce");
-  const ciphertext = ethers.getBytes(envelope.ciphertextHex);
-
-  const sharedSecret = x25519.getSharedSecret(coordinatorPrivateKey, ephemeralPublicKey);
-  const plaintext = xchacha20poly1305(sharedSecret, nonce, BALLOT_AAD).decrypt(ciphertext);
-  const decoded = ethers.toUtf8String(plaintext);
-
-  try {
-    return JSON.parse(decoded) as unknown;
-  } catch {
-    return decoded;
   }
 }
 
@@ -443,24 +397,12 @@ export async function encryptBallotPayload(
   coordinatorPubKeyHex: string,
   options?: { scheme?: BallotEncryptionScheme },
 ): Promise<string> {
-  const scheme = options?.scheme ?? "LEGACY_X25519_V1";
-
-  if (scheme === "LEGACY_X25519_V1") {
-    return encryptBallotPayloadLegacy(payload, coordinatorPubKeyHex);
+  const scheme = options?.scheme ?? "ZK_FRIENDLY_V2";
+  if (scheme !== "ZK_FRIENDLY_V2") {
+    throw new Error(`Unsupported ballot encryption scheme: ${scheme}`);
   }
-
-  if (scheme === "ZK_FRIENDLY_V2") {
-    const babyJub = await getBabyJub();
-    return encryptBallotPayloadZkFriendly(payload, coordinatorPubKeyHex, babyJub);
-  }
-
   const babyJub = await getBabyJub();
-  const coordinatorPoint = unpackBabyJubPoint(coordinatorPubKeyHex, babyJub);
-  if (coordinatorPoint) {
-    return encryptBallotPayloadZkFriendly(payload, coordinatorPubKeyHex, babyJub);
-  }
-
-  return encryptBallotPayloadLegacy(payload, coordinatorPubKeyHex);
+  return encryptBallotPayloadZkFriendly(payload, coordinatorPubKeyHex, babyJub);
 }
 
 export async function decryptBallotPayload(
@@ -468,11 +410,7 @@ export async function decryptBallotPayload(
   coordinatorPrivateKeyHex: string,
 ): Promise<unknown> {
   const envelope = decodeBallotCiphertextEnvelope(ciphertextHex);
-  if (envelope.version === "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2") {
-    return decryptBallotPayloadZkFriendly(envelope, coordinatorPrivateKeyHex);
-  }
-
-  return decryptBallotPayloadLegacy(envelope, coordinatorPrivateKeyHex);
+  return decryptBallotPayloadZkFriendly(envelope, coordinatorPrivateKeyHex);
 }
 
 /**
@@ -480,5 +418,5 @@ export async function decryptBallotPayload(
  * Kept for compatibility with older callers.
  */
 export async function mockEncryptBallot(payload: any, coordinatorPubKey: string): Promise<string> {
-  return encryptBallotPayload(payload, coordinatorPubKey);
+  return encryptBallotPayload(payload, coordinatorPubKey, { scheme: "ZK_FRIENDLY_V2" });
 }

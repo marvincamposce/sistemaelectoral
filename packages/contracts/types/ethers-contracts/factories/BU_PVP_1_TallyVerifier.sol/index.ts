@@ -2,4 +2,5 @@
 /* tslint:disable */
 /* eslint-disable */
 export { BU_PVP_1_TallyVerifier__factory } from './BU_PVP_1_TallyVerifier__factory.js';
+export { IElectionRegistryTallyRecorder__factory } from './IElectionRegistryTallyRecorder__factory.js';
 export { IGroth16Verifier__factory } from './IGroth16Verifier__factory.js';

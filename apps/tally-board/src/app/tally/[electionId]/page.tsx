@@ -9,7 +9,7 @@ import {
   generateCoordinatorSharesAction,
   getDecryptionCeremonyStateAction,
   getDecryptionShareSigningMessageAction,
-  publishProofAction, 
+  publishTranscriptCommitmentAction, 
   publishActaWithContentAction, 
   advanceToResultsPublishedAction,
   createProcessingBatchAction,
@@ -19,6 +19,7 @@ import {
   updateTallyJobStatusAction,
   logIncidentAction,
   createResultPayloadAction,
+  getZkPublicationGateAction,
   openAuditWindowAction,
   persistAuditBundleAction,
   generateZkProofAction,
@@ -32,7 +33,7 @@ function getClientEnv() {
   };
 }
 
-type TallyStatus = "IDLE" | "FETCHING_CIPHERTEXTS" | "SIMULATING_ZK" | "PUBLISHING_STUB" | "PUBLISHING_ACTA" | "DONE";
+type TallyStatus = "IDLE" | "FETCHING_CIPHERTEXTS" | "COMPUTING_TALLY" | "PUBLISHING_TRANSCRIPT" | "PUBLISHING_ACTA" | "DONE";
 
 type RealTallyComputation = {
   summary: Record<string, number>;
@@ -43,8 +44,8 @@ type RealTallyComputation = {
   merkleRootPoseidon: string;
   transcriptHash: string;
   transcript: Parameters<typeof generateZkProofAction>[1];
-  proofPayload: string;
-  proofTxHash: string;
+  commitmentPayload: string;
+  commitmentTxHash: string;
 };
 
 type BallotsApiResponse = {
@@ -65,6 +66,12 @@ type DecryptionCeremonyState = {
   openedAt: string | null;
   closedAt: string | null;
   createdAt: string;
+};
+
+type ZkPublicationGateState = {
+  ready: boolean;
+  proofState: string;
+  blockers: string[];
 };
 
 export default function TallyPage({ params }: { params: Promise<{ electionId: string }> }) {
@@ -92,6 +99,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
   const [zkProofJobId, setZkProofJobId] = useState<string | null>(null);
   const [onchainVerifyTx, setOnchainVerifyTx] = useState<string | null>(null);
   const [onchainSubmitting, setOnchainSubmitting] = useState(false);
+  const [zkGate, setZkGate] = useState<ZkPublicationGateState | null>(null);
 
   const addLog = (msg: string) => setLogs(l => [...l, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
@@ -116,6 +124,18 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
     void refreshCeremonyState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [electionId]);
+
+  const refreshZkGate = async (jobId?: string | null) => {
+    const res = await getZkPublicationGateAction(electionId, { tallyJobId: jobId ?? lastJobId });
+    if (res.ok) {
+      setZkGate({
+        ready: res.ready,
+        proofState: res.proofState,
+        blockers: res.blockers,
+      });
+    }
+    return res;
+  };
 
   const handleCreateCeremony = async () => {
     try {
@@ -267,14 +287,18 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       setCeremonyMsg("");
       setLogs([]);
       setTallyComputation(null);
+      setZkProofStatus(null);
+      setZkProofJobId(null);
+      setOnchainVerifyTx(null);
+      setZkGate(null);
 
       const ceremonySnapshot = await refreshCeremonyState({ silent: true });
       if (!ceremonySnapshot) {
-        addLog("Advertencia: no existe una ceremonia 2-de-3 activa. Se intentará modo heredado (legacy) solo si está habilitado en el servidor.");
+        addLog("No existe una ceremonia 2-de-3 activa. El escrutinio no continuará hasta que existan shares válidas suficientes.");
       } else if (ceremonySnapshot.shareCount < ceremonySnapshot.thresholdRequired) {
         addLog(
           `Advertencia: ceremonia ${ceremonySnapshot.ceremonyId} con ${ceremonySnapshot.shareCount}/${ceremonySnapshot.thresholdRequired} fragmentos. ` +
-            "Sin umbral completo, solo podrá continuar si el modo heredado (legacy) está habilitado.",
+            "Sin umbral completo, el escrutinio permanece bloqueado.",
         );
       } else {
         addLog(
@@ -300,7 +324,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         throw new Error("No hay boletas (input_count=0). Abortando. Incidente registrado.");
       }
 
-      setStatus("SIMULATING_ZK");
+      setStatus("COMPUTING_TALLY");
       addLog("Descifrando boletas y calculando resumen real...");
       const tallyRes = await computeRealTallyAction(electionId);
       if (!tallyRes.ok) {
@@ -353,22 +377,22 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       addLog(`Proceso de escrutinio creado. ID: ${jobId}`);
 
       const transcriptHash = tallyData.transcriptHash;
-      const proofPayload = ethers.solidityPacked(
+      const commitmentPayload = ethers.solidityPacked(
         ["string", "bytes32", "bytes32", "uint256"],
         ["BU-PVP-1:TALLY_TRANSCRIPT_V1", derivedRoot, transcriptHash, BigInt(ciphertexts.length)],
       );
 
-      setStatus("PUBLISHING_STUB");
-  addLog("Publicando compromiso del transcript de escrutinio en cadena (sin verificación ZK en este paso)...");
-      const proofResult = await publishProofAction(electionId, proofPayload);
-  if (!proofResult.ok) throw new Error(`Fallo publicando el compromiso de transcript: ${proofResult.error}`);
-  addLog(`Compromiso de transcript publicado en cadena. Tx: ${proofResult.txHash}`);
+      setStatus("PUBLISHING_TRANSCRIPT");
+  addLog("Publicando compromiso del transcript de escrutinio en cadena...");
+      const commitmentResult = await publishTranscriptCommitmentAction(electionId, commitmentPayload);
+  if (!commitmentResult.ok) throw new Error(`Fallo publicando el compromiso de transcript: ${commitmentResult.error}`);
+  addLog(`Compromiso de transcript publicado en cadena. Tx: ${commitmentResult.txHash}`);
 
       await updateTallyJobStatusAction(
         jobId!,
         "COMPLETED",
-        "TRANSCRIPT_VERIFIED",
-        proofResult.txHash!,
+        "TRANSCRIPT_COMMITTED",
+        commitmentResult.txHash!,
         {
           summary: tallyData.summary,
           validCount: tallyData.validCount,
@@ -380,6 +404,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         },
       );
       setLastJobId(jobId!);
+      setZkGate({
+        ready: false,
+        proofState: "TRANSCRIPT_COMMITTED",
+        blockers: ["La publicación final sigue bloqueada hasta completar la verificación ZK obligatoria."],
+      });
       setTallyComputation({
         summary: tallyData.summary,
         validCount: tallyData.validCount,
@@ -389,8 +418,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         merkleRootPoseidon: tallyData.merkleRootPoseidon,
         transcriptHash,
         transcript: tallyData.transcript,
-        proofPayload,
-        proofTxHash: proofResult.txHash!,
+        commitmentPayload,
+        commitmentTxHash: commitmentResult.txHash!,
       });
 
       setStatus("PUBLISHING_ACTA");
@@ -399,8 +428,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       const actaJson = {
         kind: "ACTA_ESCRUTINIO",
         electionId,
-        tallyMode: "REAL_TRANSCRIPT",
-        note: "Descifrado y conteo reales ejecutados. Compromiso de transcript publicado; la verificación ZK corre por un flujo separado.",
+        tallyMode: "REAL_TRANSCRIPT_COMMITTED",
+        note: "Descifrado y conteo reales ejecutados. El transcript quedó comprometido en cadena, pero la elección no puede publicar resultados finales hasta completar la verificación ZK.",
         totalProcessed: tallyData.ballotsCount,
         validBallots: tallyData.validCount,
         invalidBallots: tallyData.invalidCount,
@@ -408,7 +437,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         merkleRoot: derivedRoot,
         merkleRootPoseidon: tallyData.merkleRootPoseidon,
         transcriptHash,
-        proofPayload,
+        commitmentPayload,
         timestamp: new Date().toISOString()
       };
       
@@ -417,13 +446,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       if (!actaResult.ok) throw new Error(`Fallo anclando acta: ${actaResult.error}`);
       addLog(`ACTA_ESCRUTINIO anclada en cadena. Tx: ${actaResult.txHash} | actId: ${actaResult.actId}`);
 
-      addLog("Notificando contrato para transicionar de TALLYING a RESULTS_PUBLISHED...");
-      const resultsResult = await advanceToResultsPublishedAction(electionId);
-      if (!resultsResult.ok) throw new Error(`Fallo cambiando la fase publicada: ${resultsResult.error}`);
-      addLog(`Fase de resultados publicados activada. Tx: ${resultsResult.txHash}`);
-
       setStatus("DONE");
-      addLog("Escrutinio completado con descifrado y conteo reales.");
+      addLog("Escrutinio base completado. Falta la prueba ZK y su verificación para publicar resultados finales.");
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err));
       setStatus("IDLE");
@@ -438,33 +462,38 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       }
 
       const jobId = lastJobId ?? "proceso-desconocido";
+      const gateRes = await refreshZkGate(jobId);
+      if (!gateRes.ok) throw new Error(gateRes.error ?? "No se pudo validar el gate ZK.");
+      if (!gateRes.ready) {
+        throw new Error(`No se puede publicar resultados finales: ${gateRes.blockers.join(" ")}`);
+      }
       addLog(`Generando contenido de resultados (payload) basado en tallyJobId: ${jobId}...`);
       const resultJson = {
         electionId,
         tallyJobId: jobId,
-        proofState: "TRANSCRIPT_VERIFIED",
+        proofState: "VERIFIED",
         ballotsCount: tallyComputation.ballotsCount,
         batchesCount: 1,
-        resultMode: "TRANSCRIPT_VERIFIED",
+        resultMode: "VERIFIED",
         summary: tallyComputation.summary,
         validBallots: tallyComputation.validCount,
         invalidBallots: tallyComputation.invalidCount,
         merkleRoot: tallyComputation.merkleRoot,
         merkleRootPoseidon: tallyComputation.merkleRootPoseidon,
         transcriptHash: tallyComputation.transcriptHash,
-        proofPayload: tallyComputation.proofPayload,
-        proofTxHash: tallyComputation.proofTxHash,
+        commitmentPayload: tallyComputation.commitmentPayload,
+        commitmentTxHash: tallyComputation.commitmentTxHash,
         honesty: {
-          note: "El resumen de resultados proviene de descifrado real de ciphertexts y un transcript comprometido en cadena.",
-          whatIsReal: "Descifrado, conteo, raíz Merkle, compromiso en cadena y actas ancladas",
-          whatIsPending: "La verificación ZK sigue en un flujo separado y no forma parte de esta publicación base."
+          note: "El resumen de resultados proviene de descifrado y conteo reales cerrados por verificación ZK antes de publicar.",
+          whatIsReal: "Descifrado, conteo, raíz Merkle, compromiso en cadena, prueba ZK y verificación final",
+          whatIsPending: "Nada en el pipeline obligatorio antes de la publicación final."
         },
         publicationTimestamp: new Date().toISOString(),
       };
 
       const payloadRes = await createResultPayloadAction(electionId, jobId, resultJson, {
-        proofState: "TRANSCRIPT_VERIFIED",
-        resultKind: "TALLY_REAL",
+        proofState: "VERIFIED",
+        resultKind: "TALLY_VERIFIED",
       });
       if (!payloadRes.ok) throw new Error(`Fallo guardando payload: ${payloadRes.error}`);
       addLog(`Contenido de resultados publicado (payload). Hash: ${payloadRes.payloadHash} | modo=${payloadRes.resultMode}`);
@@ -473,8 +502,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       const actaJson = {
         kind: "ACTA_RESULTADOS",
         electionId,
-        tallyMode: "REAL_TRANSCRIPT",
-        note: "Resultados publicados desde conteo real con actas y compromiso de transcript; la verificación ZK se publica aparte.",
+        tallyMode: "REAL_ZK_VERIFIED",
+        note: "Resultados publicados únicamente después de completar la verificación ZK obligatoria.",
         summary: tallyComputation.summary,
         validBallots: tallyComputation.validCount,
         invalidBallots: tallyComputation.invalidCount,
@@ -485,6 +514,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       const actaResult = await publishActaWithContentAction(electionId, actaJson, 3);
       if (!actaResult.ok) throw new Error(`Fallo anclando acta de resultados: ${actaResult.error}`);
       addLog(`ACTA_RESULTADOS anclada en cadena. Tx: ${actaResult.txHash} | actId: ${actaResult.actId}`);
+
+      addLog("Notificando contrato para transicionar de TALLYING a RESULTS_PUBLISHED...");
+      const resultsResult = await advanceToResultsPublishedAction(electionId);
+      if (!resultsResult.ok) throw new Error(`Fallo cambiando la fase publicada: ${resultsResult.error}`);
+      addLog(`Fase de resultados publicados activada. Tx: ${resultsResult.txHash}`);
 
       addLog("Abriendo Ventana de Auditoría...");
       const auditRes = await openAuditWindowAction(electionId);
@@ -505,8 +539,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-amber-700 mb-2">Resumen operativo JED</h2>
         <p className="text-sm text-amber-700">
-          Esta consola ejecuta descifrado y conteo reales con compromiso de transcript verificable publicado en cadena (on-chain).
-          La prueba ZK incluye conteo e inclusión Merkle (fase 9B) y puede validarse en cadena (fase 9C) desde esta misma pantalla.
+          Esta consola ejecuta descifrado y conteo reales, publica un compromiso de transcript y exige prueba ZK antes de habilitar la publicación final.
+          El compromiso inicial no reemplaza la verificación criptográfica obligatoria.
         </p>
       </div>
 
@@ -527,7 +561,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
             <div>
               <h3 className="text-sm font-semibold text-slate-800">Ceremonia de Descifrado 2-de-3</h3>
               <p className="text-xs text-slate-500 mt-1">
-                El escrutinio prioriza la reconstrucción de clave desde fragmentos registrados. Si no hay umbral completo, solo continúa en modo heredado (legacy) cuando está habilitado en servidor.
+                El escrutinio requiere reconstrucción de clave desde fragmentos registrados. Si no hay umbral completo, el proceso queda bloqueado.
               </p>
             </div>
             <div className="flex gap-2">
@@ -719,12 +753,18 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
               <div className="space-y-2">
                 <button 
                   onClick={handlePublishResults}
-                  className="w-full px-6 py-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2"
+                  disabled={!zkGate?.ready}
+                  className="w-full px-6 py-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:hover:bg-slate-300"
                 >
                   <svg className="w-5 h-5 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                   Publicar resultados y abrir auditoría pública
                 </button>
-                <p className="text-center text-xs text-slate-500 font-medium">Publica el acta matemática y abre la ventana temporal para impugnaciones públicas.</p>
+                <p className="text-center text-xs text-slate-500 font-medium">Publica el acta matemática y abre la ventana temporal para impugnaciones públicas solo cuando el gate ZK esté completo.</p>
+                {zkGate && !zkGate.ready && (
+                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    {zkGate.blockers.join(" ")}
+                  </div>
+                )}
               </div>
 
               <div className="h-px w-full bg-slate-200" />
@@ -757,6 +797,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                             }
                             setZkProofJobId(res.jobId ?? null);
                             setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
+                            await refreshZkGate(lastJobId);
                             addLog(`Prueba ZK generada y verificada fuera de cadena. JobId: ${res.jobId}`);
                           } catch (err: unknown) {
                             setErrorMsg(getErrorMessage(err));
@@ -770,7 +811,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
                     {zkProofStatus && (
                       <div className={`mt-3 px-4 py-3 rounded-xl text-xs font-mono font-bold flex items-center gap-3 ${
-                        zkProofStatus === "VERIFIED_OFFCHAIN" || zkProofStatus === "VERIFIED_ONCHAIN" 
+                        zkProofStatus === "VERIFIED_OFFCHAIN" || zkProofStatus === "VERIFIED_ONCHAIN" || zkProofStatus === "VERIFIED"
                           ? "bg-emerald-100 text-emerald-800 border-2 border-emerald-300" :
                         zkProofStatus === "BUILDING" 
                           ? "bg-amber-100 text-amber-800 border-2 border-amber-300" :
@@ -783,6 +824,24 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                           Estado SNARK: <span className="uppercase">{zkProofStatus}</span>
                           {zkProofJobId && <div className="text-[10px] font-normal text-emerald-700/80 mt-0.5">ID de prueba: {zkProofJobId}</div>}
                         </div>
+                      </div>
+                    )}
+
+                    {zkGate && (
+                      <div className={`mt-3 rounded-xl border p-3 text-xs ${
+                        zkGate.ready
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-slate-200 bg-slate-50 text-slate-700"
+                      }`}>
+                        <div className="font-semibold">Gate de publicación: {zkGate.ready ? "LISTO" : "BLOQUEADO"}</div>
+                        <div className="mt-1">Estado criptográfico actual: {zkGate.proofState}</div>
+                        {zkGate.blockers.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {zkGate.blockers.map((blocker) => (
+                              <div key={blocker}>- {blocker}</div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -803,8 +862,12 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                               addLog("Enviando prueba al verificador en cadena...");
                               const res = await submitOnchainZkProofAction(electionId, { jobId: zkProofJobId ?? undefined });
                               if (!res.ok) throw new Error(res.error ?? "Falló la verificación en cadena.");
-                              setZkProofStatus("VERIFIED_ONCHAIN");
+                              setZkProofStatus(res.status ?? "VERIFIED_ONCHAIN");
                               setOnchainVerifyTx(res.txHash ?? null);
+                              const gateRes = await refreshZkGate(lastJobId);
+                              if (gateRes.ok && gateRes.ready) {
+                                addLog("Gate ZK satisfecho. Ya se puede publicar el resultado final.");
+                              }
                             } catch (err: unknown) {
                               setErrorMsg(getErrorMessage(err));
                             } finally {

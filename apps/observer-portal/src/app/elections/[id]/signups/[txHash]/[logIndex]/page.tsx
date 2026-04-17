@@ -56,11 +56,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   try {
     return await fetchJson<T>(url);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -87,10 +87,7 @@ export default async function SignupEvidencePage({
   const txHash = String(resolvedParams.txHash).toLowerCase();
   const logIndex = String(resolvedParams.logIndex);
 
-  const evidence = await safeFetchJson<SignupEvidenceResponse | null>(
-    `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/signups/${encodeURIComponent(txHash)}/${encodeURIComponent(logIndex)}`,
-    null,
-  );
+  const evidence = await fetchJsonOrNull<SignupEvidenceResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/signups/${encodeURIComponent(txHash)}/${encodeURIComponent(logIndex)}`);
 
   if (!evidence || !evidence.ok) {
     return (
@@ -211,7 +208,7 @@ export default async function SignupEvidencePage({
       {/* Footer */}
       <footer style={{ borderTop: "1px solid #e2e8f0", background: "white", padding: "1.5rem", textAlign: "center" }}>
         <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Evidencia verificable
         </p>
       </footer>
     </main>

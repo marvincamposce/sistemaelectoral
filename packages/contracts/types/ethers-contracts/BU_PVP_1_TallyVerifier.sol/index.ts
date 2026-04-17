@@ -2,4 +2,5 @@
 /* tslint:disable */
 /* eslint-disable */
 export type { BU_PVP_1_TallyVerifier } from './BU_PVP_1_TallyVerifier.js';
+export type { IElectionRegistryTallyRecorder } from './IElectionRegistryTallyRecorder.js';
 export type { IGroth16Verifier } from './IGroth16Verifier.js';

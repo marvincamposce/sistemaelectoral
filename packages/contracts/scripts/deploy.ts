@@ -14,8 +14,12 @@ const groth16Verifier = (await Groth16Factory.connect(deployer).deploy()) as any
 await groth16Verifier.waitForDeployment();
 
 const TallyVerifierFactory = await ethers.getContractFactory("BU_PVP_1_TallyVerifier");
-const tallyVerifier = (await TallyVerifierFactory.connect(deployer).deploy(await groth16Verifier.getAddress())) as any;
+const tallyVerifier = (await TallyVerifierFactory.connect(deployer).deploy(
+  await groth16Verifier.getAddress(),
+  await registry.getAddress(),
+)) as any;
 await tallyVerifier.waitForDeployment();
+await (await registry.connect(deployer).setTallyVerifier(await tallyVerifier.getAddress())).wait();
 
 const address = await registry.getAddress();
 const groth16VerifierAddress = await groth16Verifier.getAddress();

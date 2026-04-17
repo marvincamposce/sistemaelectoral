@@ -282,11 +282,8 @@ function isWarningSeverity(severity: string): boolean {
 function mapProofStateToResultMode(proofState: string | null | undefined): string {
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "VERIFIED";
-  // Bug 5.1 fix: Add missing mappings that exist in tally-board to ensure consistency.
   if (state === "TALLY_VERIFIED_ONCHAIN") return "PENDING_ZK_DECRYPTION";
   if (state === "TRANSCRIPT_COMMITTED") return "PENDING";
-  if (state === "TRANSCRIPT_VERIFIED") return "TRANSCRIPT_VERIFIED";
-  if (state === "SIMULATED") return "LEGACY_SIMULATED";
   if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
   return state;
 }
@@ -294,10 +291,12 @@ function mapProofStateToResultMode(proofState: string | null | undefined): strin
 function honestyNoteForProofState(proofState: string | null | undefined): string {
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "Resultado y prueba verificados.";
-  if (state === "TRANSCRIPT_VERIFIED") {
-    return "Descifrado y conteo reales con transcript comprometido en cadena; la verificación ZK sigue en un flujo separado.";
+  if (state === "TALLY_VERIFIED_ONCHAIN") {
+    return "La prueba ZK principal del tally ya fue verificada en cadena, pero la publicación final sigue esperando el cierre del gate criptográfico complementario.";
   }
-  if (state === "SIMULATED") return "Resultado heredado desde un flujo antiguo no verificable; no debe tratarse como publicación robusta.";
+  if (state === "TRANSCRIPT_COMMITTED") {
+    return "Existe compromiso de transcript en cadena, pero todavía no hay publicación final habilitada por verificación ZK.";
+  }
   return "Resultado aún no verificado.";
 }
 
@@ -1022,7 +1021,7 @@ async function main() {
     const created = await listHondurasWalletLinksByDni(record.dni);
     const createdActive = getActiveWalletLink(created);
     if (!createdActive) {
-      throw new Error("demo_wallet_link_creation_failed");
+      throw new Error("system_wallet_link_creation_failed");
     }
     return createdActive;
   }
@@ -1043,7 +1042,7 @@ async function main() {
     }
 
     const evidence = getObjectRecord(params.walletLink.evidenceJson);
-    const credentialSecretHex = evidence.credentialSecretHex ?? evidence.demoCredentialSecretHex;
+    const credentialSecretHex = evidence.credentialSecretHex;
     if (typeof credentialSecretHex !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(credentialSecretHex)) {
       throw new Error("wallet_link_missing_credential_secret");
     }
@@ -1551,31 +1550,13 @@ async function main() {
         return { ok: false, error: "election_not_found" };
       }
 
-      const [manifest, candidates] = await Promise.all([
-        getCurrentElectionManifest(electionId),
-        listElectionCandidates(electionId),
-      ]);
+      const manifest = await getCurrentElectionManifest(electionId);
 
       if (!manifest) {
+        reply.status(404);
         return {
-          ok: true,
-          chainId,
-          contractAddress,
-          electionId: electionId.toString(),
-          manifest: {
-            manifestHash: election.manifestHash,
-            manifestJson: {
-              electionId: electionId.toString(),
-              candidates,
-              catalogSource: "DB_CANDIDATES_FALLBACK",
-            },
-            signatureHex: null,
-            signerAddress: null,
-            schemaVersion: "1.0.0",
-            generatedAt: null,
-            updatedAt: null,
-          },
-          source: "fallback",
+          ok: false,
+          error: "manifest_not_materialized",
         };
       }
 
@@ -2001,7 +1982,6 @@ async function main() {
                verifyErrorCode = verification.errorCode;
              }
            } else {
-              // Legacy fallback
               signatureValid = false;
               verifyError = "UNSUPPORTED_SCHEME";
               verifyErrorCode = "UNSUPPORTED_SCHEME";

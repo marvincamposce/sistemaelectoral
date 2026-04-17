@@ -221,7 +221,11 @@ async function upsertWalletLinkAction(formData: FormData) {
     dni: walletLink.dni,
     walletAddress: walletLink.walletAddress,
     linkStatus: walletLink.linkStatus,
-    verificationMethod: walletLink.verificationMethod,
+    verificationMethod: walletLink.verificationMethod as
+      | "MANUAL_AEA"
+      | "SELF_ATTESTED"
+      | "CENSUS_VERIFIED"
+      | "SYSTEM_MANAGED",
     evidenceJson: walletLink.evidence ?? {},
     revokedAtIso: walletLink.revokedAt ?? null,
   });

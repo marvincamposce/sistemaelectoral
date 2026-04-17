@@ -12,7 +12,7 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "BlockUrna · Consola AEA",
   description:
-    "Consola de Autoridad Electoral Abstracta (BU-PVP-1). Uso experimental para investigación.",
+    "Consola de Autoridad Electoral Abstracta (BU-PVP-1) para operación, evidencia y control de elecciones.",
 };
 
 export default function RootLayout({

@@ -22,7 +22,6 @@ export function getEnv() {
     AE_PRIVATE_KEY: process.env.AE_PRIVATE_KEY as string, 
     JED_PRIVATE_KEY: (process.env.JED_PRIVATE_KEY || process.env.AE_PRIVATE_KEY) as string,
     COORDINATOR_PRIVATE_KEY: process.env.COORDINATOR_PRIVATE_KEY || "",
-    ALLOW_LEGACY_COORDINATOR_KEY: String(process.env.ALLOW_LEGACY_COORDINATOR_KEY || "false").toLowerCase() === "true",
     REMOTE_TRUSTEE_API_KEY: process.env.REMOTE_TRUSTEE_API_KEY || "",
     ENFORCE_REMOTE_TRUSTEE_API_KEY:
       String(process.env.ENFORCE_REMOTE_TRUSTEE_API_KEY || "false").toLowerCase() === "true",

@@ -5,10 +5,14 @@ import type * as buPvp1TallyVerifierSol from './BU_PVP_1_TallyVerifier.sol/index
 export type { buPvp1TallyVerifierSol };
 export type { BU_PVP_1_ElectionRegistry } from './BU_PVP_1_ElectionRegistry.js';
 export type { Groth16Verifier } from './Groth16Verifier.js';
+export type { MockAlwaysValidGroth16Verifier } from './MockAlwaysValidGroth16Verifier.js';
 export * as factories from './factories/index.js';
 export { BU_PVP_1_ElectionRegistry__factory } from './factories/BU_PVP_1_ElectionRegistry__factory.js';
 export type { BU_PVP_1_TallyVerifier } from './BU_PVP_1_TallyVerifier.sol/BU_PVP_1_TallyVerifier.js';
 export { BU_PVP_1_TallyVerifier__factory } from './factories/BU_PVP_1_TallyVerifier.sol/BU_PVP_1_TallyVerifier__factory.js';
+export type { IElectionRegistryTallyRecorder } from './BU_PVP_1_TallyVerifier.sol/IElectionRegistryTallyRecorder.js';
+export { IElectionRegistryTallyRecorder__factory } from './factories/BU_PVP_1_TallyVerifier.sol/IElectionRegistryTallyRecorder__factory.js';
 export type { IGroth16Verifier } from './BU_PVP_1_TallyVerifier.sol/IGroth16Verifier.js';
 export { IGroth16Verifier__factory } from './factories/BU_PVP_1_TallyVerifier.sol/IGroth16Verifier__factory.js';
 export { Groth16Verifier__factory } from './factories/Groth16Verifier__factory.js';
+export { MockAlwaysValidGroth16Verifier__factory } from './factories/MockAlwaysValidGroth16Verifier__factory.js';

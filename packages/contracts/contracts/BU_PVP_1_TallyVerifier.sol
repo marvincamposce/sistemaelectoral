@@ -10,14 +10,20 @@ interface IGroth16Verifier {
     ) external view returns (bool);
 }
 
+interface IElectionRegistryTallyRecorder {
+    function recordTallyProofVerification(uint256 electionId) external;
+}
+
 /// @title BU-PVP-1 Tally Verifier
 /// @notice Wraps Groth16 proof verification and emits an immutable on-chain verification event.
 contract BU_PVP_1_TallyVerifier {
     error InvalidVerifierAddress();
+    error InvalidRegistryAddress();
     error InvalidProof();
     error EmptyJobId();
 
     address public immutable groth16Verifier;
+    address public immutable electionRegistry;
 
     event TallyProofVerifiedOnChain(
         uint256 indexed electionId,
@@ -27,11 +33,15 @@ contract BU_PVP_1_TallyVerifier {
         address verifierContract
     );
 
-    constructor(address verifierAddress) {
+    constructor(address verifierAddress, address registryAddress) {
         if (verifierAddress == address(0)) {
             revert InvalidVerifierAddress();
         }
+        if (registryAddress == address(0)) {
+            revert InvalidRegistryAddress();
+        }
         groth16Verifier = verifierAddress;
+        electionRegistry = registryAddress;
     }
 
     function verifyTallyProof(
@@ -50,6 +60,8 @@ contract BU_PVP_1_TallyVerifier {
         if (!valid) {
             revert InvalidProof();
         }
+
+        IElectionRegistryTallyRecorder(electionRegistry).recordTallyProofVerification(electionId);
 
         emit TallyProofVerifiedOnChain(
             electionId,

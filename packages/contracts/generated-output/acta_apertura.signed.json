@@ -8,7 +8,7 @@
     "chainId": "31337",
     "blockRange": {
       "fromBlock": 0,
-      "toBlock": 9
+      "toBlock": 2
     },
     "commitments": {
       "manifestHash": "0x40703fb7499a150f395e45fa7445adbf24bd76142b926d10f4eeccc61befd921"
@@ -17,12 +17,12 @@
       "signups": 0,
       "ballots": 0
     },
-    "notes": "Seed experimental generado para pruebas reproducibles"
+    "notes": "Seed generado para pruebas reproducibles"
   },
   "signature": {
     "algorithm": "ed25519-sha256-jcs",
     "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
-    "signatureHex": "0xc9f566719d84c2d03a4d5619a8de0ec9fd058866b105b38da3acc046c146de9d9aa015b1afb79cdcb249683f2ffa77f6f81de73f43461e7a6a1cbea25fc76006",
-    "snapshotHashHex": "0x85885bdf30886f6c241c9980aea85cb93f38e0c0179b67d5e8c0fad9d22e7887"
+    "signatureHex": "0x5d198112bfe50acea91f2919e9ada92bd17ae7899197237edc2a205c20c0d86039a5524db74c0e09203fee57577a74e003f766c0f8b1bb7f0c860e7162944d0d",
+    "snapshotHashHex": "0x1f5a99718011cfbc530878685fcd1e68cd4c0e3bd5071b817c9b201d05bcf7e1"
   }
 }

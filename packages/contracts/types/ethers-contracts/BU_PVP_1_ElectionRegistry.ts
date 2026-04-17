@@ -13,9 +13,9 @@ export declare namespace BU_PVP_1_ElectionRegistry {
     }
 
   export interface BU_PVP_1_ElectionRegistryInterface extends Interface {
-    getFunction(nameOrSignature: "archiveElection" | "ballotCastByVotingAddress" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyProof" | "registryNullifierUsed" | "renounceOwnership" | "signup" | "signupCount" | "startProcessing" | "transferOwnership" | "votingAddressRegistered"): FunctionFragment;
+    getFunction(nameOrSignature: "archiveElection" | "ballotCastByVotingAddress" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyTranscriptCommitment" | "recordTallyProofVerification" | "registryNullifierUsed" | "renounceOwnership" | "setTallyVerifier" | "signup" | "signupCount" | "startProcessing" | "tallyProofVerified" | "tallyVerifier" | "transferOwnership" | "votingAddressRegistered"): FunctionFragment;
 
-    getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded" | "TallyProofPublished"): EventFragment;
+    getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded" | "TallyProofVerificationRecorded" | "TallyTranscriptCommitmentPublished" | "TallyVerifierUpdated"): EventFragment;
 
     encodeFunctionData(functionFragment: 'archiveElection', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'ballotCastByVotingAddress', values: [BigNumberish, AddressLike]): string;
@@ -33,12 +33,16 @@ encodeFunctionData(functionFragment: 'owner', values?: undefined): string;
 encodeFunctionData(functionFragment: 'publishActa', values: [BigNumberish, BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'publishBallot', values: [BigNumberish, BytesLike, BytesLike, BytesLike]): string;
 encodeFunctionData(functionFragment: 'publishResults', values: [BigNumberish]): string;
-encodeFunctionData(functionFragment: 'publishTallyProof', values: [BigNumberish, BytesLike]): string;
+encodeFunctionData(functionFragment: 'publishTallyTranscriptCommitment', values: [BigNumberish, BytesLike]): string;
+encodeFunctionData(functionFragment: 'recordTallyProofVerification', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'registryNullifierUsed', values: [BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'renounceOwnership', values?: undefined): string;
+encodeFunctionData(functionFragment: 'setTallyVerifier', values: [AddressLike]): string;
 encodeFunctionData(functionFragment: 'signup', values: [BigNumberish, BytesLike, BytesLike, BytesLike]): string;
 encodeFunctionData(functionFragment: 'signupCount', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'startProcessing', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'tallyProofVerified', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'tallyVerifier', values?: undefined): string;
 encodeFunctionData(functionFragment: 'transferOwnership', values: [AddressLike]): string;
 encodeFunctionData(functionFragment: 'votingAddressRegistered', values: [BigNumberish, AddressLike]): string;
 
@@ -58,12 +62,16 @@ decodeFunctionResult(functionFragment: 'owner', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishActa', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishBallot', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishResults', data: BytesLike): Result;
-decodeFunctionResult(functionFragment: 'publishTallyProof', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'publishTallyTranscriptCommitment', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'recordTallyProofVerification', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'registryNullifierUsed', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'renounceOwnership', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'setTallyVerifier', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'signup', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'signupCount', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'startProcessing', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'tallyProofVerified', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'tallyVerifier', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'transferOwnership', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLike): Result;
   }
@@ -141,10 +149,34 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
 
   
 
-    export namespace TallyProofPublishedEvent {
-      export type InputTuple = [electionId: BigNumberish, proofHash: BytesLike, proofPayload: BytesLike];
-      export type OutputTuple = [electionId: bigint, proofHash: string, proofPayload: string];
-      export interface OutputObject {electionId: bigint, proofHash: string, proofPayload: string };
+    export namespace TallyProofVerificationRecordedEvent {
+      export type InputTuple = [electionId: BigNumberish, verifier: AddressLike];
+      export type OutputTuple = [electionId: bigint, verifier: string];
+      export interface OutputObject {electionId: bigint, verifier: string };
+      export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
+      export type Filter = TypedDeferredTopicFilter<Event>
+      export type Log = TypedEventLog<Event>
+      export type LogDescription = TypedLogDescription<Event>
+    }
+
+  
+
+    export namespace TallyTranscriptCommitmentPublishedEvent {
+      export type InputTuple = [electionId: BigNumberish, commitmentHash: BytesLike, commitmentPayload: BytesLike];
+      export type OutputTuple = [electionId: bigint, commitmentHash: string, commitmentPayload: string];
+      export interface OutputObject {electionId: bigint, commitmentHash: string, commitmentPayload: string };
+      export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
+      export type Filter = TypedDeferredTopicFilter<Event>
+      export type Log = TypedEventLog<Event>
+      export type LogDescription = TypedLogDescription<Event>
+    }
+
+  
+
+    export namespace TallyVerifierUpdatedEvent {
+      export type InputTuple = [previousVerifier: AddressLike, newVerifier: AddressLike];
+      export type OutputTuple = [previousVerifier: string, newVerifier: string];
+      export interface OutputObject {previousVerifier: string, newVerifier: string };
       export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
       export type Filter = TypedDeferredTopicFilter<Event>
       export type Log = TypedEventLog<Event>
@@ -315,8 +347,16 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
     
 
     
-    publishTallyProof: TypedContractMethod<
-      [electionId: BigNumberish, proofPayload: BytesLike, ],
+    publishTallyTranscriptCommitment: TypedContractMethod<
+      [electionId: BigNumberish, commitmentPayload: BytesLike, ],
+      [void],
+      'nonpayable'
+    >
+    
+
+    
+    recordTallyProofVerification: TypedContractMethod<
+      [electionId: BigNumberish, ],
       [void],
       'nonpayable'
     >
@@ -333,6 +373,14 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
     
     renounceOwnership: TypedContractMethod<
       [],
+      [void],
+      'nonpayable'
+    >
+    
+
+    
+    setTallyVerifier: TypedContractMethod<
+      [verifier: AddressLike, ],
       [void],
       'nonpayable'
     >
@@ -359,6 +407,22 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
       [electionId: BigNumberish, ],
       [void],
       'nonpayable'
+    >
+    
+
+    
+    tallyProofVerified: TypedContractMethod<
+      [arg0: BigNumberish, ],
+      [boolean],
+      'view'
+    >
+    
+
+    
+    tallyVerifier: TypedContractMethod<
+      [],
+      [string],
+      'view'
     >
     
 
@@ -461,8 +525,13 @@ getFunction(nameOrSignature: 'publishResults'): TypedContractMethod<
       [void],
       'nonpayable'
     >;
-getFunction(nameOrSignature: 'publishTallyProof'): TypedContractMethod<
-      [electionId: BigNumberish, proofPayload: BytesLike, ],
+getFunction(nameOrSignature: 'publishTallyTranscriptCommitment'): TypedContractMethod<
+      [electionId: BigNumberish, commitmentPayload: BytesLike, ],
+      [void],
+      'nonpayable'
+    >;
+getFunction(nameOrSignature: 'recordTallyProofVerification'): TypedContractMethod<
+      [electionId: BigNumberish, ],
       [void],
       'nonpayable'
     >;
@@ -473,6 +542,11 @@ getFunction(nameOrSignature: 'registryNullifierUsed'): TypedContractMethod<
     >;
 getFunction(nameOrSignature: 'renounceOwnership'): TypedContractMethod<
       [],
+      [void],
+      'nonpayable'
+    >;
+getFunction(nameOrSignature: 'setTallyVerifier'): TypedContractMethod<
+      [verifier: AddressLike, ],
       [void],
       'nonpayable'
     >;
@@ -491,6 +565,16 @@ getFunction(nameOrSignature: 'startProcessing'): TypedContractMethod<
       [void],
       'nonpayable'
     >;
+getFunction(nameOrSignature: 'tallyProofVerified'): TypedContractMethod<
+      [arg0: BigNumberish, ],
+      [boolean],
+      'view'
+    >;
+getFunction(nameOrSignature: 'tallyVerifier'): TypedContractMethod<
+      [],
+      [string],
+      'view'
+    >;
 getFunction(nameOrSignature: 'transferOwnership'): TypedContractMethod<
       [newOwner: AddressLike, ],
       [void],
@@ -508,7 +592,9 @@ getEvent(key: 'ElectionCreated'): TypedContractEvent<ElectionCreatedEvent.InputT
 getEvent(key: 'OwnershipTransferred'): TypedContractEvent<OwnershipTransferredEvent.InputTuple, OwnershipTransferredEvent.OutputTuple, OwnershipTransferredEvent.OutputObject>;
 getEvent(key: 'PhaseChanged'): TypedContractEvent<PhaseChangedEvent.InputTuple, PhaseChangedEvent.OutputTuple, PhaseChangedEvent.OutputObject>;
 getEvent(key: 'SignupRecorded'): TypedContractEvent<SignupRecordedEvent.InputTuple, SignupRecordedEvent.OutputTuple, SignupRecordedEvent.OutputObject>;
-getEvent(key: 'TallyProofPublished'): TypedContractEvent<TallyProofPublishedEvent.InputTuple, TallyProofPublishedEvent.OutputTuple, TallyProofPublishedEvent.OutputObject>;
+getEvent(key: 'TallyProofVerificationRecorded'): TypedContractEvent<TallyProofVerificationRecordedEvent.InputTuple, TallyProofVerificationRecordedEvent.OutputTuple, TallyProofVerificationRecordedEvent.OutputObject>;
+getEvent(key: 'TallyTranscriptCommitmentPublished'): TypedContractEvent<TallyTranscriptCommitmentPublishedEvent.InputTuple, TallyTranscriptCommitmentPublishedEvent.OutputTuple, TallyTranscriptCommitmentPublishedEvent.OutputObject>;
+getEvent(key: 'TallyVerifierUpdated'): TypedContractEvent<TallyVerifierUpdatedEvent.InputTuple, TallyVerifierUpdatedEvent.OutputTuple, TallyVerifierUpdatedEvent.OutputObject>;
 
     filters: {
       
@@ -536,8 +622,16 @@ getEvent(key: 'TallyProofPublished'): TypedContractEvent<TallyProofPublishedEven
       SignupRecorded: TypedContractEvent<SignupRecordedEvent.InputTuple, SignupRecordedEvent.OutputTuple, SignupRecordedEvent.OutputObject>;
     
 
-      'TallyProofPublished(uint256,bytes32,bytes)': TypedContractEvent<TallyProofPublishedEvent.InputTuple, TallyProofPublishedEvent.OutputTuple, TallyProofPublishedEvent.OutputObject>;
-      TallyProofPublished: TypedContractEvent<TallyProofPublishedEvent.InputTuple, TallyProofPublishedEvent.OutputTuple, TallyProofPublishedEvent.OutputObject>;
+      'TallyProofVerificationRecorded(uint256,address)': TypedContractEvent<TallyProofVerificationRecordedEvent.InputTuple, TallyProofVerificationRecordedEvent.OutputTuple, TallyProofVerificationRecordedEvent.OutputObject>;
+      TallyProofVerificationRecorded: TypedContractEvent<TallyProofVerificationRecordedEvent.InputTuple, TallyProofVerificationRecordedEvent.OutputTuple, TallyProofVerificationRecordedEvent.OutputObject>;
+    
+
+      'TallyTranscriptCommitmentPublished(uint256,bytes32,bytes)': TypedContractEvent<TallyTranscriptCommitmentPublishedEvent.InputTuple, TallyTranscriptCommitmentPublishedEvent.OutputTuple, TallyTranscriptCommitmentPublishedEvent.OutputObject>;
+      TallyTranscriptCommitmentPublished: TypedContractEvent<TallyTranscriptCommitmentPublishedEvent.InputTuple, TallyTranscriptCommitmentPublishedEvent.OutputTuple, TallyTranscriptCommitmentPublishedEvent.OutputObject>;
+    
+
+      'TallyVerifierUpdated(address,address)': TypedContractEvent<TallyVerifierUpdatedEvent.InputTuple, TallyVerifierUpdatedEvent.OutputTuple, TallyVerifierUpdatedEvent.OutputObject>;
+      TallyVerifierUpdated: TypedContractEvent<TallyVerifierUpdatedEvent.InputTuple, TallyVerifierUpdatedEvent.OutputTuple, TallyVerifierUpdatedEvent.OutputObject>;
     
     };
   }

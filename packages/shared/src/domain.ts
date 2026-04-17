@@ -106,21 +106,7 @@ export type SignedSnapshot = z.infer<typeof SignedSnapshotSchema>;
 
 // --- Ballot encryption envelope (real ciphertext transport) ---
 
-export const BallotCiphertextEnvelopeVersionSchema = z.union([
-  z.literal("BU-PVP-1_BALLOT_X25519_XCHACHA20_V1"),
-  z.literal("BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2"),
-]);
-
-export const BallotCiphertextEnvelopeV1Schema = z
-  .object({
-    version: z.literal("BU-PVP-1_BALLOT_X25519_XCHACHA20_V1"),
-    kdf: z.literal("X25519"),
-    aead: z.literal("XCHACHA20POLY1305"),
-    ephemeralPublicKeyHex: Hex32Schema,
-    nonceHex: Hex24Schema,
-    ciphertextHex: HexBytesSchema.refine((v) => v.length > 2, "Expected non-empty ciphertext hex"),
-  })
-  .strict();
+export const BallotCiphertextEnvelopeVersionSchema = z.literal("BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2");
 
 export const BallotCiphertextEnvelopeV2Schema = z
   .object({
@@ -138,14 +124,11 @@ export const BallotCiphertextEnvelopeV2Schema = z
   })
   .strict();
 
-export const BallotCiphertextEnvelopeSchema = z.union([
-  BallotCiphertextEnvelopeV1Schema,
-  BallotCiphertextEnvelopeV2Schema,
-]);
+export const BallotCiphertextEnvelopeSchema = BallotCiphertextEnvelopeV2Schema;
 
 export type BallotCiphertextEnvelope = z.infer<typeof BallotCiphertextEnvelopeSchema>;
 
-// --- Registry Authority (REA) — experimental eligibility scaffold ---
+// --- Registry Authority (REA) eligibility objects ---
 
 export const RegistryCredentialSchema = z
   .object({
@@ -204,7 +187,6 @@ export const HondurasWalletVerificationMethodSchema = z.enum([
   "MANUAL_AEA",
   "SELF_ATTESTED",
   "CENSUS_VERIFIED",
-  "DEMO_SYSTEM",
   "SYSTEM_MANAGED",
 ]);
 

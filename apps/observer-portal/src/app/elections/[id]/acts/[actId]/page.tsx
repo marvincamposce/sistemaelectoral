@@ -58,11 +58,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   try {
     return await fetchJson<T>(url);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -102,10 +102,7 @@ export default async function ActPage({
   const electionId = String(resolvedParams.id);
   const actId = String(resolvedParams.actId).toLowerCase();
 
-  const meta = await safeFetchJson<ActMetaResponse | null>(
-    `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(actId)}`,
-    null,
-  );
+  const meta = await fetchJsonOrNull<ActMetaResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(actId)}`);
 
   if (!meta || !meta.ok) {
     return (
@@ -129,29 +126,21 @@ export default async function ActPage({
     );
   }
 
-  const verify = await safeFetchJson<ActVerifyResponse>(
-    `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(actId)}/verify`,
-    {
-      ok: true, electionId, actId,
-      signatureValid: false, hashMatchesAnchor: false,
-      anchorFoundOnChain: false, consistencyStatus: "UNKNOWN",
-    },
-  );
+  const verify = await fetchJsonOrNull<ActVerifyResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(actId)}/verify`);
 
-  const content = await safeFetchJson<ActContentResponse | null>(
-    `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(actId)}/content`,
-    null,
-  );
+  const content = await fetchJsonOrNull<ActContentResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/acts/${encodeURIComponent(actId)}/content`);
 
+  const verifyUnavailable = verify == null;
   const contentAvailable = Boolean(content && content.ok);
 
-  const isLegacyScheme = verify.signatureScheme != null &&
+  const hasUnsupportedScheme = verify?.signatureScheme != null &&
     verify.signatureScheme !== "ECDSA_SECP256K1_ETH_V1";
 
   const badge = (() => {
-    if (verify.verificationStatus === "VALID") return "VÁLIDA";
+    if (verify?.verificationStatus === "VALID") return "VÁLIDA";
+    if (verifyUnavailable) return "VERIFICACIÓN NO DISPONIBLE";
     if (!contentAvailable) return "INCOMPLETA";
-    if (isLegacyScheme) return "LEGACY";
+    if (hasUnsupportedScheme) return "ESQUEMA NO SOPORTADO";
     if (!verify.anchorFoundOnChain) return "SIN ANCHOR";
     if (verify.signatureValid && verify.hashMatchesAnchor && verify.consistencyStatus === "OK") {
       return "VÁLIDA";
@@ -161,7 +150,7 @@ export default async function ActPage({
 
   const badgeClass =
     badge === "VÁLIDA" ? "badge badge-valid"
-    : badge === "LEGACY" ? "badge badge-info"
+    : badge === "ESQUEMA NO SOPORTADO" || badge === "VERIFICACIÓN NO DISPONIBLE" ? "badge badge-info"
     : badge === "INCOMPLETA" || badge === "SIN ANCHOR" ? "badge badge-warning"
     : "badge badge-critical";
 
@@ -196,15 +185,25 @@ export default async function ActPage({
           <Link href="/" className="btn-subtle">← Volver al observatorio</Link>
         </nav>
 
-        {/* Legacy scheme notice */}
-        {isLegacyScheme && (
-          <div className="info-note" style={{ marginBottom: "1.5rem", borderLeft: "3px solid #6366f1" }}>
+        {verifyUnavailable && (
+          <div className="info-note" style={{ marginBottom: "1.5rem", borderLeft: "3px solid #f59e0b" }}>
             <p style={{ fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-              Esquema de firma legacy: {verify.signatureScheme}
+              Verificación criptográfica no disponible
             </p>
             <p>
-              Esta acta fue firmada con un esquema anterior (Ed25519) que no es verificable por el motor ECDSA actual.
-              Para obtener actas con verificación completa, crea una nueva elección — las actas generadas ahora usarán ECDSA SECP256K1.
+              La API de verificación no respondió para esta acta. El observatorio no está infiriendo validez ni invalidez.
+            </p>
+          </div>
+        )}
+
+        {hasUnsupportedScheme && (
+          <div className="info-note" style={{ marginBottom: "1.5rem", borderLeft: "3px solid #6366f1" }}>
+            <p style={{ fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
+              Esquema de firma no soportado: {verify.signatureScheme}
+            </p>
+            <p>
+              Esta acta no puede validarse con el verificador activo porque usa un esquema criptográfico distinto al estándar operativo
+              del sistema. Solo las actas firmadas con ECDSA SECP256K1 ETH V1 obtienen verificación completa en esta instalación.
             </p>
           </div>
         )}
@@ -213,19 +212,19 @@ export default async function ActPage({
         <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "1.5rem" }}>
           <h2 className="section-title" style={{ marginBottom: "1rem" }}>Verificación criptográfica</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
-            <VerifyItem label="Firma" value={verify.signatureValid} scheme={verify.signatureScheme} />
-            <VerifyItem label="Hash coincide con anchor" value={verify.hashMatchesAnchor} />
-            <VerifyItem label="Anchor en la cadena" value={verify.anchorFoundOnChain} />
+            <VerifyItem label="Firma" value={verify?.signatureValid ?? false} scheme={verify?.signatureScheme} unavailable={verifyUnavailable} />
+            <VerifyItem label="Hash coincide con anchor" value={verify?.hashMatchesAnchor ?? false} unavailable={verifyUnavailable} />
+            <VerifyItem label="Anchor en la cadena" value={verify?.anchorFoundOnChain ?? false} unavailable={verifyUnavailable} />
             <div>
               <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Consistencia</span>
               <div style={{ marginTop: "0.25rem" }}>
-                <span className={`badge ${verify.consistencyStatus === "OK" ? "badge-valid" : verify.consistencyStatus === "UNKNOWN" ? "badge-neutral" : "badge-warning"}`}>
-                  {verify.consistencyStatus}
+                <span className={`badge ${verifyUnavailable ? "badge-neutral" : verify?.consistencyStatus === "OK" ? "badge-valid" : verify?.consistencyStatus === "UNKNOWN" ? "badge-neutral" : "badge-warning"}`}>
+                  {verifyUnavailable ? "NO DISPONIBLE" : verify?.consistencyStatus}
                 </span>
               </div>
             </div>
           </div>
-          {verify.errorDetails && (
+          {verify?.errorDetails && (
             <div className="info-note" style={{ marginTop: "1rem" }}>
               <span style={{ fontWeight: 500 }}>Detalle: </span>{verify.errorDetails}
             </div>
@@ -310,22 +309,24 @@ export default async function ActPage({
       {/* Footer */}
       <footer style={{ borderTop: "1px solid #e2e8f0", background: "white", padding: "1.5rem", textAlign: "center" }}>
         <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Evidencia verificable
         </p>
       </footer>
     </main>
   );
 }
 
-function VerifyItem({ label, value, scheme }: { label: string; value: boolean; scheme?: string | null }) {
-  const isLegacy = scheme != null && scheme !== "ECDSA_SECP256K1_ETH_V1";
+function VerifyItem({ label, value, scheme, unavailable }: { label: string; value: boolean; scheme?: string | null; unavailable?: boolean }) {
+  const hasUnsupportedScheme = scheme != null && scheme !== "ECDSA_SECP256K1_ETH_V1";
   return (
     <div>
       <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
       {scheme && <div style={{ fontSize: "0.6rem", color: "#94a3b8", marginTop: "0.125rem" }}>{scheme}</div>}
       <div style={{ marginTop: "0.25rem" }}>
-        {isLegacy ? (
-          <span className="badge badge-neutral">N/A (legacy)</span>
+        {unavailable ? (
+          <span className="badge badge-neutral">No disponible</span>
+        ) : hasUnsupportedScheme ? (
+          <span className="badge badge-neutral">No soportado</span>
         ) : (
           <span className={`badge ${value ? "badge-valid" : "badge-critical"}`}>
             {value ? "✓ Válido" : "✗ Inválido"}

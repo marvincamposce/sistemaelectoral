@@ -70,11 +70,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function safeFetchJson<T>(url: string, fallback: T): Promise<T> {
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   try {
     return await fetchJson<T>(url);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -104,10 +104,7 @@ export default async function SignupsPage({
   const electionId = String(resolvedParams.id);
   const cursor = typeof resolvedSearchParams.cursor === "string" ? resolvedSearchParams.cursor : null;
 
-  const election = await safeFetchJson<PhasesResponse | null>(
-    `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/phases`,
-    null,
-  );
+  const election = await fetchJsonOrNull<PhasesResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/phases`);
 
   if (!election || !election.ok) {
     return (
@@ -128,19 +125,14 @@ export default async function SignupsPage({
   }
 
   const [summary, list] = await Promise.all([
-    safeFetchJson<SignupsSummaryResponse>(
-      `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/signups/summary`,
-      { ok: true, summary: { total: 0, uniqueNullifiers: 0 } },
-    ),
-    safeFetchJson<SignupsListResponse>(
-      `${apiBase}/v1/elections/${encodeURIComponent(electionId)}/signups?order=desc&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-      { ok: true, electionId, page: { limit: 50, order: "desc", nextCursor: null }, signups: [] },
-    ),
+    fetchJsonOrNull<SignupsSummaryResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/signups/summary`),
+    fetchJsonOrNull<SignupsListResponse>(`${apiBase}/v1/elections/${encodeURIComponent(electionId)}/signups?order=desc&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
   ]);
 
-  const page = list.page;
+  const dataUnavailable = summary == null || list == null;
+  const page = list?.page ?? null;
   const nextCursor = page?.nextCursor ?? null;
-  const recent = (list.signups ?? []).slice(0, 10);
+  const recent = (list?.signups ?? []).slice(0, 10);
 
   return (
     <main className="min-h-screen" style={{ background: "#f8fafc" }}>
@@ -179,7 +171,7 @@ export default async function SignupsPage({
               Total registros
             </span>
             <span style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>
-              {summary.summary.total}
+              {summary?.summary.total ?? "N/D"}
             </span>
           </div>
           <div className="stat-card">
@@ -187,7 +179,7 @@ export default async function SignupsPage({
               Nullifiers únicos
             </span>
             <span style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a" }}>
-              {summary.summary.uniqueNullifiers}
+              {summary?.summary.uniqueNullifiers ?? "N/D"}
             </span>
           </div>
           <div className="stat-card">
@@ -201,7 +193,13 @@ export default async function SignupsPage({
         </div>
 
         {/* Recent signups timeline */}
-        {recent.length > 0 && (
+        {dataUnavailable ? (
+          <div className="card" style={{ padding: "2rem", textAlign: "center", marginBottom: "2.5rem" }}>
+            <p style={{ fontSize: "0.8125rem", color: "#b45309" }}>
+              La evidencia de registros no está disponible. Esta vista no interpreta el error como ausencia de signups.
+            </p>
+          </div>
+        ) : recent.length > 0 && (
           <section style={{ marginBottom: "2.5rem" }}>
             <h2 className="section-title">Últimos registros</h2>
             <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
@@ -244,7 +242,7 @@ export default async function SignupsPage({
         {/* Full table */}
         <section style={{ marginBottom: "2.5rem" }}>
           <h2 className="section-title">Tabla completa (paginada)</h2>
-          {list.signups.length === 0 ? (
+          {dataUnavailable ? null : list.signups.length === 0 ? (
             <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
               <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin registros.</p>
             </div>
@@ -288,16 +286,16 @@ export default async function SignupsPage({
               {cursor && <span className="hash-display" style={{ fontSize: "0.625rem" }}>cursor: {cursor}</span>}
             </div>
             <div className="flex items-center gap-3">
-              {cursor && (
-                <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/signups`}>
-                  ← Inicio
-                </Link>
-              )}
-              {nextCursor ? (
-                <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/signups?cursor=${encodeURIComponent(nextCursor)}`}>
-                  Siguiente →
-                </Link>
-              ) : (
+            {cursor && !dataUnavailable && (
+              <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/signups`}>
+                ← Inicio
+              </Link>
+            )}
+            {nextCursor && !dataUnavailable ? (
+              <Link className="btn-subtle" href={`/elections/${encodeURIComponent(electionId)}/signups?cursor=${encodeURIComponent(nextCursor)}`}>
+                Siguiente →
+              </Link>
+            ) : (
                 <span style={{ color: "#94a3b8" }}>(Fin)</span>
               )}
             </div>
@@ -308,7 +306,7 @@ export default async function SignupsPage({
       {/* Footer */}
       <footer style={{ borderTop: "1px solid #e2e8f0", background: "white", padding: "1.5rem", textAlign: "center" }}>
         <p style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
-          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Instancia experimental de investigación
+          BlockUrna · Observatorio Electoral BU‑PVP‑1 · Evidencia verificable
         </p>
       </footer>
     </main>

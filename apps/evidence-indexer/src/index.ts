@@ -690,16 +690,6 @@ async function resolveRecoveredRelayerIncidents(params: {
   }
 }
 
-// Legacy migration function removed — signups/ballots tables are fully deprecated.
-// All data now flows exclusively through signup_records/ballot_records.
-async function migrateLegacyEventTables(_params: {
-  pool: ReturnType<typeof createPool>;
-  chainId: string;
-  contractAddress: string;
-}): Promise<void> {
-  // No-op: legacy tables are no longer used.
-}
-
 async function backfillMissingBlockTimestamps(params: {
   pool: ReturnType<typeof createPool>;
   provider: ethers.Provider;
@@ -1601,7 +1591,6 @@ async function main() {
     genesisBlockHash,
   });
 
-  await migrateLegacyEventTables({ pool, chainId, contractAddress });
   await backfillMissingBlockTimestamps({ pool, provider, chainId, contractAddress });
   const diskRefresh = await refreshActaContentsFromDisk({
     pool,
@@ -1820,10 +1809,10 @@ async function main() {
 
         // Bug 3.1 fix: Add missing `continue` to match all other event handlers
         // and prevent fallthrough to subsequent if-blocks.
-        if (parsed.name === "TallyProofPublished") {
+        if (parsed.name === "TallyTranscriptCommitmentPublished") {
           const electionId = (parsed.args as any).electionId as bigint;
-          const proofHash = String((parsed.args as any).proofHash);
-          const proofPayload = String((parsed.args as any).proofPayload);
+          const proofHash = String((parsed.args as any).commitmentHash);
+          const proofPayload = String((parsed.args as any).commitmentPayload);
 
           touchedElectionIds.add(electionId.toString());
 

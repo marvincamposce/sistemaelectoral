@@ -6,10 +6,7 @@
  *   2. Generate a Groth16 proof
  *   3. Verify a proof off-chain
  *
- * Backend is selectable via ZK_BACKEND (rust|snarkjs), defaulting to rust.
  */
-
-import * as snarkjs from "snarkjs";
 import { readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
@@ -30,20 +27,8 @@ export const CIRCUIT_ID = TALLY_CIRCUIT_ID;
 export const PROOF_SYSTEM = "GROTH16_BN128";
 export type ZkCircuitKind = "TALLY" | "DECRYPTION";
 
-export type ZkBackend = "rust" | "snarkjs";
-
-function readBackendFromEnv(): ZkBackend {
-  const raw = (process.env.ZK_BACKEND ?? "rust").toLowerCase();
-  if (raw === "rust" || raw === "snarkjs") {
-    return raw;
-  }
-
-  throw new Error(
-    `Invalid ZK_BACKEND='${process.env.ZK_BACKEND}'. Use 'rust' or 'snarkjs'.`,
-  );
-}
-
-export const ZK_BACKEND: ZkBackend = readBackendFromEnv();
+export type ZkBackend = "rust";
+export const ZK_BACKEND: ZkBackend = "rust";
 
 // Paths to build artifacts and keys
 type CircuitPaths = {
@@ -350,21 +335,14 @@ export function checkArtifactsForCircuit(circuit: ZkCircuitKind): {
   const { paths } = getCircuitConfig(circuit);
   const missing: string[] = [];
 
-  const requiredPaths: Array<[string, string]> =
-    ZK_BACKEND === "rust"
-      ? [
-          ["r1cs", paths.r1cs],
-          ["wasm", paths.wasm],
-          ["rustBinary", RUST_BINARY_PATH],
-          ["rustProvingKey", paths.rustProvingKey],
-          ["rustVerifyingKey", paths.rustVerifyingKey],
-          ["vkey", paths.vkey],
-        ]
-      : [
-          ["wasm", paths.wasm],
-          ["zkey", paths.zkey],
-          ["vkey", paths.vkey],
-        ];
+  const requiredPaths: Array<[string, string]> = [
+    ["r1cs", paths.r1cs],
+    ["wasm", paths.wasm],
+    ["rustBinary", RUST_BINARY_PATH],
+    ["rustProvingKey", paths.rustProvingKey],
+    ["rustVerifyingKey", paths.rustVerifyingKey],
+    ["vkey", paths.vkey],
+  ];
 
   for (const [name, path] of requiredPaths) {
     if (!existsSync(path)) {
@@ -390,14 +368,7 @@ export async function proveTally(
 
   const { paths, circuitId } = getCircuitConfig("TALLY");
 
-  const proofOutput =
-    ZK_BACKEND === "rust"
-      ? proveWithRust(input as unknown as Record<string, unknown>, paths)
-      : await snarkjs.groth16.fullProve(
-          input as unknown as Record<string, unknown>,
-          paths.wasm,
-          paths.zkey,
-        );
+  const proofOutput = proveWithRust(input as unknown as Record<string, unknown>, paths);
 
   // Compute vkey hash for integrity
   const { createHash } = await import("node:crypto");
@@ -427,14 +398,7 @@ export async function proveDecryption(
 
   const { paths, circuitId } = getCircuitConfig("DECRYPTION");
 
-  const proofOutput =
-    ZK_BACKEND === "rust"
-      ? proveWithRust(input as unknown as Record<string, unknown>, paths)
-      : await snarkjs.groth16.fullProve(
-          input as unknown as Record<string, unknown>,
-          paths.wasm,
-          paths.zkey,
-        );
+  const proofOutput = proveWithRust(input as unknown as Record<string, unknown>, paths);
 
   const { createHash } = await import("node:crypto");
   const vkeyContent = readFileSync(paths.vkey);
@@ -474,25 +438,13 @@ async function verifyProofForCircuit(
   publicSignals: string[],
 ): Promise<ZkTallyVerifyResult> {
   const { paths, circuitId } = getCircuitConfig(circuit);
-  const valid =
-    ZK_BACKEND === "rust"
-      ? verifyWithRust(paths, proof, publicSignals)
-      : await verifyWithSnarkjs(paths, proof, publicSignals);
+  const valid = verifyWithRust(paths, proof, publicSignals);
 
   return {
     valid: Boolean(valid),
     proofSystem: PROOF_SYSTEM,
     circuitId,
   };
-}
-
-async function verifyWithSnarkjs(
-  paths: CircuitPaths,
-  proof: object,
-  publicSignals: string[],
-): Promise<boolean> {
-  const vkeyJson = JSON.parse(readFileSync(paths.vkey, "utf-8"));
-  return snarkjs.groth16.verify(vkeyJson, publicSignals, proof);
 }
 
 function proveWithRust(

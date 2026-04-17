@@ -106,7 +106,7 @@ const snapshotBody = {
     signups: 0,
     ballots: 0,
   },
-  notes: "Seed experimental generado para pruebas reproducibles",
+  notes: "Seed generado para pruebas reproducibles",
 } as const;
 
 const ed25519PrivateKeyHex =
@@ -115,7 +115,7 @@ const ed25519PrivateKeyHex =
 const signed = await signSnapshot(snapshotBody as any, ed25519PrivateKeyHex);
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const outDir = path.join(REPO_ROOT, "packages", "contracts", "experimental-output");
+const outDir = path.join(REPO_ROOT, "packages", "contracts", "generated-output");
 await fs.mkdir(outDir, { recursive: true });
 
 const manifestFile = path.join(outDir, "manifest.current.json");

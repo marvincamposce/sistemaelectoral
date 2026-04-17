@@ -48,7 +48,7 @@ type BallotsListResponse = {
   ballots?: Array<{ txHash: string }>;
 };
 
-type DemoBootstrapResponse = {
+type SignupPreparationResponse = {
   ok: boolean;
   error?: string;
   record?: {
@@ -180,10 +180,10 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         },
       );
 
-      const bootstrapData = (await bootstrapRes.json()) as DemoBootstrapResponse;
+      const bootstrapData = (await bootstrapRes.json()) as SignupPreparationResponse;
       if (!bootstrapRes.ok || !bootstrapData.ok) {
         if (bootstrapData.error === "dni_not_eligible") {
-          throw new Error("Este DNI no está habilitado para votar en el censo del demo.");
+          throw new Error("Este DNI no está habilitado para votar en el censo electoral configurado.");
         }
         if (bootstrapData.error === "voter_not_authorized_for_election") {
           throw new Error("Tu expediente existe, pero todavía no estás autorizado para esta elección.");
@@ -199,7 +199,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
       setVotingKeys({ pub: wallet.publicKey, priv: wallet.privateKey });
       setVoterIdentity({
         dni: normalizedDni,
-        fullName: bootstrapData.record?.fullName ?? "Votante demo",
+        fullName: bootstrapData.record?.fullName ?? "Votante registrado",
         walletAddress: bootstrapData.walletLink?.walletAddress ?? null,
         verificationMethod: bootstrapData.walletLink?.verificationMethod ?? null,
         authMethod: bootstrapData.authorization?.status ?? null,
