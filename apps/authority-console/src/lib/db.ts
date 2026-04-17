@@ -141,7 +141,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS hn_wallet_links_active_wallet_uniq
 
 CREATE TABLE IF NOT EXISTS hn_enrollment_requests (
   request_id TEXT PRIMARY KEY,
-  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  dni TEXT NOT NULL,
   status TEXT NOT NULL,
   requested_wallet_address TEXT,
   request_channel TEXT NOT NULL DEFAULT 'CITIZEN_PORTAL',
@@ -152,6 +152,9 @@ CREATE TABLE IF NOT EXISTS hn_enrollment_requests (
   requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   reviewed_at TIMESTAMPTZ
 );
+
+ALTER TABLE hn_enrollment_requests
+  DROP CONSTRAINT IF EXISTS hn_enrollment_requests_dni_fkey;
 
 CREATE INDEX IF NOT EXISTS hn_enrollment_requests_dni_idx
   ON hn_enrollment_requests(dni, requested_at DESC);

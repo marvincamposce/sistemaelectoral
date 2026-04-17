@@ -775,7 +775,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                   <div>
                     <h3 className="text-sm font-bold text-violet-900">Prueba de conocimiento cero (ZK)</h3>
                     <p className="text-xs text-violet-700 mt-1 mb-4">
-                      Comprueba matemáticamente que el sistema contó correctamente sin revelar los votos individuales.
+                      El cierre final exige dos pruebas: tally on-chain y descifrado verificado. Sin ambas, no se publican resultados.
                     </p>
 
                     {tallyComputation && !zkProofStatus && (
@@ -798,7 +798,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                             setZkProofJobId(res.jobId ?? null);
                             setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
                             await refreshZkGate(lastJobId);
-                            addLog(`Prueba ZK generada y verificada fuera de cadena. JobId: ${res.jobId}`);
+                            addLog(`Pruebas ZK generadas y verificadas fuera de cadena. JobId tally: ${res.jobId}`);
                           } catch (err: unknown) {
                             setErrorMsg(getErrorMessage(err));
                           }
@@ -821,7 +821,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                         {zkProofStatus === "VERIFIED_OFFCHAIN" && <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
                         
                         <div>
-                          Estado SNARK: <span className="uppercase">{zkProofStatus}</span>
+                          Estado ZK: <span className="uppercase">{zkProofStatus}</span>
                           {zkProofJobId && <div className="text-[10px] font-normal text-emerald-700/80 mt-0.5">ID de prueba: {zkProofJobId}</div>}
                         </div>
                       </div>
@@ -852,7 +852,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                            Registrar prueba en cadena (blockchain)
                          </h4>
                          <p className="text-xs text-emerald-700 mb-4 font-medium">
-                           Envía Groth16 al contrato inteligente (smart contract) para verificación matemática pública, sin depender del servidor.
+                           Envía la proof de tally al contrato inteligente. La publicación final seguirá bloqueada hasta que también exista la proof obligatoria de descifrado.
                          </p>
                          <button
                           onClick={async () => {

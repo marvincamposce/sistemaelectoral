@@ -64,6 +64,18 @@ const EnrollmentReviewInputSchema = z
   })
   .strict();
 
+const EnrollmentToCensusInputSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    dni: HondurasDniSchema,
+    fullName: z.string().trim().min(5).max(200),
+    habilitationStatus: HondurasCensusStatusSchema,
+    statusReason: z.string().trim().max(300).optional(),
+    source: z.string().trim().min(1).max(120).optional(),
+    citizenAccessCode: z.string().trim().min(6).max(64).optional(),
+  })
+  .strict();
+
 const AuthorizationInputSchema = z
   .object({
     dni: HondurasDniSchema,
@@ -271,6 +283,59 @@ async function reviewEnrollmentRequestAction(formData: FormData) {
 
   revalidatePath("/honduras");
   redirect("/honduras");
+}
+
+async function createCensusFromEnrollmentRequestAction(formData: FormData) {
+  "use server";
+  const env = getEnv();
+  const pool = getPool(env.DATABASE_URL);
+  await ensureSchema(pool);
+
+  const parsed = EnrollmentToCensusInputSchema.parse({
+    requestId: String(formData.get("requestId") ?? ""),
+    dni: String(formData.get("dni") ?? ""),
+    fullName: String(formData.get("fullName") ?? ""),
+    habilitationStatus: String(formData.get("habilitationStatus") ?? ""),
+    statusReason: String(formData.get("statusReason") ?? "").trim() || undefined,
+    source: String(formData.get("source") ?? "").trim() || undefined,
+    citizenAccessCode: String(formData.get("citizenAccessCode") ?? "").trim() || undefined,
+  });
+
+  const metadataJson: Record<string, unknown> = {
+    enrollmentRequestId: parsed.requestId,
+    createdFromEnrollmentRequest: true,
+  };
+  if (parsed.citizenAccessCode) {
+    metadataJson.citizenAccessCodeHash = ethers.keccak256(ethers.toUtf8Bytes(parsed.citizenAccessCode)).toLowerCase();
+    metadataJson.citizenAccessCodeRotatedAt = new Date().toISOString();
+  }
+
+  const nameParts = parsed.fullName.trim().split(/\s+/).filter(Boolean);
+  await upsertHondurasVoterRegistryRecord({
+    pool,
+    dni: parsed.dni,
+    fullName: parsed.fullName,
+    firstName: nameParts[0] ?? null,
+    middleName: nameParts.length > 3 ? nameParts.slice(1, -2).join(" ") : nameParts[1] ?? null,
+    lastName: nameParts.length >= 2 ? nameParts[nameParts.length - 2] ?? null : null,
+    secondLastName: nameParts.length >= 1 ? nameParts[nameParts.length - 1] ?? null : null,
+    habilitationStatus: parsed.habilitationStatus,
+    statusReason: parsed.statusReason ?? null,
+    source: parsed.source ?? "PUBLIC_ENROLLMENT_REVIEW",
+    metadataJson,
+  });
+
+  if (parsed.citizenAccessCode) {
+    await pool.query(
+      `UPDATE hn_citizen_sessions
+       SET status='REVOKED', revoked_at=NOW()
+       WHERE dni=$1 AND status='ACTIVE' AND revoked_at IS NULL`,
+      [parsed.dni],
+    );
+  }
+
+  revalidatePath("/honduras");
+  redirect(`/honduras?dni=${encodeURIComponent(parsed.dni)}`);
 }
 
 async function authorizeVoterAction(formData: FormData) {
@@ -535,7 +600,16 @@ export default async function HondurasPage(props: {
                 <div className="text-sm text-slate-500">No hay solicitudes todavía.</div>
               ) : (
                 <div className="space-y-3">
-                  {enrollmentRequests.map((request) => (
+                  {enrollmentRequests.map((request) => {
+                    const metadata = request.metadataJson && typeof request.metadataJson === "object" && !Array.isArray(request.metadataJson)
+                      ? (request.metadataJson as Record<string, unknown>)
+                      : {};
+                    const requestedFullName = typeof metadata.fullName === "string" ? metadata.fullName : "";
+                    const contactEmail = typeof metadata.contactEmail === "string" ? metadata.contactEmail : "";
+                    const contactPhone = typeof metadata.contactPhone === "string" ? metadata.contactPhone : "";
+                    const requestedElectionId = typeof metadata.electionId === "string" ? metadata.electionId : "";
+
+                    return (
                     <div key={request.requestId} className="rounded-md border border-slate-200 p-3 space-y-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
@@ -549,8 +623,56 @@ export default async function HondurasPage(props: {
                       {request.requestNotes ? (
                         <div className="text-sm text-slate-700">{request.requestNotes}</div>
                       ) : null}
+                      {requestedFullName || contactEmail || contactPhone || requestedElectionId ? (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
+                          {requestedFullName ? <div>Nombre reportado: {requestedFullName}</div> : null}
+                          {contactEmail ? <div>Correo: {contactEmail}</div> : null}
+                          {contactPhone ? <div>Teléfono: {contactPhone}</div> : null}
+                          {requestedElectionId ? <div>Elección solicitada: #{requestedElectionId}</div> : null}
+                        </div>
+                      ) : null}
                       {request.status === "PENDING_REVIEW" ? (
                         <div className="grid gap-3">
+                          <form action={createCensusFromEnrollmentRequestAction} className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            <input type="hidden" name="requestId" value={request.requestId} />
+                            <input type="hidden" name="dni" value={request.dni} />
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Crear o actualizar expediente</div>
+                            <input
+                              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                              name="fullName"
+                              defaultValue={requestedFullName}
+                              placeholder="Nombre completo validado"
+                            />
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" name="habilitationStatus" defaultValue="OBSERVADO">
+                                <option value="HABILITADO">HABILITADO</option>
+                                <option value="OBSERVADO">OBSERVADO</option>
+                                <option value="INHABILITADO">INHABILITADO</option>
+                                <option value="SUSPENDIDO">SUSPENDIDO</option>
+                              </select>
+                              <input
+                                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                name="citizenAccessCode"
+                                placeholder="Código ciudadano inicial"
+                              />
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <input
+                                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                name="source"
+                                defaultValue="PUBLIC_ENROLLMENT_REVIEW"
+                                placeholder="Fuente"
+                              />
+                              <input
+                                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                name="statusReason"
+                                placeholder="Resultado de validación"
+                              />
+                            </div>
+                            <button className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white" type="submit">
+                              Guardar expediente desde solicitud
+                            </button>
+                          </form>
                           <form action={reviewEnrollmentRequestAction} className="grid gap-2">
                             <input type="hidden" name="requestId" value={request.requestId} />
                             <input
@@ -593,7 +715,7 @@ export default async function HondurasPage(props: {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </section>

@@ -34,7 +34,9 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     await expect(registry.connect(aea).finalizeProcessing(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).publishResults(0)).to.be.revert(ethers);
     await expect(registry.connect(aea).setTallyVerifier(await rea.getAddress())).to.not.be.revert(ethers);
+    await expect(registry.connect(aea).setDecryptionVerifier(await rea.getAddress())).to.not.be.revert(ethers);
     await expect(registry.connect(rea).recordTallyProofVerification(0)).to.not.be.revert(ethers);
+    await expect(registry.connect(rea).recordDecryptionProofVerification(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).publishResults(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).openAuditWindow(0)).to.not.be.revert(ethers);
     await expect(registry.connect(aea).archiveElection(0)).to.not.be.revert(ethers);
@@ -59,7 +61,15 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     )) as any;
     await tallyVerifier.waitForDeployment();
 
+    const DecryptionFactory = await ethers.getContractFactory("BU_PVP_1_DecryptionVerifier");
+    const decryptionVerifier = (await DecryptionFactory.connect(aea).deploy(
+      await groth.getAddress(),
+      await registry.getAddress(),
+    )) as any;
+    await decryptionVerifier.waitForDeployment();
+
     await (await registry.connect(aea).setTallyVerifier(await tallyVerifier.getAddress())).wait();
+    await (await registry.connect(aea).setDecryptionVerifier(await decryptionVerifier.getAddress())).wait();
     await (
       await registry
         .connect(aea)
@@ -79,6 +89,14 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     ).to.not.be.revert(ethers);
 
     expect(await registry.tallyProofVerified(0)).to.equal(true);
+    expect(await registry.decryptionProofVerified(0)).to.equal(false);
+    await expect(registry.connect(aea).publishResults(0)).to.be.revert(ethers);
+
+    await expect(
+      decryptionVerifier.verifyDecryptionProof(0n, "job-dec", [0n, 0n], [[0n, 0n], [0n, 0n]], [0n, 0n], []),
+    ).to.not.be.revert(ethers);
+
+    expect(await registry.decryptionProofVerified(0)).to.equal(true);
     await expect(registry.connect(aea).publishResults(0)).to.not.be.revert(ethers);
   });
 

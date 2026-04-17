@@ -259,6 +259,15 @@ type EnrollmentRequestBody = {
   requestNotes?: string;
 };
 
+type PublicEnrollmentRequestBody = {
+  dni?: string;
+  fullName?: string;
+  electionId?: string;
+  requestNotes?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+};
+
 type CitizenSessionRequestBody = {
   dni?: string;
   accessCode?: string;
@@ -300,10 +309,9 @@ function isWarningSeverity(severity: string): boolean {
 function mapProofStateToResultMode(proofState: string | null | undefined): string {
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "VERIFIED";
-  if (state === "TALLY_VERIFIED_ONCHAIN") return "PENDING_ZK_DECRYPTION";
-  if (state === "TRANSCRIPT_COMMITTED") return "PENDING";
-  if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
-  return state;
+  if (state === "TALLY_VERIFIED_ONCHAIN" || state === "TRANSCRIPT_COMMITTED") return "BLOCKED_BY_ZK";
+  if (state === "NOT_IMPLEMENTED" || state.length === 0) return "UNVERIFIED";
+  return "UNVERIFIED";
 }
 
 function honestyNoteForProofState(proofState: string | null | undefined): string {
@@ -316,6 +324,25 @@ function honestyNoteForProofState(proofState: string | null | undefined): string
     return "Existe compromiso de transcript en cadena, pero todavía no hay publicación final habilitada por verificación ZK.";
   }
   return "Resultado aún no verificado.";
+}
+
+function verifiedResultPayloadWhereClause(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `${prefix}publication_status='PUBLISHED' AND ${prefix}proof_state='VERIFIED'`;
+}
+
+function zkProofJobPriorityOrderSql(): string {
+  return `ORDER BY
+    COALESCE(verified_onchain, false) DESC,
+    COALESCE(verified_offchain, false) DESC,
+    CASE status
+      WHEN 'VERIFIED_ONCHAIN' THEN 4
+      WHEN 'VERIFIED_OFFCHAIN' THEN 3
+      WHEN 'PROVED' THEN 2
+      WHEN 'BUILDING' THEN 1
+      ELSE 0
+    END DESC,
+    created_at DESC`;
 }
 
 type ElectionRow = {
@@ -975,6 +1002,8 @@ async function main() {
     requestedWalletAddress?: string | null;
     electionId?: string | null;
     requestNotes?: string | null;
+    requestChannel?: string | null;
+    metadataJson?: Record<string, unknown> | null;
   }): Promise<HondurasEnrollmentRequestRow> {
     const requestId = crypto.randomUUID();
     await pool.query(
@@ -986,9 +1015,12 @@ async function main() {
         params.dni,
         "PENDING_REVIEW",
         params.requestedWalletAddress ?? null,
-        "CITIZEN_PORTAL",
+        params.requestChannel ?? "CITIZEN_PORTAL",
         params.requestNotes ?? null,
-        JSON.stringify({ electionId: params.electionId ?? null }),
+        JSON.stringify({
+          electionId: params.electionId ?? null,
+          ...(params.metadataJson ?? {}),
+        }),
       ],
     );
     const created = await listHondurasEnrollmentRequestsByDni(params.dni);
@@ -1313,6 +1345,55 @@ async function main() {
     }
   });
 
+  app.post<{ Body: PublicEnrollmentRequestBody }>(
+    "/v1/hn/public-enrollment-requests",
+    async (req, reply) => {
+      try {
+        const dni = requireHondurasDni(String(req.body?.dni ?? ""));
+        const fullName = String(req.body?.fullName ?? "").trim();
+        if (fullName.length < 5) {
+          reply.status(400);
+          return { ok: false, error: "full_name_required" };
+        }
+
+        const electionId = req.body?.electionId ? requireElectionId(String(req.body.electionId)) : null;
+        const existing = await listHondurasEnrollmentRequestsByDni(dni);
+        const latestPending = existing.find((row) => String(row.status).toUpperCase() === "PENDING_REVIEW");
+        if (latestPending) {
+          return {
+            ok: true,
+            dni,
+            request: normalizeHondurasEnrollmentRequest(latestPending),
+            idempotent: true,
+          };
+        }
+
+        const request = await createEnrollmentRequest({
+          dni,
+          electionId,
+          requestNotes: req.body?.requestNotes ? String(req.body.requestNotes) : null,
+          requestedWalletAddress: null,
+          requestChannel: "PUBLIC_SELF_REGISTRATION",
+          metadataJson: {
+            selfRegistration: true,
+            fullName,
+            contactEmail: String(req.body?.contactEmail ?? "").trim() || null,
+            contactPhone: String(req.body?.contactPhone ?? "").trim() || null,
+          },
+        });
+
+        return {
+          ok: true,
+          dni,
+          request: normalizeHondurasEnrollmentRequest(request),
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
   app.post<{ Body: EnrollmentRequestBody }>(
     "/v1/hn/enrollment-requests",
     async (req, reply) => {
@@ -1347,6 +1428,11 @@ async function main() {
           electionId,
           requestedWalletAddress,
           requestNotes: req.body?.requestNotes ? String(req.body.requestNotes) : null,
+          requestChannel: "CITIZEN_PORTAL",
+          metadataJson: {
+            electionId,
+            citizenInitiated: true,
+          },
         });
 
         return {
@@ -1361,6 +1447,43 @@ async function main() {
       }
     },
   );
+
+  app.get<{
+    Params: {
+      dni: string;
+    };
+  }>("/v1/hn/public-enrollment-status/:dni", async (req, reply) => {
+    try {
+      const dni = requireHondurasDni(String(req.params?.dni ?? ""));
+      const [record, requests, walletLinks, authorizations] = await Promise.all([
+        getHondurasCensusRecord(dni),
+        listHondurasEnrollmentRequestsByDni(dni),
+        listHondurasWalletLinksByDni(dni),
+        listHondurasVoterAuthorizations({
+          dni,
+        }),
+      ]);
+
+      const activeWallet = getActiveWalletLink(walletLinks);
+      const activeAuthorizations = authorizations.filter(
+        (row) => String(row.status).toUpperCase() === "AUTHORIZED" && !row.revokedAt,
+      );
+
+      return {
+        ok: true,
+        dni,
+        record: record ? normalizeHondurasCensusRecord(record) : null,
+        latestRequest: requests[0] ? normalizeHondurasEnrollmentRequest(requests[0]) : null,
+        requests: requests.map(normalizeHondurasEnrollmentRequest),
+        walletProvisioned: Boolean(activeWallet),
+        citizenAccessConfigured: record ? Boolean(extractCitizenAccessCodeHash(record)) : false,
+        authorizations: activeAuthorizations.map(normalizeHondurasVoterAuthorization),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 
   app.post<{ Body: CitizenSessionRequestBody }>("/v1/hn/auth/session", async (req, reply) => {
     try {
@@ -3123,6 +3246,7 @@ async function main() {
             published_at AS "publishedAt"
           FROM result_payloads
           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+            AND ${verifiedResultPayloadWhereClause()}
           ORDER BY created_at DESC`,
           [chainId, contractAddress, electionId],
         ),
@@ -3250,6 +3374,7 @@ async function main() {
               published_at AS "publishedAt"
             FROM result_payloads
             WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND id=$4
+              AND ${verifiedResultPayloadWhereClause()}
             LIMIT 1`,
             [chainId, contractAddress, electionId, resultId],
           ),
@@ -3331,7 +3456,10 @@ async function main() {
         ),
         pool.query(
           `SELECT id, tally_job_id AS "tallyJobId", result_kind AS "resultKind", payload_hash AS "payloadHash", proof_state AS "proofState", publication_status AS "publicationStatus", created_at AS "createdAt", published_at AS "publishedAt"
-           FROM result_payloads WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at DESC`,
+           FROM result_payloads
+           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+             AND ${verifiedResultPayloadWhereClause()}
+           ORDER BY created_at DESC`,
           [chainId, contractAddress, electionId],
         ),
         pool.query(
@@ -3479,7 +3607,7 @@ async function main() {
             created_at AS "createdAt"
           FROM zk_proof_jobs
           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND circuit_id=$4
-          ORDER BY created_at DESC
+          ${zkProofJobPriorityOrderSql()}
           LIMIT 1`,
           [chainId, contractAddress, electionId.toString(), "TallyVerifier_4x64"],
         );
@@ -3513,7 +3641,7 @@ async function main() {
             created_at AS "createdAt"
           FROM zk_proof_jobs
           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND circuit_id=$4
-          ORDER BY created_at DESC
+          ${zkProofJobPriorityOrderSql()}
           LIMIT 1`,
           [chainId, contractAddress, electionId.toString(), "DecryptionVerifier_4x64"],
         );
@@ -3567,15 +3695,15 @@ async function main() {
               ? "Los conteos publicados son la suma correcta de selecciones individuales y la inclusión de boletas en el árbol Merkle Poseidon (ZK verificada fuera de cadena)"
               : job?.status === "VERIFIED_ONCHAIN"
                 ? "Los conteos publicados son la suma correcta de selecciones individuales y la inclusión de boletas en el árbol Merkle Poseidon (ZK verificada en cadena)"
-                : "Aún no se generó una prueba ZK. La auditabilidad depende de la verificación del transcript.",
+                : "Aún no se completó el paquete ZK obligatorio de tally y descifrado.",
             whatIsNotProved: [
               ...(job?.merkleInclusionVerified ? [] : ["Inclusión de boletas en árbol Merkle"]),
-              ...(decryptionJob?.status === "VERIFIED_OFFCHAIN" || decryptionJob?.status === "VERIFIED_ONCHAIN"
+              ...(decryptionJob?.status === "VERIFIED_ONCHAIN"
                 ? []
-                : ["Descifrado correcto de ciphertexts (requiere circuito de descifrado)"]),
+                : ["Descifrado correcto de ciphertexts (proof on-chain de descifrado pendiente)"]),
               ...(job?.verifiedOnchain ? [] : ["Verificación en cadena"]),
             ],
-            auditabilityNote: "El transcript completo permanece disponible para auditoría independiente fuera de cadena sin depender del estado de prueba ZK.",
+            auditabilityNote: "La publicación final solo es válida cuando tally y descifrado quedan verificados en cadena.",
           },
         };
       } catch (err: unknown) {

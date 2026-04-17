@@ -13,9 +13,9 @@ export declare namespace BU_PVP_1_ElectionRegistry {
     }
 
   export interface BU_PVP_1_ElectionRegistryInterface extends Interface {
-    getFunction(nameOrSignature: "archiveElection" | "ballotCastByVotingAddress" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyTranscriptCommitment" | "recordTallyProofVerification" | "registryNullifierUsed" | "renounceOwnership" | "setTallyVerifier" | "signup" | "signupCount" | "startProcessing" | "tallyProofVerified" | "tallyVerifier" | "transferOwnership" | "votingAddressRegistered"): FunctionFragment;
+    getFunction(nameOrSignature: "archiveElection" | "ballotCastByVotingAddress" | "ballotCount" | "closeRegistry" | "closeVoting" | "createElection" | "decryptionProofVerified" | "decryptionVerifier" | "electionCount" | "finalizeProcessing" | "getElection" | "openAuditWindow" | "openRegistry" | "openVoting" | "owner" | "publishActa" | "publishBallot" | "publishResults" | "publishTallyTranscriptCommitment" | "recordDecryptionProofVerification" | "recordTallyProofVerification" | "registryNullifierUsed" | "renounceOwnership" | "setDecryptionVerifier" | "setTallyVerifier" | "signup" | "signupCount" | "startProcessing" | "tallyProofVerified" | "tallyVerifier" | "transferOwnership" | "votingAddressRegistered"): FunctionFragment;
 
-    getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded" | "TallyProofVerificationRecorded" | "TallyTranscriptCommitmentPublished" | "TallyVerifierUpdated"): EventFragment;
+    getEvent(nameOrSignatureOrTopic: "ActaPublished" | "BallotPublished" | "DecryptionProofVerificationRecorded" | "DecryptionVerifierUpdated" | "ElectionCreated" | "OwnershipTransferred" | "PhaseChanged" | "SignupRecorded" | "TallyProofVerificationRecorded" | "TallyTranscriptCommitmentPublished" | "TallyVerifierUpdated"): EventFragment;
 
     encodeFunctionData(functionFragment: 'archiveElection', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'ballotCastByVotingAddress', values: [BigNumberish, AddressLike]): string;
@@ -23,6 +23,8 @@ encodeFunctionData(functionFragment: 'ballotCount', values: [BigNumberish]): str
 encodeFunctionData(functionFragment: 'closeRegistry', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'closeVoting', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'createElection', values: [BytesLike, AddressLike, BytesLike]): string;
+encodeFunctionData(functionFragment: 'decryptionProofVerified', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'decryptionVerifier', values?: undefined): string;
 encodeFunctionData(functionFragment: 'electionCount', values?: undefined): string;
 encodeFunctionData(functionFragment: 'finalizeProcessing', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'getElection', values: [BigNumberish]): string;
@@ -34,9 +36,11 @@ encodeFunctionData(functionFragment: 'publishActa', values: [BigNumberish, BigNu
 encodeFunctionData(functionFragment: 'publishBallot', values: [BigNumberish, BytesLike, BytesLike, BytesLike]): string;
 encodeFunctionData(functionFragment: 'publishResults', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'publishTallyTranscriptCommitment', values: [BigNumberish, BytesLike]): string;
+encodeFunctionData(functionFragment: 'recordDecryptionProofVerification', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'recordTallyProofVerification', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'registryNullifierUsed', values: [BigNumberish, BytesLike]): string;
 encodeFunctionData(functionFragment: 'renounceOwnership', values?: undefined): string;
+encodeFunctionData(functionFragment: 'setDecryptionVerifier', values: [AddressLike]): string;
 encodeFunctionData(functionFragment: 'setTallyVerifier', values: [AddressLike]): string;
 encodeFunctionData(functionFragment: 'signup', values: [BigNumberish, BytesLike, BytesLike, BytesLike]): string;
 encodeFunctionData(functionFragment: 'signupCount', values: [BigNumberish]): string;
@@ -52,6 +56,8 @@ decodeFunctionResult(functionFragment: 'ballotCount', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'closeRegistry', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'closeVoting', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'createElection', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'decryptionProofVerified', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'decryptionVerifier', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'electionCount', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'finalizeProcessing', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'getElection', data: BytesLike): Result;
@@ -63,9 +69,11 @@ decodeFunctionResult(functionFragment: 'publishActa', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishBallot', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishResults', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'publishTallyTranscriptCommitment', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'recordDecryptionProofVerification', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'recordTallyProofVerification', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'registryNullifierUsed', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'renounceOwnership', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'setDecryptionVerifier', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'setTallyVerifier', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'signup', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'signupCount', data: BytesLike): Result;
@@ -93,6 +101,30 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
       export type InputTuple = [electionId: BigNumberish, ballotIndex: BigNumberish, ballotHash: BytesLike, ciphertext: BytesLike];
       export type OutputTuple = [electionId: bigint, ballotIndex: bigint, ballotHash: string, ciphertext: string];
       export interface OutputObject {electionId: bigint, ballotIndex: bigint, ballotHash: string, ciphertext: string };
+      export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
+      export type Filter = TypedDeferredTopicFilter<Event>
+      export type Log = TypedEventLog<Event>
+      export type LogDescription = TypedLogDescription<Event>
+    }
+
+  
+
+    export namespace DecryptionProofVerificationRecordedEvent {
+      export type InputTuple = [electionId: BigNumberish, verifier: AddressLike];
+      export type OutputTuple = [electionId: bigint, verifier: string];
+      export interface OutputObject {electionId: bigint, verifier: string };
+      export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
+      export type Filter = TypedDeferredTopicFilter<Event>
+      export type Log = TypedEventLog<Event>
+      export type LogDescription = TypedLogDescription<Event>
+    }
+
+  
+
+    export namespace DecryptionVerifierUpdatedEvent {
+      export type InputTuple = [previousVerifier: AddressLike, newVerifier: AddressLike];
+      export type OutputTuple = [previousVerifier: string, newVerifier: string];
+      export interface OutputObject {previousVerifier: string, newVerifier: string };
       export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
       export type Filter = TypedDeferredTopicFilter<Event>
       export type Log = TypedEventLog<Event>
@@ -267,6 +299,22 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
     
 
     
+    decryptionProofVerified: TypedContractMethod<
+      [arg0: BigNumberish, ],
+      [boolean],
+      'view'
+    >
+    
+
+    
+    decryptionVerifier: TypedContractMethod<
+      [],
+      [string],
+      'view'
+    >
+    
+
+    
     electionCount: TypedContractMethod<
       [],
       [bigint],
@@ -355,6 +403,14 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
     
 
     
+    recordDecryptionProofVerification: TypedContractMethod<
+      [electionId: BigNumberish, ],
+      [void],
+      'nonpayable'
+    >
+    
+
+    
     recordTallyProofVerification: TypedContractMethod<
       [electionId: BigNumberish, ],
       [void],
@@ -373,6 +429,14 @@ decodeFunctionResult(functionFragment: 'votingAddressRegistered', data: BytesLik
     
     renounceOwnership: TypedContractMethod<
       [],
+      [void],
+      'nonpayable'
+    >
+    
+
+    
+    setDecryptionVerifier: TypedContractMethod<
+      [verifier: AddressLike, ],
       [void],
       'nonpayable'
     >
@@ -475,6 +539,16 @@ getFunction(nameOrSignature: 'createElection'): TypedContractMethod<
       [bigint],
       'nonpayable'
     >;
+getFunction(nameOrSignature: 'decryptionProofVerified'): TypedContractMethod<
+      [arg0: BigNumberish, ],
+      [boolean],
+      'view'
+    >;
+getFunction(nameOrSignature: 'decryptionVerifier'): TypedContractMethod<
+      [],
+      [string],
+      'view'
+    >;
 getFunction(nameOrSignature: 'electionCount'): TypedContractMethod<
       [],
       [bigint],
@@ -530,6 +604,11 @@ getFunction(nameOrSignature: 'publishTallyTranscriptCommitment'): TypedContractM
       [void],
       'nonpayable'
     >;
+getFunction(nameOrSignature: 'recordDecryptionProofVerification'): TypedContractMethod<
+      [electionId: BigNumberish, ],
+      [void],
+      'nonpayable'
+    >;
 getFunction(nameOrSignature: 'recordTallyProofVerification'): TypedContractMethod<
       [electionId: BigNumberish, ],
       [void],
@@ -542,6 +621,11 @@ getFunction(nameOrSignature: 'registryNullifierUsed'): TypedContractMethod<
     >;
 getFunction(nameOrSignature: 'renounceOwnership'): TypedContractMethod<
       [],
+      [void],
+      'nonpayable'
+    >;
+getFunction(nameOrSignature: 'setDecryptionVerifier'): TypedContractMethod<
+      [verifier: AddressLike, ],
       [void],
       'nonpayable'
     >;
@@ -588,6 +672,8 @@ getFunction(nameOrSignature: 'votingAddressRegistered'): TypedContractMethod<
 
     getEvent(key: 'ActaPublished'): TypedContractEvent<ActaPublishedEvent.InputTuple, ActaPublishedEvent.OutputTuple, ActaPublishedEvent.OutputObject>;
 getEvent(key: 'BallotPublished'): TypedContractEvent<BallotPublishedEvent.InputTuple, BallotPublishedEvent.OutputTuple, BallotPublishedEvent.OutputObject>;
+getEvent(key: 'DecryptionProofVerificationRecorded'): TypedContractEvent<DecryptionProofVerificationRecordedEvent.InputTuple, DecryptionProofVerificationRecordedEvent.OutputTuple, DecryptionProofVerificationRecordedEvent.OutputObject>;
+getEvent(key: 'DecryptionVerifierUpdated'): TypedContractEvent<DecryptionVerifierUpdatedEvent.InputTuple, DecryptionVerifierUpdatedEvent.OutputTuple, DecryptionVerifierUpdatedEvent.OutputObject>;
 getEvent(key: 'ElectionCreated'): TypedContractEvent<ElectionCreatedEvent.InputTuple, ElectionCreatedEvent.OutputTuple, ElectionCreatedEvent.OutputObject>;
 getEvent(key: 'OwnershipTransferred'): TypedContractEvent<OwnershipTransferredEvent.InputTuple, OwnershipTransferredEvent.OutputTuple, OwnershipTransferredEvent.OutputObject>;
 getEvent(key: 'PhaseChanged'): TypedContractEvent<PhaseChangedEvent.InputTuple, PhaseChangedEvent.OutputTuple, PhaseChangedEvent.OutputObject>;
@@ -604,6 +690,14 @@ getEvent(key: 'TallyVerifierUpdated'): TypedContractEvent<TallyVerifierUpdatedEv
 
       'BallotPublished(uint256,uint256,bytes32,bytes)': TypedContractEvent<BallotPublishedEvent.InputTuple, BallotPublishedEvent.OutputTuple, BallotPublishedEvent.OutputObject>;
       BallotPublished: TypedContractEvent<BallotPublishedEvent.InputTuple, BallotPublishedEvent.OutputTuple, BallotPublishedEvent.OutputObject>;
+    
+
+      'DecryptionProofVerificationRecorded(uint256,address)': TypedContractEvent<DecryptionProofVerificationRecordedEvent.InputTuple, DecryptionProofVerificationRecordedEvent.OutputTuple, DecryptionProofVerificationRecordedEvent.OutputObject>;
+      DecryptionProofVerificationRecorded: TypedContractEvent<DecryptionProofVerificationRecordedEvent.InputTuple, DecryptionProofVerificationRecordedEvent.OutputTuple, DecryptionProofVerificationRecordedEvent.OutputObject>;
+    
+
+      'DecryptionVerifierUpdated(address,address)': TypedContractEvent<DecryptionVerifierUpdatedEvent.InputTuple, DecryptionVerifierUpdatedEvent.OutputTuple, DecryptionVerifierUpdatedEvent.OutputObject>;
+      DecryptionVerifierUpdated: TypedContractEvent<DecryptionVerifierUpdatedEvent.InputTuple, DecryptionVerifierUpdatedEvent.OutputTuple, DecryptionVerifierUpdatedEvent.OutputObject>;
     
 
       'ElectionCreated(uint256,bytes32,address,address,bytes)': TypedContractEvent<ElectionCreatedEvent.InputTuple, ElectionCreatedEvent.OutputTuple, ElectionCreatedEvent.OutputObject>;

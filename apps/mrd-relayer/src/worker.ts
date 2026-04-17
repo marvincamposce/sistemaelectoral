@@ -23,7 +23,6 @@ export async function runWorkerLoop(pool: pg.Pool, provider: ethers.JsonRpcProvi
 
         if (res.rows.length === 0) {
           await client.query("COMMIT");
-          client.release();
           await new Promise((r) => setTimeout(r, 2000));
           continue;
         }

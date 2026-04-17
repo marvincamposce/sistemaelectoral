@@ -43,6 +43,7 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
 
     Election[] private _elections;
     address public tallyVerifier;
+    address public decryptionVerifier;
 
     // electionId => nullifier used
     mapping(uint256 => mapping(bytes32 => bool)) public registryNullifierUsed;
@@ -55,6 +56,7 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     mapping(uint256 => uint256) public signupCount;
     mapping(uint256 => uint256) public ballotCount;
     mapping(uint256 => bool) public tallyProofVerified;
+    mapping(uint256 => bool) public decryptionProofVerified;
 
     event ElectionCreated(
         uint256 indexed electionId,
@@ -92,8 +94,10 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     );
 
     event TallyVerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
+    event DecryptionVerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
 
     event TallyProofVerificationRecorded(uint256 indexed electionId, address indexed verifier);
+    event DecryptionProofVerificationRecorded(uint256 indexed electionId, address indexed verifier);
 
     error NotElectionAuthority(uint256 electionId, address caller);
     error WrongPhase(uint256 electionId, Phase expected, Phase actual);
@@ -106,7 +110,10 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     error InvalidBallotSignature(uint256 electionId, address votingAddress);
     error InvalidTallyVerifier();
     error NotTallyVerifier(address caller);
+    error InvalidDecryptionVerifier();
+    error NotDecryptionVerifier(address caller);
     error TallyProofNotVerified(uint256 electionId);
+    error DecryptionProofNotVerified(uint256 electionId);
 
     modifier onlyElectionAuthority(uint256 electionId) {
         if (_elections[electionId].authority != msg.sender) {
@@ -130,6 +137,13 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         _;
     }
 
+    modifier onlyDecryptionVerifier() {
+        if (msg.sender != decryptionVerifier) {
+            revert NotDecryptionVerifier(msg.sender);
+        }
+        _;
+    }
+
     constructor() Ownable(msg.sender) {}
 
     function setTallyVerifier(address verifier) external onlyOwner {
@@ -140,6 +154,16 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         address previousVerifier = tallyVerifier;
         tallyVerifier = verifier;
         emit TallyVerifierUpdated(previousVerifier, verifier);
+    }
+
+    function setDecryptionVerifier(address verifier) external onlyOwner {
+        if (verifier == address(0)) {
+            revert InvalidDecryptionVerifier();
+        }
+
+        address previousVerifier = decryptionVerifier;
+        decryptionVerifier = verifier;
+        emit DecryptionVerifierUpdated(previousVerifier, verifier);
     }
 
     function electionCount() external view returns (uint256) {
@@ -233,6 +257,9 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
         if (!tallyProofVerified[electionId]) {
             revert TallyProofNotVerified(electionId);
         }
+        if (!decryptionProofVerified[electionId]) {
+            revert DecryptionProofNotVerified(electionId);
+        }
         _setPhase(electionId, Phase.RESULTS_PUBLISHED);
     }
 
@@ -243,6 +270,15 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
     {
         tallyProofVerified[electionId] = true;
         emit TallyProofVerificationRecorded(electionId, msg.sender);
+    }
+
+    function recordDecryptionProofVerification(uint256 electionId)
+        external
+        onlyDecryptionVerifier
+        inPhase(electionId, Phase.TALLYING)
+    {
+        decryptionProofVerified[electionId] = true;
+        emit DecryptionProofVerificationRecorded(electionId, msg.sender);
     }
 
     function openAuditWindow(uint256 electionId)

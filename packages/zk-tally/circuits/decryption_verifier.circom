@@ -53,7 +53,7 @@ template DecryptionVerifier(MAX_BALLOTS, NUM_CANDIDATES) {
     // --- Public inputs ---
     signal input voteCounts[NUM_CANDIDATES];
     signal input totalValid;
-    signal output decryptionCommitment;
+    signal input decryptionCommitment;
 
     // --- Private inputs ---
     signal input activeSlots[MAX_BALLOTS];
@@ -146,7 +146,7 @@ template DecryptionVerifier(MAX_BALLOTS, NUM_CANDIDATES) {
         rollingCommitment[i + 1] <== commitmentHashers[i].out;
     }
 
-    decryptionCommitment <== rollingCommitment[MAX_BALLOTS];
+    rollingCommitment[MAX_BALLOTS] === decryptionCommitment;
 }
 
 component main {public [voteCounts, totalValid, decryptionCommitment]} = DecryptionVerifier(64, 4);

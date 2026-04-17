@@ -17,9 +17,12 @@ export const BU_PVP_1_ELECTION_REGISTRY_ABI = [
   "function signupCount(uint256 electionId) view returns (uint256)",
   "function ballotCount(uint256 electionId) view returns (uint256)",
   "function tallyVerifier() view returns (address)",
+  "function decryptionVerifier() view returns (address)",
   "function tallyProofVerified(uint256 electionId) view returns (bool)",
+  "function decryptionProofVerified(uint256 electionId) view returns (bool)",
   "function createElection(bytes32 manifestHash,address registryAuthority,bytes coordinatorPubKey) returns (uint256)",
   "function setTallyVerifier(address verifier)",
+  "function setDecryptionVerifier(address verifier)",
   "function openRegistry(uint256 electionId)",
   "function closeRegistry(uint256 electionId)",
   "function openVoting(uint256 electionId)",
@@ -34,6 +37,7 @@ export const BU_PVP_1_ELECTION_REGISTRY_ABI = [
   "function publishActa(uint256 electionId, uint8 kind, bytes32 snapshotHash)",
   "function publishTallyTranscriptCommitment(uint256 electionId, bytes commitmentPayload)",
   "function recordTallyProofVerification(uint256 electionId)",
+  "function recordDecryptionProofVerification(uint256 electionId)",
   "event ElectionCreated(uint256 indexed electionId, bytes32 indexed manifestHash, address indexed authority, address registryAuthority, bytes coordinatorPubKey)",
   "event PhaseChanged(uint256 indexed electionId, uint8 previousPhase, uint8 newPhase)",
   "event SignupRecorded(uint256 indexed electionId, bytes32 indexed registryNullifier, bytes votingPubKey)",
@@ -41,7 +45,9 @@ export const BU_PVP_1_ELECTION_REGISTRY_ABI = [
   "event ActaPublished(uint256 indexed electionId, uint8 kind, bytes32 indexed snapshotHash)",
   "event TallyTranscriptCommitmentPublished(uint256 indexed electionId, bytes32 indexed commitmentHash, bytes commitmentPayload)",
   "event TallyVerifierUpdated(address indexed previousVerifier, address indexed newVerifier)",
+  "event DecryptionVerifierUpdated(address indexed previousVerifier, address indexed newVerifier)",
   "event TallyProofVerificationRecorded(uint256 indexed electionId, address indexed verifier)",
+  "event DecryptionProofVerificationRecorded(uint256 indexed electionId, address indexed verifier)",
 ] as const;
 
 export const BU_PVP_1_TALLY_VERIFIER_ABI = [
@@ -49,6 +55,13 @@ export const BU_PVP_1_TALLY_VERIFIER_ABI = [
   "function electionRegistry() view returns (address)",
   "function verifyTallyProof(uint256 electionId, string jobId, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[] input) returns (bool)",
   "event TallyProofVerifiedOnChain(uint256 indexed electionId, bytes32 indexed jobIdHash, bytes32 indexed proofHash, bytes32 publicInputsHash, address verifierContract)",
+] as const;
+
+export const BU_PVP_1_DECRYPTION_VERIFIER_ABI = [
+  "function groth16Verifier() view returns (address)",
+  "function electionRegistry() view returns (address)",
+  "function verifyDecryptionProof(uint256 electionId, string jobId, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[] input) returns (bool)",
+  "event DecryptionProofVerifiedOnChain(uint256 indexed electionId, bytes32 indexed jobIdHash, bytes32 indexed proofHash, bytes32 publicInputsHash, address verifierContract)",
 ] as const;
 
 type ElectionRegistryContract = ethers.Contract & {

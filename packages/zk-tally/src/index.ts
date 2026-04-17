@@ -11,6 +11,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildPoseidon } from "circomlibjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(__dirname, "..");
@@ -106,6 +107,8 @@ export interface DecryptionWitnessInput {
   voteCounts: string[];
   /** Total number of valid ballots */
   totalValid: string;
+  /** Compact public commitment over decryption witness lanes */
+  decryptionCommitment: string;
   /** Active slot selector (length = MAX_BALLOTS): 1=real ballot, 0=padding */
   activeSlots: string[];
   /** Decrypted selection index per slot (length = MAX_BALLOTS), values 0..NUM_CANDIDATES */
@@ -145,6 +148,35 @@ export interface BuildDecryptionWitnessParams {
   candidateOrder: string[];
   /** Per-real-ballot witness entries in deterministic ballot order */
   entries: DecryptionWitnessEntry[];
+}
+
+type PoseidonFn = ((inputs: bigint[]) => unknown) & {
+  F: {
+    toObject(value: unknown): bigint;
+  };
+};
+
+let poseidonPromise: Promise<PoseidonFn> | undefined;
+
+const FIELD_MODULUS =
+  21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+function normalizeField(value: bigint): bigint {
+  const modded = value % FIELD_MODULUS;
+  return modded >= 0n ? modded : modded + FIELD_MODULUS;
+}
+
+async function getPoseidon(): Promise<PoseidonFn> {
+  if (!poseidonPromise) {
+    poseidonPromise = buildPoseidon().then((poseidon: unknown) => poseidon as PoseidonFn);
+  }
+  return poseidonPromise;
+}
+
+async function poseidonHash(inputs: bigint[]): Promise<bigint> {
+  const poseidon = await getPoseidon();
+  const out = poseidon(inputs.map((value) => normalizeField(value)));
+  return normalizeField(BigInt(poseidon.F.toObject(out)));
 }
 
 /**
@@ -267,7 +299,7 @@ export function buildWitnessFromTranscript(
 /**
  * Build witness input for decryption verification circuit (Phase 9D).
  */
-export function buildDecryptionWitness(params: BuildDecryptionWitnessParams): DecryptionWitnessInput {
+export async function buildDecryptionWitness(params: BuildDecryptionWitnessParams): Promise<DecryptionWitnessInput> {
   const { summary, candidateOrder, entries } = params;
 
   if (candidateOrder.length !== NUM_CANDIDATES) {
@@ -310,9 +342,21 @@ export function buildDecryptionWitness(params: BuildDecryptionWitnessParams): De
     }
   }
 
+  let decryptionCommitment = 0n;
+  for (let i = 0; i < MAX_BALLOTS; i++) {
+    decryptionCommitment = await poseidonHash([
+      decryptionCommitment,
+      BigInt(selectionCiphertexts[i] ?? "0"),
+      BigInt(selectionNonces[i] ?? "0"),
+      BigInt(selectionSharedKeys[i] ?? "0"),
+      BigInt(selections[i] ?? String(INVALID_SELECTION)),
+    ]);
+  }
+
   return {
     voteCounts,
     totalValid: String(totalValid),
+    decryptionCommitment: decryptionCommitment.toString(),
     activeSlots,
     selections,
     selectionCiphertexts,

@@ -327,8 +327,8 @@ describe("TallyVerifier ZK Proof (Groth16)", () => {
     }, /merkle path index must be 0 or 1/);
   });
 
-  it("should build decryption witness with active slot padding", () => {
-    const witness = buildDecryptionWitness({
+  it("should build decryption witness with active slot padding", async () => {
+    const witness = await buildDecryptionWitness({
       summary: {
         CANDIDATO_A: 1,
         CANDIDATO_B: 1,

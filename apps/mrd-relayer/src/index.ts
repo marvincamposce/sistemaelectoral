@@ -146,14 +146,15 @@ app.post("/v1/mrd/elections/:electionId/ballot", async (request, reply) => {
       .send({ ok: false, error: "Missing required ballot payload fields" });
   }
 
-  let encryptionScheme = "LEGACY_RAW_HEX";
+  let encryptionScheme = "";
   try {
     const envelope = decodeBallotCiphertextEnvelope(ciphertext);
     encryptionScheme = envelope.version;
   } catch {
-    if (!/^0x[0-9a-fA-F]+$/.test(ciphertext)) {
-      return reply.status(400).send({ ok: false, error: "Invalid ballot ciphertext format" });
-    }
+    return reply.status(400).send({
+      ok: false,
+      error: "Ballot ciphertext must be a valid BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2 envelope",
+    });
   }
 
   const normalizedPayload = {

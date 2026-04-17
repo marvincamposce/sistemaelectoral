@@ -35,6 +35,13 @@ import {
   NUM_CANDIDATES as ZK_NUM_CANDIDATES,
 } from "@blockurna/zk-tally";
 
+const BU_PVP_1_DECRYPTION_VERIFIER_ABI = [
+  "function groth16Verifier() view returns (address)",
+  "function electionRegistry() view returns (address)",
+  "function verifyDecryptionProof(uint256 electionId, string jobId, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[] input) returns (bool)",
+  "event DecryptionProofVerifiedOnChain(uint256 indexed electionId, bytes32 indexed jobIdHash, bytes32 indexed proofHash, bytes32 publicInputsHash, address verifierContract)",
+] as const;
+
 function getContract() {
   const env = getEnv();
   const provider = new ethers.JsonRpcProvider(env.RPC_URL);
@@ -53,13 +60,37 @@ function getTallyVerifierContract() {
   return new ethers.Contract(env.TALLY_VERIFIER_ADDRESS, BU_PVP_1_TALLY_VERIFIER_ABI, wallet);
 }
 
+function getDecryptionVerifierContract() {
+  const env = getEnv();
+  if (!env.DECRYPTION_VERIFIER_ADDRESS) {
+    throw new Error("Missing DECRYPTION_VERIFIER_ADDRESS in environment");
+  }
+
+  const provider = new ethers.JsonRpcProvider(env.RPC_URL);
+  const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
+  return new ethers.Contract(env.DECRYPTION_VERIFIER_ADDRESS, BU_PVP_1_DECRYPTION_VERIFIER_ABI, wallet);
+}
+
 function mapProofStateToResultMode(proofState: string): string {
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "VERIFIED";
-  if (state === "TALLY_VERIFIED_ONCHAIN") return "PENDING_ZK_DECRYPTION";
-  if (state === "TRANSCRIPT_COMMITTED") return "PENDING";
-  if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
-  return state;
+  if (state === "TALLY_VERIFIED_ONCHAIN" || state === "TRANSCRIPT_COMMITTED") return "BLOCKED_BY_ZK";
+  if (state === "NOT_IMPLEMENTED" || state.length === 0) return "UNVERIFIED";
+  return "UNVERIFIED";
+}
+
+function zkProofJobPriorityOrderSql(): string {
+  return `ORDER BY
+    COALESCE(verified_onchain, false) DESC,
+    COALESCE(verified_offchain, false) DESC,
+    CASE status
+      WHEN 'VERIFIED_ONCHAIN' THEN 4
+      WHEN 'VERIFIED_OFFCHAIN' THEN 3
+      WHEN 'PROVED' THEN 2
+      WHEN 'BUILDING' THEN 1
+      ELSE 0
+    END DESC,
+    created_at DESC`;
 }
 
 type ZkPublicationGateState = {
@@ -302,7 +333,7 @@ async function loadZkPublicationGateState(params: {
        tally_job_id AS "tallyJobId"
      FROM zk_proof_jobs
      WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3${tallyJobClause} AND circuit_id=$${params.tallyJobId ? 5 : 4}
-     ORDER BY created_at DESC
+     ${zkProofJobPriorityOrderSql()}
      LIMIT 1`,
     [...tallyQueryParams, ZK_CIRCUIT_ID],
   );
@@ -327,7 +358,7 @@ async function loadZkPublicationGateState(params: {
        verified_onchain AS "verifiedOnchain"
      FROM zk_proof_jobs
      WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ${decryptionWhereClause}
-     ORDER BY created_at DESC
+     ${zkProofJobPriorityOrderSql()}
      LIMIT 1`,
     decryptionQueryParams,
   );
@@ -335,13 +366,11 @@ async function loadZkPublicationGateState(params: {
   const decryptionProofRow = decryptionProofRes.rows[0] ?? null;
   const blockers: string[] = [];
   const tallyVerifiedOnchain = Boolean(tallyProofRow?.verifiedOnchain) || tallyProofRow?.status === "VERIFIED_ONCHAIN";
-  const decryptionRequired = decryptionProofRow !== null;
+  const decryptionRequired = true;
   const decryptionVerified =
     !decryptionRequired ||
     Boolean(decryptionProofRow?.verifiedOnchain) ||
-    Boolean(decryptionProofRow?.verifiedOffchain) ||
-    decryptionProofRow?.status === "VERIFIED_ONCHAIN" ||
-    decryptionProofRow?.status === "VERIFIED_OFFCHAIN";
+    decryptionProofRow?.status === "VERIFIED_ONCHAIN";
 
   if (!tallyProofRow) {
     blockers.push("No existe un job de prueba ZK de tally para esta eleccion.");
@@ -353,7 +382,7 @@ async function loadZkPublicationGateState(params: {
 
   if (decryptionRequired && !decryptionVerified) {
     blockers.push(
-      `La prueba ZK de descifrado aún no está verificada fuera de cadena (status=${decryptionProofRow?.status ?? "UNKNOWN"}).`,
+      `La prueba ZK de descifrado aún no está verificada en cadena (status=${decryptionProofRow?.status ?? "MISSING"}).`,
     );
   }
 
@@ -980,6 +1009,23 @@ export async function computeRealTallyAction(electionId: string) {
       return { ok: false, error: keyResolution.error };
     }
 
+    for (let i = 0; i < ciphertexts.length; i += 1) {
+      try {
+        const envelope = decodeBallotCiphertextEnvelope(String(ciphertexts[i]));
+        if (envelope.version !== "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2") {
+          return {
+            ok: false,
+            error: `Unsupported ballot ciphertext version at index ${i}: ${envelope.version}`,
+          };
+        }
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          error: `Invalid ballot ciphertext envelope at index ${i}: ${getErrorMessage(err)}`,
+        };
+      }
+    }
+
     const summary: Record<string, number> = {};
     const transcriptEntries: Array<{
       ballotIndex: number;
@@ -1316,24 +1362,25 @@ export async function createResultPayloadAction(
     const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
-    const proofState = options?.proofState ?? "TRANSCRIPT_COMMITTED";
+    const proofState = options?.proofState ?? "VERIFIED";
     const normalizedProofState = String(proofState).toUpperCase();
-    if (!["VERIFIED", "TALLY_VERIFIED_ONCHAIN", "TRANSCRIPT_COMMITTED", "NOT_IMPLEMENTED"].includes(normalizedProofState)) {
-      return { ok: false, error: `Unsupported proofState for result payloads: ${proofState}` };
+    if (normalizedProofState !== "VERIFIED") {
+      return {
+        ok: false,
+        error: `Result payloads finales solo se permiten con proofState VERIFIED. Recibido: ${proofState}`,
+      };
     }
-    if (normalizedProofState === "VERIFIED") {
-      const gate = await loadZkPublicationGateState({
-        chainId,
-        contractAddress,
-        electionId,
-        tallyJobId,
-      });
-      if (!gate.ready) {
-        return {
-          ok: false,
-          error: `No se puede publicar payload VERIFIED sin gate ZK completo: ${gate.blockers.join(" ")}`,
-        };
-      }
+    const gate = await loadZkPublicationGateState({
+      chainId,
+      contractAddress,
+      electionId,
+      tallyJobId,
+    });
+    if (!gate.ready) {
+      return {
+        ok: false,
+        error: `No se puede publicar payload VERIFIED sin gate ZK completo: ${gate.blockers.join(" ")}`,
+      };
     }
     const resultKind = options?.resultKind ?? "LOCAL_REPRODUCIBLE";
     const publicationStatus = options?.publicationStatus ?? "PUBLISHED";
@@ -1487,11 +1534,25 @@ export async function persistAuditBundleAction(electionId: string) {
       pool.query(`SELECT COUNT(*)::int AS c FROM ballot_records WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM processing_batches WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM tally_jobs WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
-      pool.query(`SELECT COUNT(*)::int AS c FROM result_payloads WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
+      pool.query(
+        `SELECT COUNT(*)::int AS c
+         FROM result_payloads
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+           AND publication_status='PUBLISHED' AND proof_state='VERIFIED'`,
+        [chainId, contractAddress, electionId],
+      ),
       pool.query(`SELECT COUNT(*)::int AS c FROM acta_contents WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM acta_anchors WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
       pool.query(`SELECT COUNT(*)::int AS c FROM incident_logs WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`, [chainId, contractAddress, electionId]),
-      pool.query(`SELECT proof_state AS "proofState" FROM result_payloads WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at DESC LIMIT 1`, [chainId, contractAddress, electionId]),
+      pool.query(
+        `SELECT proof_state AS "proofState"
+         FROM result_payloads
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+           AND publication_status='PUBLISHED' AND proof_state='VERIFIED'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [chainId, contractAddress, electionId],
+      ),
     ]);
 
     const latestProofState = String(latestResultR.rows[0]?.proofState ?? "NOT_IMPLEMENTED");
@@ -1517,11 +1578,7 @@ export async function persistAuditBundleAction(electionId: string) {
         note:
           latestProofState === "VERIFIED"
             ? "Resultado y prueba verificados."
-            : latestProofState === "TALLY_VERIFIED_ONCHAIN"
-              ? "La prueba de tally ya fue verificada en cadena, pero falta cerrar la verificación ZK complementaria requerida para publicar resultados finales."
-              : latestProofState === "TRANSCRIPT_COMMITTED"
-                ? "Existe compromiso de transcript en cadena, pero la publicación final está bloqueada hasta completar la verificación ZK."
-                : "Resultado aún no verificado.",
+            : "No existe todavía un payload final publicado y verificado.",
       },
     };
 
@@ -1689,7 +1746,8 @@ export async function generateZkProofAction(
       [jobId],
     );
 
-    // Best-effort Phase 9D: generate decryption proof on top of V2 ciphertext witness lane.
+    // Phase 9D is mandatory for final publication: every tally proof must be paired
+    // with a decryption proof over the same ballot set.
     let decryptionProofJob: {
       jobId: string;
       status: string;
@@ -1700,114 +1758,121 @@ export async function generateZkProofAction(
 
     try {
       const decryptionArtifacts = checkArtifactsForCircuit("DECRYPTION");
-      if (decryptionArtifacts.ok) {
-        const ballotsRes = await pool.query<{
-          ballotIndex: number;
-          ciphertext: string;
-        }>(
-          `SELECT ballot_index::int AS "ballotIndex", ciphertext
-           FROM ballot_records
-           WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
-           ORDER BY ballot_index ASC, block_number ASC, log_index ASC`,
-          [chainId, contractAddress, electionId],
+      if (!decryptionArtifacts.ok) {
+        throw new Error(
+          `Missing mandatory decryption ZK artifacts: ${decryptionArtifacts.missing.join(", ")}`,
         );
+      }
 
-        const keyResolution = await resolveCoordinatorPrivateKeyForTally({
+      const ballotsRes = await pool.query<{
+        ballotIndex: number;
+        ciphertext: string;
+      }>(
+        `SELECT ballot_index::int AS "ballotIndex", ciphertext
+         FROM ballot_records
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+         ORDER BY ballot_index ASC, block_number ASC, log_index ASC`,
+        [chainId, contractAddress, electionId],
+      );
+
+      const keyResolution = await resolveCoordinatorPrivateKeyForTally({
+        chainId,
+        contractAddress,
+        electionId,
+      });
+      if (!keyResolution.ok) {
+        throw new Error(keyResolution.error ?? "Coordinator key resolution failed for decryption proof");
+      }
+
+      await pool.query(
+        `INSERT INTO zk_proof_jobs (
+           job_id, chain_id, contract_address, election_id, tally_job_id,
+           proof_system, circuit_id, status,
+           proving_started_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUILDING',NOW())`,
+        [
+          decryptionJobId,
           chainId,
           contractAddress,
           electionId,
-        });
+          tallyJobId,
+          ZK_PROOF_SYSTEM,
+          ZK_DECRYPTION_CIRCUIT_ID,
+        ],
+      );
 
-        if (keyResolution.ok) {
-          const v2Ballots = ballotsRes.rows.filter((row) => {
-            try {
-              return decodeBallotCiphertextEnvelope(String(row.ciphertext)).version === "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2";
-            } catch {
-              return false;
-            }
-          });
+      const decryptionEntries = [] as Array<{
+        selectionCiphertext: string;
+        selectionNonce: string;
+        selectionSharedKey: string;
+        decryptedSelection: string;
+      }>;
 
-          if (v2Ballots.length > 0) {
-            await pool.query(
-              `INSERT INTO zk_proof_jobs (
-                 job_id, chain_id, contract_address, election_id, tally_job_id,
-                 proof_system, circuit_id, status,
-                 proving_started_at
-               ) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUILDING',NOW())`,
-              [
-                decryptionJobId,
-                chainId,
-                contractAddress,
-                electionId,
-                tallyJobId,
-                ZK_PROOF_SYSTEM,
-                ZK_DECRYPTION_CIRCUIT_ID,
-              ],
-            );
-
-            const decryptionEntries = [] as Array<{
-              selectionCiphertext: string;
-              selectionNonce: string;
-              selectionSharedKey: string;
-              decryptedSelection: string;
-            }>;
-
-            for (const ballot of v2Ballots) {
-              const entry = await deriveZkFriendlySelectionWitnessData(
-                String(ballot.ciphertext),
-                keyResolution.keyHex,
-              );
-              decryptionEntries.push(entry);
-            }
-
-            const decryptionWitness = buildDecryptionWitness({
-              summary: transcript.summary,
-              candidateOrder: candidateKeys,
-              entries: decryptionEntries,
-            });
-
-            const decryptionProof = await proveDecryption(decryptionWitness);
-            const decryptionVerify = await verifyDecryptionProof(
-              decryptionProof.proof,
-              decryptionProof.publicSignals,
-            );
-
-            if (!decryptionVerify.valid) {
-              throw new Error("Off-chain verification failed for decryption proof");
-            }
-
-            await pool.query(
-              `UPDATE zk_proof_jobs SET
-                 status='VERIFIED_OFFCHAIN',
-                 verified_offchain=true,
-                 public_inputs=$2,
-                 proof_json=$3,
-                 verification_key_hash=$4,
-                 proving_completed_at=NOW(),
-                 error_message=NULL
-               WHERE job_id=$1`,
-              [
-                decryptionJobId,
-                JSON.stringify({
-                  signals: decryptionProof.publicSignals,
-                  candidateOrder: candidateKeys,
-                  witnessBallotsCount: decryptionEntries.length,
-                }),
-                JSON.stringify(decryptionProof.proof),
-                decryptionProof.verificationKeyHash,
-              ],
-            );
-
-            decryptionProofJob = {
-              jobId: decryptionJobId,
-              status: "VERIFIED_OFFCHAIN",
-              circuitId: ZK_DECRYPTION_CIRCUIT_ID,
-              verificationKeyHash: decryptionProof.verificationKeyHash,
-              error: null,
-            };
-          }
+      for (const ballot of ballotsRes.rows) {
+        const envelope = decodeBallotCiphertextEnvelope(String(ballot.ciphertext));
+        if (envelope.version !== "BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2") {
+          throw new Error(
+            `Decryption proof requires only BU-PVP-1_BALLOT_BABYJUB_POSEIDON_V2 ballots. Unsupported ballot at index ${ballot.ballotIndex}`,
+          );
         }
+        const entry = await deriveZkFriendlySelectionWitnessData(
+          String(ballot.ciphertext),
+          keyResolution.keyHex,
+        );
+        decryptionEntries.push(entry);
       }
+
+      if (decryptionEntries.length !== transcript.ballotsCount) {
+        throw new Error(
+          `Decryption proof witness mismatch: expected ${transcript.ballotsCount} ballots, got ${decryptionEntries.length}`,
+        );
+      }
+
+      const decryptionWitness = await buildDecryptionWitness({
+        summary: transcript.summary,
+        candidateOrder: candidateKeys,
+        entries: decryptionEntries,
+      });
+
+      const decryptionProof = await proveDecryption(decryptionWitness);
+      const decryptionVerify = await verifyDecryptionProof(
+        decryptionProof.proof,
+        decryptionProof.publicSignals,
+      );
+
+      if (!decryptionVerify.valid) {
+        throw new Error("Off-chain verification failed for mandatory decryption proof");
+      }
+
+      await pool.query(
+        `UPDATE zk_proof_jobs SET
+           status='VERIFIED_OFFCHAIN',
+           verified_offchain=true,
+           public_inputs=$2,
+           proof_json=$3,
+           verification_key_hash=$4,
+           proving_completed_at=NOW(),
+           error_message=NULL
+         WHERE job_id=$1`,
+        [
+          decryptionJobId,
+          JSON.stringify({
+            signals: decryptionProof.publicSignals,
+            candidateOrder: candidateKeys,
+            witnessBallotsCount: decryptionEntries.length,
+          }),
+          JSON.stringify(decryptionProof.proof),
+          decryptionProof.verificationKeyHash,
+        ],
+      );
+
+      decryptionProofJob = {
+        jobId: decryptionJobId,
+        status: "VERIFIED_OFFCHAIN",
+        circuitId: ZK_DECRYPTION_CIRCUIT_ID,
+        verificationKeyHash: decryptionProof.verificationKeyHash,
+        error: null,
+      };
     } catch (decryptionErr: unknown) {
       const decryptionErrorMessage = getErrorMessage(decryptionErr);
       await pool.query(
@@ -1839,11 +1904,13 @@ export async function generateZkProofAction(
         verificationKeyHash: null,
         error: decryptionErrorMessage,
       };
-    }
 
-    const decryptionVerified =
-      decryptionProofJob?.status === "VERIFIED_OFFCHAIN" ||
-      decryptionProofJob?.status === "VERIFIED_ONCHAIN";
+      return {
+        ok: false,
+        error: `Mandatory decryption proof failed: ${decryptionErrorMessage}`,
+        jobId,
+      };
+    }
 
     return {
       ok: true,
@@ -1859,11 +1926,8 @@ export async function generateZkProofAction(
       decryptionProofJob,
       honesty: {
         whatIsProved:
-          "Los conteos publicados son la suma correcta de selecciones individuales y los hashes procesados están incluidos en la raíz Merkle Poseidon",
+          "Los conteos publicados son la suma correcta de selecciones individuales, los hashes procesados están incluidos en la raíz Merkle Poseidon y el descifrado queda probado fuera de cadena",
         whatIsNotProved: [
-          ...(decryptionVerified
-            ? []
-            : ["Descifrado correcto de ciphertexts (requiere circuito de descifrado)"]),
           "Verificación en cadena",
         ],
         auditabilityNote: "El transcript completo permanece disponible para auditoría independiente fuera de cadena",
@@ -1938,164 +2002,182 @@ function parseSignalsFromPublicInputs(value: unknown): string[] {
 
 export async function submitOnchainZkProofAction(
   electionId: string,
-  options?: { jobId?: string },
+  options?: { jobId?: string; circuit?: "TALLY" | "DECRYPTION" },
 ) {
   try {
     const { chainId, contractAddress } = await resolveRuntimeContext();
-    const verifierContract = getTallyVerifierContract();
-
-    const whereByJob = options?.jobId ? " AND job_id=$4" : "";
-    const circuitIdParam = options?.jobId ? 5 : 4;
-    const queryParams = options?.jobId
-      ? [chainId, contractAddress, electionId, options.jobId, ZK_CIRCUIT_ID]
-      : [chainId, contractAddress, electionId, ZK_CIRCUIT_ID];
-
-    const jobRes = await pool.query<{
+    const submitCircuit = async (
+      circuit: "TALLY" | "DECRYPTION",
+      forcedJobId?: string,
+    ): Promise<{
       jobId: string;
       tallyJobId: string | null;
       status: string;
-      circuitId: string;
-      proofJson: unknown;
-      publicInputs: unknown;
-      onchainVerificationTx: string | null;
-    }>(
-      `SELECT
-         job_id AS "jobId",
-         tally_job_id AS "tallyJobId",
-         status,
-         circuit_id AS "circuitId",
-         proof_json AS "proofJson",
-         public_inputs AS "publicInputs",
-         onchain_verification_tx AS "onchainVerificationTx"
-       FROM zk_proof_jobs
-       WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3${whereByJob} AND circuit_id=$${circuitIdParam}
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      queryParams,
-    );
+      txHash: string;
+      verifierAddress: string;
+      alreadyVerified: boolean;
+    }> => {
+      const verifierContract =
+        circuit === "TALLY" ? getTallyVerifierContract() : getDecryptionVerifierContract();
+      const circuitId = circuit === "TALLY" ? ZK_CIRCUIT_ID : ZK_DECRYPTION_CIRCUIT_ID;
+      const whereByJob = forcedJobId ? " AND job_id=$4" : "";
+      const circuitIdParam = forcedJobId ? 5 : 4;
+      const queryParams = forcedJobId
+        ? [chainId, contractAddress, electionId, forcedJobId, circuitId]
+        : [chainId, contractAddress, electionId, circuitId];
 
-    const job = jobRes.rows[0] ?? null;
-    if (!job) {
-      return {
-        ok: false,
-        error: "No hay ZK proof job de tally verificado para esta eleccion",
-      };
-    }
+      const jobRes = await pool.query<{
+        jobId: string;
+        tallyJobId: string | null;
+        status: string;
+        circuitId: string;
+        proofJson: unknown;
+        publicInputs: unknown;
+        onchainVerificationTx: string | null;
+      }>(
+        `SELECT
+           job_id AS "jobId",
+           tally_job_id AS "tallyJobId",
+           status,
+           circuit_id AS "circuitId",
+           proof_json AS "proofJson",
+           public_inputs AS "publicInputs",
+           onchain_verification_tx AS "onchainVerificationTx"
+         FROM zk_proof_jobs
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3${whereByJob} AND circuit_id=$${circuitIdParam}
+         ${zkProofJobPriorityOrderSql()}
+         LIMIT 1`,
+        queryParams,
+      );
 
-    if (job.circuitId !== ZK_CIRCUIT_ID) {
-      return {
-        ok: false,
-        error: `El job ${job.jobId} no corresponde al circuito on-chain de tally (${job.circuitId})`,
-      };
-    }
+      const job = jobRes.rows[0] ?? null;
+      if (!job) {
+        throw new Error(`No hay ZK proof job de ${circuit.toLowerCase()} para esta eleccion`);
+      }
 
-    if (job.status === "VERIFIED_ONCHAIN" && job.onchainVerificationTx) {
+      if (job.circuitId !== circuitId) {
+        throw new Error(
+          `El job ${job.jobId} no corresponde al circuito on-chain de ${circuit.toLowerCase()} (${job.circuitId})`,
+        );
+      }
+
+      if (job.status === "VERIFIED_ONCHAIN" && job.onchainVerificationTx) {
+        return {
+          jobId: job.jobId,
+          tallyJobId: job.tallyJobId,
+          status: "VERIFIED_ONCHAIN",
+          txHash: job.onchainVerificationTx,
+          verifierAddress: (await verifierContract.getAddress()).toLowerCase(),
+          alreadyVerified: true,
+        };
+      }
+
+      if (job.status !== "VERIFIED_OFFCHAIN" && job.status !== "PROVED") {
+        throw new Error(
+          `El job ${job.jobId} no esta listo para verificacion on-chain (status=${job.status})`,
+        );
+      }
+
+      const proof = parseGroth16ProofData(job.proofJson);
+      const signals = parseSignalsFromPublicInputs(job.publicInputs);
+      if (!proof) {
+        throw new Error(`El job ${job.jobId} no contiene proof_json valido`);
+      }
+      if (signals.length === 0) {
+        throw new Error(`El job ${job.jobId} no contiene public inputs`);
+      }
+
+      const a = [
+        toBigIntValue(proof.a[0], "proof.a[0]"),
+        toBigIntValue(proof.a[1], "proof.a[1]"),
+      ] as [bigint, bigint];
+
+      const b = [
+        [
+          toBigIntValue(proof.b[0][1], "proof.b[0][1]"),
+          toBigIntValue(proof.b[0][0], "proof.b[0][0]"),
+        ],
+        [
+          toBigIntValue(proof.b[1][1], "proof.b[1][1]"),
+          toBigIntValue(proof.b[1][0], "proof.b[1][0]"),
+        ],
+      ] as [[bigint, bigint], [bigint, bigint]];
+
+      const c = [
+        toBigIntValue(proof.c[0], "proof.c[0]"),
+        toBigIntValue(proof.c[1], "proof.c[1]"),
+      ] as [bigint, bigint];
+
+      const input = signals.map((value: string, index: number) =>
+        toBigIntValue(value, `publicSignals[${index}]`),
+      );
+
+      const tx =
+        circuit === "TALLY"
+          ? await verifierContract.verifyTallyProof(BigInt(electionId), job.jobId, a, b, c, input)
+          : await verifierContract.verifyDecryptionProof(BigInt(electionId), job.jobId, a, b, c, input);
+
+      const receipt = await tx.wait();
+      const txHash = receipt?.hash ?? tx.hash;
+      const verifierAddress = (await verifierContract.getAddress()).toLowerCase();
+
+      await pool.query(
+        `UPDATE zk_proof_jobs
+         SET status='VERIFIED_ONCHAIN',
+             verified_onchain=true,
+             onchain_verifier_address=$2,
+             onchain_verification_tx=$3,
+             error_message=NULL
+         WHERE job_id=$1`,
+        [job.jobId, verifierAddress, txHash],
+      );
+
       return {
-        ok: true,
         jobId: job.jobId,
+        tallyJobId: job.tallyJobId,
         status: "VERIFIED_ONCHAIN",
-        txHash: job.onchainVerificationTx,
-        alreadyVerified: true,
+        txHash,
+        verifierAddress,
+        alreadyVerified: false,
       };
-    }
+    };
 
-    if (job.status !== "VERIFIED_OFFCHAIN" && job.status !== "PROVED") {
-      return {
-        ok: false,
-        error: `El job ${job.jobId} no esta listo para verificacion on-chain (status=${job.status})`,
-      };
-    }
-
-    const proof = parseGroth16ProofData(job.proofJson);
-    const signals = parseSignalsFromPublicInputs(job.publicInputs);
-
-    if (!proof) {
-      return { ok: false, error: `El job ${job.jobId} no contiene proof_json valido` };
-    }
-
-    if (signals.length === 0) {
-      return { ok: false, error: `El job ${job.jobId} no contiene public inputs` };
-    }
-
-    const a = [
-      toBigIntValue(proof.a[0], "proof.a[0]"),
-      toBigIntValue(proof.a[1], "proof.a[1]"),
-    ] as [bigint, bigint];
-
-    // Rust backend serializes Fq2 coordinates as [c0, c1], while the Solidity verifier expects [c1, c0].
-    const b = [
-      [
-        toBigIntValue(proof.b[0][1], "proof.b[0][1]"),
-        toBigIntValue(proof.b[0][0], "proof.b[0][0]"),
-      ],
-      [
-        toBigIntValue(proof.b[1][1], "proof.b[1][1]"),
-        toBigIntValue(proof.b[1][0], "proof.b[1][0]"),
-      ],
-    ] as [[bigint, bigint], [bigint, bigint]];
-
-    const c = [
-      toBigIntValue(proof.c[0], "proof.c[0]"),
-      toBigIntValue(proof.c[1], "proof.c[1]"),
-    ] as [bigint, bigint];
-
-    const input = signals.map((value: string, index: number) =>
-      toBigIntValue(value, `publicSignals[${index}]`),
-    );
-
-    const tx = await verifierContract.verifyTallyProof(BigInt(electionId), job.jobId, a, b, c, input);
-    const receipt = await tx.wait();
-    const txHash = receipt?.hash ?? tx.hash;
-    const verifierAddress = (await verifierContract.getAddress()).toLowerCase();
-
-    await pool.query(
-      `UPDATE zk_proof_jobs
-       SET status='VERIFIED_ONCHAIN',
-           verified_onchain=true,
-           onchain_verifier_address=$2,
-           onchain_verification_tx=$3,
-           error_message=NULL
-       WHERE job_id=$1`,
-      [job.jobId, verifierAddress, txHash],
-    );
+    const requestedCircuit = options?.circuit;
+    const tallySubmission =
+      requestedCircuit === "DECRYPTION" ? null : await submitCircuit("TALLY", requestedCircuit === "TALLY" ? options?.jobId : undefined);
+    const effectiveTallyJobId = tallySubmission?.tallyJobId ?? null;
+    const decryptionSubmission =
+      requestedCircuit === "TALLY"
+        ? null
+        : await submitCircuit("DECRYPTION", requestedCircuit === "DECRYPTION" ? options?.jobId : undefined);
 
     const gate = await loadZkPublicationGateState({
       chainId,
       contractAddress,
       electionId,
-      tallyJobId: job.tallyJobId,
+      tallyJobId: effectiveTallyJobId ?? decryptionSubmission?.tallyJobId ?? null,
     });
 
-    if (job.tallyJobId) {
-      await pool.query(
-        `UPDATE tally_jobs SET proof_state=$2 WHERE tally_job_id=$1`,
-        [job.tallyJobId, gate.proofState],
-      );
-
-      await pool.query(
-         `UPDATE result_payloads
-         SET proof_state=$5
-         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND tally_job_id=$4`,
-        [chainId, contractAddress, electionId, job.tallyJobId, gate.proofState],
-      );
-    } else {
-      await pool.query(
-         `UPDATE result_payloads
-         SET proof_state=$4
-         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3`,
-        [chainId, contractAddress, electionId, gate.proofState],
-      );
+    const tallyJobIdToUpdate =
+      effectiveTallyJobId ?? decryptionSubmission?.tallyJobId ?? null;
+    if (tallyJobIdToUpdate) {
+      await pool.query(`UPDATE tally_jobs SET proof_state=$2 WHERE tally_job_id=$1`, [
+        tallyJobIdToUpdate,
+        gate.proofState,
+      ]);
     }
 
     return {
       ok: true,
-      jobId: job.jobId,
+      jobId: decryptionSubmission?.jobId ?? tallySubmission?.jobId ?? null,
       status: gate.proofState,
-      txHash,
-      verifierAddress,
+      txHash: decryptionSubmission?.txHash ?? tallySubmission?.txHash ?? null,
+      tallyTxHash: tallySubmission?.txHash ?? null,
+      decryptionTxHash: decryptionSubmission?.txHash ?? null,
+      verifierAddress: decryptionSubmission?.verifierAddress ?? tallySubmission?.verifierAddress ?? null,
       publicationReady: gate.ready,
       blockers: gate.blockers,
-      alreadyVerified: false,
+      alreadyVerified: Boolean(tallySubmission?.alreadyVerified) && (requestedCircuit === "TALLY" || Boolean(decryptionSubmission?.alreadyVerified)),
     };
   } catch (err: unknown) {
     return { ok: false, error: getErrorMessage(err) };
