@@ -24,7 +24,7 @@ CHAIN_ID=31337
 ELECTION_REGISTRY_ADDRESS=$CONTRACT_ADDR
 AEA_PRIVATE_KEY=$AEA_PK
 AEA_ED25519_PRIVATE_KEY_HEX=0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
-ACTA_OUTPUT_DIR=packages/contracts/experimental-output
+ACTA_OUTPUT_DIR=packages/contracts/generated-output
 EOF
 
 # evidence-api
@@ -41,7 +41,7 @@ cat <<EOF > apps/evidence-indexer/.env
 DATABASE_URL=$DB_URL
 RPC_URL=http://127.0.0.1:8545
 ELECTION_REGISTRY_ADDRESS=$CONTRACT_ADDR
-ACTA_SOURCE_DIR=packages/contracts/experimental-output
+ACTA_SOURCE_DIR=packages/contracts/generated-output
 START_BLOCK=0
 CONFIRMATIONS=0
 BATCH_SIZE=2000

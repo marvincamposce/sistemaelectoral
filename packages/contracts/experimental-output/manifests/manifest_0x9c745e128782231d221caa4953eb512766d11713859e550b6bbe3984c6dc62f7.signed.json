@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-17T06:17:03.453Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "Elección Local Reproducible 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "cand-1",
+        "candidateCode": "CAND_1",
+        "displayName": "Mariana Soto",
+        "shortName": "M. Soto",
+        "partyName": "Alianza Cívica",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "cand-2",
+        "candidateCode": "CAND_2",
+        "displayName": "Tomás Rivas",
+        "shortName": "T. Rivas",
+        "partyName": "Movimiento Federal",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      },
+      {
+        "id": "cand-3",
+        "candidateCode": "CAND_3",
+        "displayName": "Lucía Peña",
+        "shortName": "L. Peña",
+        "partyName": "Pacto Social",
+        "ballotOrder": 3,
+        "status": "ACTIVE",
+        "colorHex": "#B45309",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x52b7257e0c8fc225fa0e2a8942dcf3a29012bb2562932fd72baf5e451a48839909f6b3a154108798bac82f6800f0031e694366ceba2e5c5bc3cc10e8c2ae8d08",
+    "manifestHashHex": "0x9c745e128782231d221caa4953eb512766d11713859e550b6bbe3984c6dc62f7"
+  }
+}

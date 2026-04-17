@@ -6,11 +6,11 @@ import {
   decodeBallotCiphertextEnvelope,
   decryptBallotPayload,
   encryptBallotPayload,
-  generateExperimentalVotingKeypair,
+  generateVotingKeypair,
 } from "../encryption.js";
 
 test("encryptBallotPayload/decryptBallotPayload roundtrip (zk-friendly V2)", async () => {
-  const coordinator = await generateExperimentalVotingKeypair();
+  const coordinator = await generateVotingKeypair();
   const ballotPayload = {
     electionId: "42",
     selection: "CANDIDATO_A",
@@ -32,7 +32,7 @@ test("encryptBallotPayload/decryptBallotPayload roundtrip (zk-friendly V2)", asy
 });
 
 test("decryptBallotPayload fails with tampered ciphertext (V2)", async () => {
-  const coordinator = await generateExperimentalVotingKeypair();
+  const coordinator = await generateVotingKeypair();
   const ciphertext = await encryptBallotPayload(
     { selection: "CANDIDATO_B", selectionIndex: 1 },
     coordinator.publicKey,
@@ -59,7 +59,7 @@ test("decryptBallotPayload fails with tampered ciphertext (V2)", async () => {
 });
 
 test("encryptBallotPayload defaults to zk-friendly V2", async () => {
-  const coordinator = await generateExperimentalVotingKeypair();
+  const coordinator = await generateVotingKeypair();
   const payload = { electionId: "7", selection: "CANDIDATO_A", selectionIndex: 0 };
   const ciphertext = await encryptBallotPayload(payload, coordinator.publicKey);
   const envelope = decodeBallotCiphertextEnvelope(ciphertext);

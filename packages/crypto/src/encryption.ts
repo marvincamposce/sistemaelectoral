@@ -213,7 +213,7 @@ function requireFixedHexBytes(hex: string, expectedLen: number, label: string): 
  * Creates a Vote Keypair for the voter flow.
  * Uses a BabyJub scalar/public point pair for zk-friendly ballot encryption.
  */
-export async function generateExperimentalVotingKeypair(): Promise<{ publicKey: string; privateKey: string }> {
+export async function generateVotingKeypair(): Promise<{ publicKey: string; privateKey: string }> {
   const babyJub = await getBabyJub();
   const privateScalar = randomNonZeroScalar(babyJub.subOrder);
   const publicPoint = babyJub.mulPointEscalar(babyJub.Base8, privateScalar);

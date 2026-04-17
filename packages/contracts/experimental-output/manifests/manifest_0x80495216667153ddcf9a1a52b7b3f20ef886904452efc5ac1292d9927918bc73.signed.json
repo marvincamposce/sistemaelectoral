@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-17T06:17:12.368Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "Elección Local Reproducible 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "cand-1",
+        "candidateCode": "CAND_1",
+        "displayName": "Mariana Soto",
+        "shortName": "M. Soto",
+        "partyName": "Alianza Cívica",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "cand-2",
+        "candidateCode": "CAND_2",
+        "displayName": "Tomás Rivas",
+        "shortName": "T. Rivas",
+        "partyName": "Movimiento Federal",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      },
+      {
+        "id": "cand-3",
+        "candidateCode": "CAND_3",
+        "displayName": "Lucía Peña",
+        "shortName": "L. Peña",
+        "partyName": "Pacto Social",
+        "ballotOrder": 3,
+        "status": "ACTIVE",
+        "colorHex": "#B45309",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x4e25456a1773d832b4d33eeacf302edf0a2b3cf487dffebfffc08a81aeaa51e4d7dd0782c7177ee62eaa56de0f303e7e0c3873e9a3733992cd0b79a23bcad106",
+    "manifestHashHex": "0x80495216667153ddcf9a1a52b7b3f20ef886904452efc5ac1292d9927918bc73"
+  }
+}

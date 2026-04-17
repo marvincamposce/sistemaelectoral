@@ -94,9 +94,13 @@ extract_deploy_field() {
 echo "▶ 1. Liberando puertos locales ocupados por sesiones previas..."
 CI=1 pnpm dlx kill-port 3000 3004 3005 3011 3012 3013 3020 8002 8545 >/dev/null 2>&1 || true
 
-echo "▶ 2. Iniciando PostgreSQL (Docker)..."
-# Apuntamos correctamente la ruta al archivo docker-compose en la carpeta infra
-docker compose -f infra/compose/docker-compose.yml up -d postgres 2>/dev/null || docker-compose -f infra/compose/docker-compose.yml up -d postgres
+echo "▶ 2. Iniciando PostgreSQL..."
+if command -v docker >/dev/null 2>&1; then
+  docker compose -f infra/compose/docker-compose.yml up -d postgres 2>/dev/null || docker-compose -f infra/compose/docker-compose.yml up -d postgres
+else
+  echo "  [⚠️] Advertencia: Docker no está instalado o no tienes integración WSL."
+  echo "  [!] Asegúrate de que PostgreSQL local esté corriendo en puerto 5432 con usuario/db 'blockurna'."
+fi
 
 echo "▶ 3. Iniciando nodo Hardhat local..."
 pnpm -F @blockurna/contracts run node > .hardhat-node.log 2>&1 &

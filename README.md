@@ -64,10 +64,10 @@ El comando imprime la dirección del contrato y la ruta del acta firmada (JSON).
 
 ```bash
 pnpm --filter @blockurna/audit-cli build
-node apps/audit-cli/dist/cli.js verify-acta --file packages/contracts/experimental-output/acta_apertura.signed.json --rpc http://127.0.0.1:8545 --contract <ADDRESS> --election 0
+node apps/audit-cli/dist/cli.js verify-acta --file packages/contracts/generated-output/acta_apertura.signed.json --rpc http://127.0.0.1:8545 --contract <ADDRESS> --election 0
 ```
 
-Nota: el acta seed se escribe en `packages/contracts/experimental-output/` (evita romper `hardhat compile`).
+Nota: el acta seed se escribe en `packages/contracts/generated-output/` (evita romper `hardhat compile`).
 
 4) Observer portal (configura env vars y corre dev):
 

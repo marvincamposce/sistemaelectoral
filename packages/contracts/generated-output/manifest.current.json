@@ -6,7 +6,7 @@
   "authority": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
   "registryAuthority": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
   "coordinatorPubKey": "0x2222222222222222222222222222222222222222222222222222222222222222",
-  "catalogSource": "SEED_EXPERIMENTAL",
+  "catalogSource": "SEED_LOCAL_REPRODUCIBLE",
   "candidates": [
     {
       "id": "presidencia-2025-lucia-ferrer",

@@ -76,7 +76,7 @@ const manifestBody = {
   authority: (await aea.getAddress()).toLowerCase(),
   registryAuthority: (await rea.getAddress()).toLowerCase(),
   coordinatorPubKey,
-  catalogSource: "SEED_EXPERIMENTAL",
+  catalogSource: "SEED_LOCAL_REPRODUCIBLE",
   candidates: candidateCatalog,
 } as const;
 
