@@ -259,6 +259,24 @@ type EnrollmentRequestBody = {
   requestNotes?: string;
 };
 
+type CitizenSessionRequestBody = {
+  dni?: string;
+  accessCode?: string;
+};
+
+type CitizenSessionRow = {
+  sessionId: string;
+  dni: string;
+  tokenHash: string;
+  authMethod: string;
+  authContextJson: unknown;
+  status: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+};
+
 type EnrollmentRegistryCredential = {
   credentialVersion: "1";
   protocolVersion: "BU-PVP-1";
@@ -472,6 +490,24 @@ function getActiveWalletLink(rows: HondurasWalletLinkRow[]): HondurasWalletLinkR
 
 function deriveCredentialId(secretHex: string): string {
   return ethers.keccak256(secretHex).toLowerCase();
+}
+
+function hashCitizenAccessCode(accessCode: string): string {
+  return ethers.keccak256(ethers.toUtf8Bytes(accessCode.trim())).toLowerCase();
+}
+
+function extractCitizenAccessCodeHash(record: HondurasCensusRow): string | null {
+  const metadata = getObjectRecord(record.metadataJson);
+  const value = metadata.citizenAccessCodeHash;
+  return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value) ? value.toLowerCase() : null;
+}
+
+function extractBearerToken(authHeader: string | undefined): string | null {
+  if (!authHeader) return null;
+  const trimmed = authHeader.trim();
+  if (!trimmed.toLowerCase().startsWith("bearer ")) return null;
+  const token = trimmed.slice(7).trim();
+  return token.length > 0 ? token : null;
 }
 
 function deriveRegistryNullifier(params: {
@@ -961,6 +997,97 @@ async function main() {
     return latest;
   }
 
+  async function createCitizenSession(params: {
+    dni: string;
+    authMethod: string;
+    authContextJson?: Record<string, unknown>;
+  }): Promise<{ session: CitizenSessionRow; token: string }> {
+    const sessionId = crypto.randomUUID();
+    const token = ethers.hexlify(ethers.randomBytes(32)).toLowerCase();
+    const tokenHash = ethers.keccak256(token).toLowerCase();
+    const expiresAt = new Date(Date.now() + env.CITIZEN_SESSION_TTL_MINUTES * 60_000);
+
+    const res = await pool.query<CitizenSessionRow>(
+      `INSERT INTO hn_citizen_sessions(
+        session_id, dni, token_hash, auth_method, auth_context_json, status, expires_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING
+        session_id AS "sessionId",
+        dni,
+        token_hash AS "tokenHash",
+        auth_method AS "authMethod",
+        auth_context_json AS "authContextJson",
+        status,
+        created_at AS "createdAt",
+        last_seen_at AS "lastSeenAt",
+        expires_at AS "expiresAt",
+        revoked_at AS "revokedAt"`,
+      [
+        sessionId,
+        params.dni,
+        tokenHash,
+        params.authMethod,
+        JSON.stringify(params.authContextJson ?? {}),
+        "ACTIVE",
+        expiresAt.toISOString(),
+      ],
+    );
+
+    return {
+      session: res.rows[0]!,
+      token,
+    };
+  }
+
+  async function resolveCitizenSession(token: string | null): Promise<CitizenSessionRow | null> {
+    if (!token) return null;
+    const tokenHash = ethers.keccak256(token).toLowerCase();
+    const res = await pool.query<CitizenSessionRow>(
+      `SELECT
+        session_id AS "sessionId",
+        dni,
+        token_hash AS "tokenHash",
+        auth_method AS "authMethod",
+        auth_context_json AS "authContextJson",
+        status,
+        created_at AS "createdAt",
+        last_seen_at AS "lastSeenAt",
+        expires_at AS "expiresAt",
+        revoked_at AS "revokedAt"
+      FROM hn_citizen_sessions
+      WHERE token_hash=$1
+      LIMIT 1`,
+      [tokenHash],
+    );
+    const session = res.rows[0] ?? null;
+    if (!session) return null;
+    if (String(session.status).toUpperCase() !== "ACTIVE") return null;
+    if (session.revokedAt) return null;
+    if (session.expiresAt.getTime() <= Date.now()) return null;
+
+    await pool.query(
+      `UPDATE hn_citizen_sessions
+       SET last_seen_at=NOW()
+       WHERE session_id=$1`,
+      [session.sessionId],
+    );
+    return session;
+  }
+
+  async function requireCitizenSession(request: Fastify.FastifyRequest, dni: string): Promise<CitizenSessionRow> {
+    const token =
+      extractBearerToken(request.headers.authorization) ??
+      (typeof request.headers["x-citizen-session"] === "string" ? request.headers["x-citizen-session"] : null);
+    const session = await resolveCitizenSession(token);
+    if (!session) {
+      throw new Error("citizen_session_required");
+    }
+    if (session.dni !== dni) {
+      throw new Error("citizen_session_subject_mismatch");
+    }
+    return session;
+  }
+
   async function ensureManagedWalletLinkForDni(record: HondurasCensusRow): Promise<HondurasWalletLinkRow> {
     const links = await listHondurasWalletLinksByDni(record.dni);
     const active = getActiveWalletLink(links);
@@ -1106,8 +1233,13 @@ async function main() {
         record: normalizeHondurasCensusRecord(record),
       };
     } catch (err: unknown) {
-      reply.status(400);
-      return { ok: false, error: (err as Error).message };
+      const message = (err as Error).message;
+      const status =
+        message === "citizen_session_required" ? 401
+        : message === "citizen_session_subject_mismatch" ? 403
+        : 400;
+      reply.status(status);
+      return { ok: false, error: message };
     }
   });
 
@@ -1122,8 +1254,13 @@ async function main() {
         count: links.length,
       };
     } catch (err: unknown) {
-      reply.status(400);
-      return { ok: false, error: (err as Error).message };
+      const message = (err as Error).message;
+      const status =
+        message === "citizen_session_required" ? 401
+        : message === "citizen_session_subject_mismatch" ? 403
+        : 400;
+      reply.status(status);
+      return { ok: false, error: message };
     }
   });
 
@@ -1181,6 +1318,7 @@ async function main() {
     async (req, reply) => {
       try {
         const dni = requireHondurasDni(String(req.body?.dni ?? ""));
+        await requireCitizenSession(req, dni);
         const electionId = req.body?.electionId ? requireElectionId(String(req.body.electionId)) : null;
         const requestedWalletAddress = req.body?.requestedWalletAddress
           ? requireWalletAddress(String(req.body.requestedWalletAddress))
@@ -1224,9 +1362,71 @@ async function main() {
     },
   );
 
+  app.post<{ Body: CitizenSessionRequestBody }>("/v1/hn/auth/session", async (req, reply) => {
+    try {
+      const dni = requireHondurasDni(String(req.body?.dni ?? ""));
+      const accessCode = String(req.body?.accessCode ?? "").trim();
+      if (accessCode.length < 6) {
+        reply.status(400);
+        return { ok: false, error: "invalid_access_code" };
+      }
+
+      const [record, links, requests, authorizations] = await Promise.all([
+        getHondurasCensusRecord(dni),
+        listHondurasWalletLinksByDni(dni),
+        listHondurasEnrollmentRequestsByDni(dni),
+        listHondurasVoterAuthorizations({ dni }),
+      ]);
+
+      if (!record) {
+        reply.status(404);
+        return { ok: false, error: "dni_not_found", dni };
+      }
+
+      const expectedHash = extractCitizenAccessCodeHash(record);
+      if (!expectedHash) {
+        reply.status(403);
+        return { ok: false, error: "citizen_access_not_configured", dni };
+      }
+      if (hashCitizenAccessCode(accessCode) !== expectedHash) {
+        reply.status(401);
+        return { ok: false, error: "invalid_access_code", dni };
+      }
+
+      const created = await createCitizenSession({
+        dni,
+        authMethod: "ACCESS_CODE",
+        authContextJson: {
+          accessCodeVerifiedAt: new Date().toISOString(),
+        },
+      });
+
+      return {
+        ok: true,
+        session: {
+          sessionId: created.session.sessionId,
+          token: created.token,
+          authMethod: created.session.authMethod,
+          expiresAt: created.session.expiresAt.toISOString(),
+        },
+        dni,
+        record: normalizeHondurasCensusRecord(record),
+        latestRequest: requests[0] ? normalizeHondurasEnrollmentRequest(requests[0]) : null,
+        requests: requests.map(normalizeHondurasEnrollmentRequest),
+        walletLink: getActiveWalletLink(links) ? normalizeHondurasWalletLink(getActiveWalletLink(links)!) : null,
+        walletLinks: links.map(normalizeHondurasWalletLink),
+        authorizations: authorizations.map(normalizeHondurasVoterAuthorization),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   app.get<{ Params: { dni: string } }>("/v1/hn/enrollment/:dni", async (req, reply) => {
     try {
       const dni = requireHondurasDni(req.params.dni);
+      await requireCitizenSession(req, dni);
       const [record, links, requests, authorizations] = await Promise.all([
         getHondurasCensusRecord(dni),
         listHondurasWalletLinksByDni(dni),
@@ -1261,6 +1461,7 @@ async function main() {
       try {
         const electionId = requireElectionId(req.params.id);
         const dni = requireHondurasDni(String(req.body?.dni ?? ""));
+        const session = await requireCitizenSession(req, dni);
         const election = await getElectionMeta(electionId);
         if (!election) {
           reply.status(404);
@@ -1319,6 +1520,11 @@ async function main() {
           ok: true,
           dni,
           electionId,
+          session: {
+            sessionId: session.sessionId,
+            authMethod: session.authMethod,
+            expiresAt: session.expiresAt.toISOString(),
+          },
           record: normalizeHondurasCensusRecord(record),
           walletLink: normalizeHondurasWalletLink(
             hardenedWalletLink.walletAddress.toLowerCase() === walletLink.walletAddress.toLowerCase()
@@ -1330,7 +1536,11 @@ async function main() {
         };
       } catch (err: unknown) {
         const message = (err as Error).message;
-        const status = message === "rea_private_key_not_configured" ? 503 : 400;
+        const status =
+          message === "rea_private_key_not_configured" ? 503
+          : message === "citizen_session_required" ? 401
+          : message === "citizen_session_subject_mismatch" ? 403
+          : 400;
         reply.status(status);
         return { ok: false, error: message };
       }

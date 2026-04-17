@@ -37,6 +37,7 @@ const CensusUpsertInputSchema = z
     habilitationStatus: HondurasCensusStatusSchema,
     statusReason: z.string().trim().max(300).optional(),
     source: z.string().trim().min(1).max(120).optional(),
+    citizenAccessCode: z.string().trim().min(6).max(64).optional(),
     metadataJson: z.string().trim().optional(),
   })
   .strict();
@@ -129,10 +130,15 @@ async function upsertCensusRecordAction(formData: FormData) {
     habilitationStatus: String(formData.get("habilitationStatus") ?? ""),
     statusReason: String(formData.get("statusReason") ?? "").trim() || undefined,
     source: String(formData.get("source") ?? "").trim() || undefined,
+    citizenAccessCode: String(formData.get("citizenAccessCode") ?? "").trim() || undefined,
     metadataJson: String(formData.get("metadataJson") ?? "").trim() || undefined,
   });
 
   const metadataJson = parseJsonObject(parsed.metadataJson);
+  if (parsed.citizenAccessCode) {
+    metadataJson.citizenAccessCodeHash = ethers.keccak256(ethers.toUtf8Bytes(parsed.citizenAccessCode)).toLowerCase();
+    metadataJson.citizenAccessCodeRotatedAt = new Date().toISOString();
+  }
   const nameParts = parsed.fullName.trim().split(/\s+/).filter(Boolean);
 
   await upsertHondurasVoterRegistryRecord({
@@ -148,6 +154,15 @@ async function upsertCensusRecordAction(formData: FormData) {
     source: parsed.source ?? "MANUAL_AEA",
     metadataJson,
   });
+
+  if (parsed.citizenAccessCode) {
+    await pool.query(
+      `UPDATE hn_citizen_sessions
+       SET status='REVOKED', revoked_at=NOW()
+       WHERE dni=$1 AND status='ACTIVE' AND revoked_at IS NULL`,
+      [parsed.dni],
+    );
+  }
 
   revalidatePath("/honduras");
   redirect(`/honduras?dni=${encodeURIComponent(parsed.dni)}`);
@@ -404,6 +419,14 @@ export default async function HondurasPage(props: {
                     <div className="grid gap-2 sm:grid-cols-2 text-xs text-slate-600">
                       <div>Fuente: {selectedRecord.source}</div>
                       <div>Actualizado: {formatTimestamp(selectedRecord.updatedAt)}</div>
+                      <div>
+                        Código ciudadano: {typeof (selectedRecord.metadataJson as Record<string, unknown>)?.citizenAccessCodeHash === "string" ? "configurado" : "no configurado"}
+                      </div>
+                      <div>
+                        Rotación código: {typeof (selectedRecord.metadataJson as Record<string, unknown>)?.citizenAccessCodeRotatedAt === "string"
+                          ? formatTimestamp(String((selectedRecord.metadataJson as Record<string, unknown>).citizenAccessCodeRotatedAt))
+                          : "—"}
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Autorizaciones activas</div>
@@ -473,6 +496,7 @@ export default async function HondurasPage(props: {
                 <input className="rounded-md border border-slate-300 px-3 py-2 text-sm" name="statusReason" placeholder="Motivo o nota de estado" />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <input className="rounded-md border border-slate-300 px-3 py-2 text-sm" name="source" placeholder="Fuente" defaultValue="MANUAL_AEA" />
+                  <input className="rounded-md border border-slate-300 px-3 py-2 text-sm" name="citizenAccessCode" placeholder="Código ciudadano (mín. 6)" />
                 </div>
                 <input className="rounded-md border border-slate-300 px-3 py-2 text-sm" name="metadataJson" placeholder='Metadata JSON opcional, p.ej. {"batch":"abril"}' />
                 <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">

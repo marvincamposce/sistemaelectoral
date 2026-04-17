@@ -6,6 +6,7 @@ const EnvSchema = z
     CHAIN_ID: z.string().min(1),
     ELECTION_REGISTRY_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
     REA_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+    CITIZEN_SESSION_TTL_MINUTES: z.coerce.number().int().positive().max(1440).optional().default(30),
     HOST: z.string().min(1).optional().default("0.0.0.0"),
     PORT: z.coerce.number().int().positive().optional().default(3020),
   })

@@ -9,6 +9,12 @@ import { getPublicEnv } from "@/lib/env";
 type EnrollmentLookupResponse = {
   ok: boolean;
   error?: string;
+  session?: {
+    sessionId: string;
+    token: string;
+    authMethod: string;
+    expiresAt: string;
+  };
   record?: {
     dni: string;
     fullName: string;
@@ -42,6 +48,8 @@ type EnrollmentRequestResponse = {
   };
 };
 
+const CITIZEN_SESSION_STORAGE_KEY = "bu_citizen_session";
+
 function formatTimestamp(ts: string | null | undefined): string {
   if (!ts) return "—";
   try {
@@ -69,6 +77,7 @@ export default function Home() {
   const router = useRouter();
 
   const [dni, setDni] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [electionId, setElectionId] = useState("");
   const [requestNotes, setRequestNotes] = useState("");
   const [lookup, setLookup] = useState<EnrollmentLookupResponse | null>(null);
@@ -88,12 +97,31 @@ export default function Home() {
     setBusy("LOOKUP");
     setErrorMsg("");
     try {
-      const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/enrollment/${normalizedDni}`, {
-        cache: "no-store",
+      const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/auth/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dni: normalizedDni,
+          accessCode: accessCode.trim(),
+        }),
       });
       const data = (await res.json()) as EnrollmentLookupResponse;
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "No se pudo consultar el expediente.");
+        if (data.error === "invalid_access_code") {
+          throw new Error("El código de acceso ciudadano es inválido.");
+        }
+        if (data.error === "citizen_access_not_configured") {
+          throw new Error("Tu expediente no tiene un código ciudadano configurado. Contacta a la autoridad electoral.");
+        }
+        throw new Error(data.error || "No se pudo autenticar tu expediente.");
+      }
+      if (data.session) {
+        sessionStorage.setItem(CITIZEN_SESSION_STORAGE_KEY, JSON.stringify({
+          dni: normalizedDni,
+          token: data.session.token,
+          expiresAt: data.session.expiresAt,
+          authMethod: data.session.authMethod,
+        }));
       }
       setLookup(data);
     } catch (error: unknown) {
@@ -112,7 +140,10 @@ export default function Home() {
     try {
       const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/enrollment-requests`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(lookup?.session?.token ? { Authorization: `Bearer ${lookup.session.token}` } : {}),
+        },
         body: JSON.stringify({
           dni: normalizedDni,
           electionId: electionId.trim() || undefined,
@@ -166,6 +197,16 @@ export default function Home() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">Código de acceso</label>
+              <input
+                className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Código ciudadano"
+                value={accessCode}
+                onChange={(event) => setAccessCode(event.target.value)}
+                type="password"
+              />
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700">Elección</label>
               <input
                 className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -176,10 +217,10 @@ export default function Home() {
             </div>
             <button
               type="submit"
-              disabled={!canLookup || busy !== null}
+              disabled={!canLookup || accessCode.trim().length < 6 || busy !== null}
               className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {busy === "LOOKUP" ? "Consultando..." : "Consultar expediente"}
+              {busy === "LOOKUP" ? "Autenticando..." : "Autenticar expediente"}
             </button>
           </form>
 

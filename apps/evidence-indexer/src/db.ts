@@ -276,6 +276,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS hn_voter_authorizations_active_dni_uniq
   ON hn_voter_authorizations(chain_id, contract_address, election_id, dni)
   WHERE status = 'AUTHORIZED' AND revoked_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS hn_citizen_sessions (
+  session_id TEXT PRIMARY KEY,
+  dni TEXT NOT NULL REFERENCES hn_voter_registry(dni) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  auth_method TEXT NOT NULL,
+  auth_context_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS hn_citizen_sessions_dni_idx
+  ON hn_citizen_sessions(dni, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS hn_citizen_sessions_status_idx
+  ON hn_citizen_sessions(status, expires_at ASC);
+
 
 /* Legacy ballots table removed. Use ballot_records exclusively. */
 

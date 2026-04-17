@@ -51,6 +51,11 @@ type BallotsListResponse = {
 type SignupPreparationResponse = {
   ok: boolean;
   error?: string;
+  session?: {
+    sessionId: string;
+    authMethod: string;
+    expiresAt: string;
+  };
   record?: {
     dni: string;
     fullName: string;
@@ -72,6 +77,24 @@ type SignupPreparationResponse = {
   };
 };
 
+type CitizenAuthResponse = {
+  ok: boolean;
+  error?: string;
+  session?: {
+    sessionId: string;
+    token: string;
+    authMethod: string;
+    expiresAt: string;
+  };
+};
+
+type CitizenSession = {
+  dni: string;
+  token: string;
+  expiresAt: string;
+  authMethod: string;
+};
+
 type VoterIdentity = {
   dni: string;
   fullName: string;
@@ -79,6 +102,8 @@ type VoterIdentity = {
   verificationMethod: string | null;
   authMethod: string | null;
 };
+
+const CITIZEN_SESSION_STORAGE_KEY = "bu_citizen_session";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -90,7 +115,9 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
 
   const [step, setStep] = useState<WizardStep>("SETUP");
   const [dni, setDni] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [voterIdentity, setVoterIdentity] = useState<VoterIdentity | null>(null);
+  const [citizenSession, setCitizenSession] = useState<CitizenSession | null>(null);
   const [votingKeys, setVotingKeys] = useState<{ pub: string; priv: string } | null>(null);
   const [subId, setSubId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -108,6 +135,18 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
   // Recovery
   useEffect(() => {
     const saved = sessionStorage.getItem(`bu_vote_state_${electionId}`);
+    const storedCitizenSessionRaw = sessionStorage.getItem(CITIZEN_SESSION_STORAGE_KEY);
+    if (storedCitizenSessionRaw) {
+      try {
+        const parsed = JSON.parse(storedCitizenSessionRaw) as CitizenSession;
+        if (parsed?.token && parsed?.dni && parsed?.expiresAt && new Date(parsed.expiresAt).getTime() > Date.now()) {
+          setCitizenSession(parsed);
+          setDni(parsed.dni);
+        }
+      } catch {
+        sessionStorage.removeItem(CITIZEN_SESSION_STORAGE_KEY);
+      }
+    }
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -169,11 +208,47 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         throw new Error("Debes ingresar un DNI hondureño válido de 13 dígitos.");
       }
 
+      let activeSession = citizenSession;
+      if (!activeSession || activeSession.dni !== normalizedDni || new Date(activeSession.expiresAt).getTime() <= Date.now()) {
+        if (accessCode.trim().length < 6) {
+          throw new Error("Debes ingresar tu código de acceso ciudadano.");
+        }
+        const authRes = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/auth/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dni: normalizedDni,
+            accessCode: accessCode.trim(),
+          }),
+        });
+        const authData = (await authRes.json()) as CitizenAuthResponse;
+        if (!authRes.ok || !authData.ok || !authData.session) {
+          if (authData.error === "invalid_access_code") {
+            throw new Error("El código de acceso ciudadano es inválido.");
+          }
+          if (authData.error === "citizen_access_not_configured") {
+            throw new Error("Tu expediente no tiene un código ciudadano configurado.");
+          }
+          throw new Error(authData.error || "No se pudo abrir una sesión ciudadana.");
+        }
+        activeSession = {
+          dni: normalizedDni,
+          token: authData.session.token,
+          expiresAt: authData.session.expiresAt,
+          authMethod: authData.session.authMethod,
+        };
+        setCitizenSession(activeSession);
+        sessionStorage.setItem(CITIZEN_SESSION_STORAGE_KEY, JSON.stringify(activeSession));
+      }
+
       const bootstrapRes = await fetch(
         `${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/elections/${electionId}/prepare-signup`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${activeSession.token}`,
+          },
           body: JSON.stringify({
             dni: normalizedDni,
           }),
@@ -202,7 +277,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         fullName: bootstrapData.record?.fullName ?? "Votante registrado",
         walletAddress: bootstrapData.walletLink?.walletAddress ?? null,
         verificationMethod: bootstrapData.walletLink?.verificationMethod ?? null,
-        authMethod: bootstrapData.authorization?.status ?? null,
+        authMethod: activeSession.authMethod ?? bootstrapData.authorization?.status ?? null,
       });
 
       const res = await fetch(`${env.NEXT_PUBLIC_MRD_API_URL}/v1/mrd/elections/${electionId}/signup`, {
@@ -487,13 +562,20 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
                 value={dni}
                 onChange={(e) => setDni(e.target.value)}
               />
+              <input
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder:text-slate-400"
+                placeholder="Código de acceso ciudadano"
+                type="password"
+                value={accessCode}
+                onChange={(e) => setAccessCode(e.target.value)}
+              />
             </div>
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900">
-              La API de evidencias valida tu `DNI`, comprueba que tu expediente esté autorizado para esta elección y emite el `SignupPermit` sin archivos manuales.
+              La API de evidencias valida tu sesión ciudadana, comprueba que tu expediente esté autorizado para esta elección y emite el `SignupPermit` sin archivos manuales.
             </div>
             <button 
               onClick={handleSignup} 
-              disabled={isSubmitting || !dni.trim()}
+              disabled={isSubmitting || !dni.trim() || ((!citizenSession || citizenSession.dni !== dni.replace(/\D/g, "")) && accessCode.trim().length < 6)}
               className="w-full rounded-xl bg-indigo-600 py-3.5 px-4 text-sm font-extrabold tracking-wide uppercase text-white hover:bg-indigo-700 hover:shadow-lg transition-all focus:ring-4 focus:ring-indigo-100 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isSubmitting ? (
