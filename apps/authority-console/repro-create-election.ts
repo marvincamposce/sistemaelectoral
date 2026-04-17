@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ethers } from 'ethers';
 import {
   canonicalizeJson,
+  deriveCoordinatorPublicKey,
   getPublicKeyHex,
   sha256Hex,
   signEd25519Hex,
@@ -21,13 +22,14 @@ async function main() {
     CONTRACT_ADDRESS: process.env.ELECTION_REGISTRY_ADDRESS!,
     AEA_PRIVATE_KEY: process.env.AEA_PRIVATE_KEY!,
     AEA_ED25519_PRIVATE_KEY_HEX: process.env.AEA_ED25519_PRIVATE_KEY_HEX!,
+    COORDINATOR_PRIVATE_KEY: process.env.COORDINATOR_PRIVATE_KEY!,
   };
 
   const provider = new ethers.JsonRpcProvider(env.RPC_URL);
   const wallet = new ethers.Wallet(env.AEA_PRIVATE_KEY, provider);
   const authorityAddress = await wallet.getAddress();
   const registryAuthority = authorityAddress;
-  const coordinatorPubKey = '0x1111111111111111111111111111111111111111111111111111111111111111';
+  const coordinatorPubKey = await deriveCoordinatorPublicKey(env.COORDINATOR_PRIVATE_KEY);
 
   const candidatesCatalog = [
     { id: 'cand-1', candidateCode: 'CAND_1', displayName: 'Mariana Soto', shortName: 'M. Soto', partyName: 'Alianza Cívica', ballotOrder: 1, status: 'ACTIVE' as const, colorHex: '#1D4ED8' },

@@ -412,3 +412,11 @@ export async function decryptBallotPayload(
   const envelope = decodeBallotCiphertextEnvelope(ciphertextHex);
   return decryptBallotPayloadZkFriendly(envelope, coordinatorPrivateKeyHex);
 }
+
+/**
+ * @deprecated Use encryptBallotPayload.
+ * Kept for compatibility with older callers.
+ */
+export async function mockEncryptBallot(payload: any, coordinatorPubKey: string): Promise<string> {
+  return encryptBallotPayload(payload, coordinatorPubKey, { scheme: "ZK_FRIENDLY_V2" });
+}

@@ -271,7 +271,8 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
       }
 
       const wallet = ethers.Wallet.createRandom();
-      setVotingKeys({ pub: wallet.publicKey, priv: wallet.privateKey });
+      const votingPubKey = ethers.SigningKey.computePublicKey(wallet.privateKey, false);
+      setVotingKeys({ pub: votingPubKey, priv: wallet.privateKey });
       setVoterIdentity({
         dni: normalizedDni,
         fullName: bootstrapData.record?.fullName ?? "Votante registrado",
@@ -285,7 +286,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           registryNullifier: bootstrapData.permit.registryNullifier,
-          votingPubKey: wallet.publicKey,
+          votingPubKey,
           permitSig: bootstrapData.permit.permitSig,
         }),
       });

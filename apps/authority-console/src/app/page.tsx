@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { ethers } from "ethers";
 import {
   canonicalizeJson,
+  deriveCoordinatorPublicKey,
   getPublicKeyHex,
   sha256Hex,
   signEd25519Hex,
@@ -122,9 +123,17 @@ function resolveDefaultRegistryAuthority(aeaPrivateKey: string): string {
   return new ethers.Wallet(aeaPrivateKey).address;
 }
 
-function resolveDefaultCoordinatorPubKey(): string {
+async function resolveDefaultCoordinatorPubKey(): Promise<string> {
   const fromEnv = String(process.env.DEFAULT_COORDINATOR_PUBKEY ?? "").trim();
   if (HEX32_REGEX.test(fromEnv)) return fromEnv;
+  const coordinatorPrivateKey = String(process.env.COORDINATOR_PRIVATE_KEY ?? "").trim();
+  if (HEX32_REGEX.test(coordinatorPrivateKey)) {
+    try {
+      return await deriveCoordinatorPublicKey(coordinatorPrivateKey);
+    } catch {
+      // Ignore invalid derivation and fall back to the placeholder for explicit operator input.
+    }
+  }
   return "0x1111111111111111111111111111111111111111111111111111111111111111";
 }
 
@@ -429,7 +438,7 @@ export default async function Page() {
     title: `Elección Local Reproducible ${new Date().getFullYear()}`,
     notes: "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
     registryAuthority: resolveDefaultRegistryAuthority(env.AEA_PRIVATE_KEY),
-    coordinatorPubKey: resolveDefaultCoordinatorPubKey(),
+    coordinatorPubKey: await resolveDefaultCoordinatorPubKey(),
   };
 
   const electionsRes = await fetchJsonOrNull<ElectionsApiResponse>(`${env.EVIDENCE_API_URL}/v1/elections`);

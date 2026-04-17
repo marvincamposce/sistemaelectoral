@@ -13,7 +13,9 @@ import {
   buildDecryptionWitness,
   buildWitnessFromTranscript,
   checkArtifactsForCircuit,
+  proveDecryption,
   proveTally,
+  verifyDecryptionProof,
   verifyTallyProof,
   parsePublicSignals,
   checkArtifacts,
@@ -358,5 +360,42 @@ describe("TallyVerifier ZK Proof (Groth16)", () => {
     assert.strictEqual(witness.activeSlots[2], "0");
     assert.strictEqual(witness.selections[2], String(INVALID_SELECTION));
     assert.strictEqual(witness.totalValid, "2");
+  });
+
+  it("should generate and verify a valid decryption proof", async () => {
+    const poseidon = await getPoseidon();
+    const makeValidEntry = (sharedKey: bigint, nonce: bigint, selection: bigint) => {
+      const mask = normalizeField(
+        BigInt(poseidon.F.toObject(poseidon([sharedKey, nonce, 0n]))),
+      );
+      return {
+        selectionCiphertext: normalizeField(mask + selection).toString(),
+        selectionNonce: nonce.toString(),
+        selectionSharedKey: sharedKey.toString(),
+        decryptedSelection: selection.toString(),
+      };
+    };
+
+    const witness = await buildDecryptionWitness({
+      summary: {
+        CANDIDATO_A: 1,
+        CANDIDATO_B: 1,
+        CANDIDATO_C: 0,
+        ABSTENCION: 0,
+      },
+      candidateOrder,
+      entries: [
+        makeValidEntry(21n, 11n, 0n),
+        makeValidEntry(22n, 12n, 1n),
+      ],
+    });
+
+    const proofResult = await proveDecryption(witness);
+    const verifyResult = await verifyDecryptionProof(
+      proofResult.proof,
+      proofResult.publicSignals,
+    );
+
+    assert.ok(verifyResult.valid, "Valid decryption proof should verify");
   });
 });

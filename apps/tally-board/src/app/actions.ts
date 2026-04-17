@@ -313,7 +313,7 @@ async function loadZkPublicationGateState(params: {
   electionId: string;
   tallyJobId?: string | null;
 }): Promise<ZkPublicationGateState> {
-  const tallyJobClause = params.tallyJobId ? "AND tally_job_id=$4" : "";
+  const tallyJobClause = params.tallyJobId ? " AND tally_job_id=$4" : "";
   const tallyQueryParams = params.tallyJobId
     ? [params.chainId, params.contractAddress, params.electionId, params.tallyJobId]
     : [params.chainId, params.contractAddress, params.electionId];
@@ -343,7 +343,9 @@ async function loadZkPublicationGateState(params: {
   const decryptionQueryParams = effectiveTallyJobId
     ? [params.chainId, params.contractAddress, params.electionId, effectiveTallyJobId, ZK_DECRYPTION_CIRCUIT_ID]
     : [params.chainId, params.contractAddress, params.electionId, ZK_DECRYPTION_CIRCUIT_ID];
-  const decryptionWhereClause = effectiveTallyJobId ? "AND tally_job_id=$4 AND circuit_id=$5" : "AND circuit_id=$4";
+  const decryptionWhereClause = effectiveTallyJobId
+    ? " AND tally_job_id=$4 AND circuit_id=$5"
+    : " AND circuit_id=$4";
 
   const decryptionProofRes = await pool.query<{
     jobId: string;
