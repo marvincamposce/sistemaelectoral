@@ -205,6 +205,7 @@ export const HondurasWalletVerificationMethodSchema = z.enum([
   "SELF_ATTESTED",
   "CENSUS_VERIFIED",
   "DEMO_SYSTEM",
+  "SYSTEM_MANAGED",
 ]);
 
 export type HondurasWalletVerificationMethod = z.infer<typeof HondurasWalletVerificationMethodSchema>;

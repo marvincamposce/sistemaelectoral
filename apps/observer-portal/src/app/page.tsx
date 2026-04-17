@@ -250,6 +250,39 @@ type ZkProofResponse = {
   };
 };
 
+type ElectionEnrollmentResponse = {
+  ok: boolean;
+  summary: {
+    totalRequests: number;
+    pendingReview: number;
+    approvedRequests: number;
+    rejectedRequests: number;
+    totalAuthorizations: number;
+    activeAuthorizations: number;
+    activeWalletCoverage: number;
+  };
+  requests: Array<{
+    requestId: string;
+    dni: string;
+    fullName: string | null;
+    status: string;
+    requestedAt: string;
+    reviewedAt: string | null;
+    requestChannel: string;
+  }>;
+  authorizations: Array<{
+    authorizationId: string;
+    dni: string;
+    fullName: string | null;
+    electionId: string;
+    walletAddress: string;
+    status: string;
+    verificationMethod: string | null;
+    walletLinkStatus: string | null;
+    authorizedAt: string;
+  }>;
+};
+
 /* ─── Helpers (logic unchanged) ─── */
 
 function isCriticalSeverity(severity: string): boolean {
@@ -465,6 +498,7 @@ export default async function Page() {
         consistencyRes,
         incidentsRes,
         resultsRes,
+        enrollmentRes,
         auditWindowRes,
         auditBundleRes,
         zkProofRes,
@@ -511,6 +545,20 @@ export default async function Page() {
           ok: true,
           results: [],
         }),
+        safeFetchJson<ElectionEnrollmentResponse>(`${apiBase}/v1/elections/${id}/enrollment`, {
+          ok: true,
+          summary: {
+            totalRequests: 0,
+            pendingReview: 0,
+            approvedRequests: 0,
+            rejectedRequests: 0,
+            totalAuthorizations: 0,
+            activeAuthorizations: 0,
+            activeWalletCoverage: 0,
+          },
+          requests: [],
+          authorizations: [],
+        }),
         safeFetchJson<AuditWindowResponse>(`${apiBase}/v1/elections/${id}/audit-window`, {
           ok: true,
           auditWindow: null,
@@ -546,6 +594,7 @@ export default async function Page() {
         consistency: consistencyRes.consistency,
         incidents: incidentsRes.incidents,
         results: resultsRes.results,
+        enrollment: enrollmentRes,
         auditWindow: auditWindowRes.auditWindow,
         bundleHash: auditBundleRes.bundleHash,
         bundleExportStatus: auditBundleRes.exportStatus,
@@ -878,6 +927,97 @@ export default async function Page() {
                           ))}
                         </div>
                       )}
+                    </div>
+                  </section>
+
+                  {/* ─── Enrollment & Authorization ─── */}
+                  <section style={{ marginBottom: "2rem" }}>
+                    <h3 className="section-title">Enrolamiento y autorización</h3>
+                    <div className="card" style={{ padding: "1rem 1.25rem" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
+                        <div className="stat-card">
+                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Solicitudes</span>
+                          <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment.summary.totalRequests}</span>
+                        </div>
+                        <div className="stat-card">
+                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Pendientes</span>
+                          <span className="badge badge-warning" style={{ alignSelf: "flex-start" }}>{e.enrollment.summary.pendingReview}</span>
+                        </div>
+                        <div className="stat-card">
+                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Autorizados</span>
+                          <span className="badge badge-valid" style={{ alignSelf: "flex-start" }}>{e.enrollment.summary.activeAuthorizations}</span>
+                        </div>
+                        <div className="stat-card">
+                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Wallet activa</span>
+                          <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment.summary.activeWalletCoverage}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+                        <div>
+                          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#334155", marginBottom: "0.5rem" }}>
+                            Solicitudes recientes
+                          </div>
+                          {e.enrollment.requests.length === 0 ? (
+                            <p style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Sin solicitudes ligadas a esta elección.</p>
+                          ) : (
+                            <div style={{ display: "grid", gap: "0.5rem" }}>
+                              {e.enrollment.requests.slice(0, 5).map((request) => (
+                                <div key={request.requestId} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "0.625rem 0.75rem" }}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div>
+                                      <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a" }}>
+                                        {request.fullName ?? request.dni}
+                                      </div>
+                                      <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>{request.dni}</div>
+                                    </div>
+                                    <span className={severityBadgeClass(request.status === "REJECTED" ? "CRITICAL" : request.status === "PENDING_REVIEW" ? "WARNING" : "INFO")}>
+                                      {request.status}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.35rem" }}>
+                                    {request.requestChannel} · {formatTimestamp(request.requestedAt)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#334155", marginBottom: "0.5rem" }}>
+                            Autorizaciones activas
+                          </div>
+                          {e.enrollment.authorizations.length === 0 ? (
+                            <p style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Sin autorizaciones registradas para esta elección.</p>
+                          ) : (
+                            <div style={{ display: "grid", gap: "0.5rem" }}>
+                              {e.enrollment.authorizations
+                                .filter((authorization) => authorization.status === "AUTHORIZED")
+                                .slice(0, 5)
+                                .map((authorization) => (
+                                  <div key={authorization.authorizationId} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "0.625rem 0.75rem" }}>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div>
+                                        <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#0f172a" }}>
+                                          {authorization.fullName ?? authorization.dni}
+                                        </div>
+                                        <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>{authorization.dni}</div>
+                                      </div>
+                                      <span className="badge badge-valid">{authorization.status}</span>
+                                    </div>
+                                    <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.35rem" }}>
+                                      wallet {authorization.walletLinkStatus ?? "—"} · método {authorization.verificationMethod ?? "—"}
+                                    </div>
+                                    <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.2rem" }}>
+                                      {formatTimestamp(authorization.authorizedAt)}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </section>
 

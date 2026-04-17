@@ -256,7 +256,7 @@ function resolveAllowedTrusteeSignerAddress(trusteeId: string): string {
 }
 
 async function resolveRuntimeContext() {
-  const chainId = "31337";
+  const chainId = getEnv().CHAIN_ID;
   const contract = getContract();
   const contractAddress = (await contract.getAddress()).toLowerCase();
   return { chainId, contractAddress, contract };
@@ -974,7 +974,7 @@ export async function publishActaWithContentAction(
     const receipt = await tx.wait();
 
     // Persist full content to acta_contents so evidence-api can serve it
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
     const expectedSignerAddress = new ethers.Wallet(signingKey).address.toLowerCase();
@@ -1034,7 +1034,7 @@ export async function createProcessingBatchAction(electionId: string, inputCount
     const batchId = crypto.randomUUID();
     // Default to a 31337 chain ID and localhost contract for now, or match indexer logically
     // To match indexer, we need the contract address and chain ID
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
@@ -1074,7 +1074,7 @@ export async function updateProcessingBatchStatusAction(batchId: string, status:
 export async function createTallyJobAction(electionId: string, basedOnBatchSet: string) {
   try {
     const jobId = crypto.randomUUID();
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
@@ -1125,7 +1125,7 @@ export async function logIncidentAction(
   evidencePointers: unknown[] = [],
 ) {
   try {
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
@@ -1151,10 +1151,13 @@ export async function createResultPayloadAction(
 ) {
   try {
     const payloadId = crypto.randomUUID();
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
-    const proofState = options?.proofState ?? "SIMULATED";
+    const proofState = options?.proofState ?? "NOT_IMPLEMENTED";
+    if (String(proofState).toUpperCase() === "SIMULATED") {
+      return { ok: false, error: "SIMULATED proofState is no longer accepted for result payloads" };
+    }
     const resultKind = options?.resultKind ?? "EXPERIMENTAL";
     const publicationStatus = options?.publicationStatus ?? "PUBLISHED";
 
@@ -1269,7 +1272,7 @@ export async function createResultPayloadAction(
 export async function openAuditWindowAction(electionId: string) {
   try {
     const auditId = crypto.randomUUID();
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
 
@@ -1298,7 +1301,7 @@ export async function openAuditWindowAction(electionId: string) {
 export async function persistAuditBundleAction(electionId: string) {
   try {
     const bundleId = crypto.randomUUID();
-    const chainId = "31337";
+    const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
 

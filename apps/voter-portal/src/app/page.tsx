@@ -1,103 +1,308 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, Fingerprint, Network, ChevronRight } from "lucide-react";
+import { CheckCircle2, FilePlus2, Search, ShieldAlert, Wallet } from "lucide-react";
+
+import { getPublicEnv } from "@/lib/env";
+
+type EnrollmentLookupResponse = {
+  ok: boolean;
+  error?: string;
+  record?: {
+    dni: string;
+    fullName: string;
+    habilitationStatus: string;
+    statusReason?: string | null;
+  };
+  latestRequest?: {
+    requestId: string;
+    status: string;
+    requestedAt: string;
+    reviewedAt?: string | null;
+  } | null;
+  walletLink?: {
+    walletAddress: string;
+    verificationMethod: string;
+  } | null;
+  authorizations?: Array<{
+    electionId: string;
+    status: string;
+    authorizedAt: string;
+  }>;
+};
+
+type EnrollmentRequestResponse = {
+  ok: boolean;
+  error?: string;
+  request?: {
+    requestId: string;
+    status: string;
+    requestedAt: string;
+  };
+};
+
+function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString("es-HN", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return ts;
+  }
+}
+
+function statusTone(status: string | undefined): string {
+  const value = String(status ?? "").toUpperCase();
+  if (value === "AUTHORIZED" || value === "HABILITADO") return "badge badge-valid";
+  if (value === "REJECTED" || value === "INHABILITADO" || value === "SUSPENDIDO") return "badge badge-critical";
+  return "badge badge-warning";
+}
 
 export default function Home() {
+  const env = getPublicEnv();
   const router = useRouter();
-  const [electionId, setElectionId] = useState("");
-  const [isAttempting, setIsAttempting] = useState(false);
 
-  const handleStart = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (electionId.trim()) {
-      setIsAttempting(true);
-      setTimeout(() => {
-        router.push(`/vote/${encodeURIComponent(electionId.trim())}`);
-      }, 500); // Slight delay for the authentication effect
+  const [dni, setDni] = useState("");
+  const [electionId, setElectionId] = useState("");
+  const [requestNotes, setRequestNotes] = useState("");
+  const [lookup, setLookup] = useState<EnrollmentLookupResponse | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [busy, setBusy] = useState<"LOOKUP" | "REQUEST" | "GO" | null>(null);
+
+  const normalizedDni = useMemo(() => dni.replace(/\D/g, ""), [dni]);
+  const canLookup = normalizedDni.length === 13;
+  const selectedAuthorization = useMemo(
+    () => lookup?.authorizations?.find((row) => row.electionId === electionId && row.status === "AUTHORIZED") ?? null,
+    [lookup, electionId],
+  );
+
+  async function handleLookup(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canLookup) return;
+    setBusy("LOOKUP");
+    setErrorMsg("");
+    try {
+      const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/enrollment/${normalizedDni}`, {
+        cache: "no-store",
+      });
+      const data = (await res.json()) as EnrollmentLookupResponse;
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "No se pudo consultar el expediente.");
+      }
+      setLookup(data);
+    } catch (error: unknown) {
+      setLookup(null);
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(null);
     }
-  };
+  }
+
+  async function handleEnrollmentRequest(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canLookup) return;
+    setBusy("REQUEST");
+    setErrorMsg("");
+    try {
+      const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/enrollment-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dni: normalizedDni,
+          electionId: electionId.trim() || undefined,
+          requestNotes: requestNotes.trim() || undefined,
+        }),
+      });
+      const data = (await res.json()) as EnrollmentRequestResponse;
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "No se pudo crear la solicitud de enrolamiento.");
+      }
+      await handleLookup(event);
+    } catch (error: unknown) {
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function goToVote() {
+    if (!electionId.trim()) {
+      setErrorMsg("Debes indicar el identificador de elección.");
+      return;
+    }
+    if (!selectedAuthorization) {
+      setErrorMsg("Todavía no estás autorizado para esa elección.");
+      return;
+    }
+    setBusy("GO");
+    router.push(`/vote/${encodeURIComponent(electionId.trim())}`);
+  }
 
   return (
-    <main className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-      <div className="absolute inset-0 z-0 opacity-30 pointer-events-none">
-        <svg className="absolute -left-8 top-8 h-56 w-56 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 4v16m8-8H4" />
-        </svg>
-      </div>
-
-      <div className="max-w-lg w-full z-10">
-        <div className="card p-8 sm:p-9 space-y-6">
-          <div className="flex items-start gap-4">
-            <div className="h-12 w-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
-              <Lock className="h-6 w-6 text-indigo-600" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Ingreso al proceso de votación</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Continúa con una experiencia guiada para emitir tu boleta cifrada de forma segura.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 p-4 rounded-xl border border-indigo-100 bg-indigo-50/60 text-sm text-slate-700">
-            <Fingerprint className="w-5 h-5 text-indigo-600 mt-0.5 flex-shrink-0" />
-            <p>
-              Necesitarás tu permiso digital en formato JSON, emitido por la Autoridad de Registro (REA),
-              para habilitar tu inscripción y votar.
+    <main className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl w-full grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="card p-8 space-y-6">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Portal ciudadano</h2>
+            <p className="text-sm text-slate-600">
+              Consulta tu expediente, solicita enrolamiento y verifica si ya estás autorizado para votar.
             </p>
           </div>
 
-          <form onSubmit={handleStart} className="space-y-5">
+          <form onSubmit={handleLookup} className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="electionId" className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <Network className="w-4 h-4 text-slate-500" />
-                Identificador de la elección
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <span className="text-slate-400 text-sm font-semibold">ID</span>
-                </div>
-                <input
-                  id="electionId"
-                  type="text"
-                  required
-                  value={electionId}
-                  onChange={(e) => setElectionId(e.target.value)}
-                  disabled={isAttempting}
-                  className="block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-all disabled:opacity-50 disabled:bg-slate-100"
-                  placeholder="Ejemplo: 1"
-                />
-              </div>
+              <label className="text-sm font-semibold text-slate-700">DNI</label>
+              <input
+                className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="0801199912345"
+                value={dni}
+                onChange={(event) => setDni(event.target.value)}
+              />
             </div>
-
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">Elección</label>
+              <input
+                className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="1"
+                value={electionId}
+                onChange={(event) => setElectionId(event.target.value)}
+              />
+            </div>
             <button
               type="submit"
-              disabled={!electionId.trim() || isAttempting}
-              className="group w-full flex justify-center items-center gap-2 py-3.5 px-4 text-sm font-bold rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              disabled={!canLookup || busy !== null}
+              className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {isAttempting ? (
-                <>
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span>Validando acceso a la elección...</span>
-                </>
-              ) : (
-                <>
-                  <span>Continuar a votación</span>
-                  <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </>
-              )}
+              {busy === "LOOKUP" ? "Consultando..." : "Consultar expediente"}
             </button>
           </form>
 
-          <p className="text-xs text-slate-500">
-            Si no conoces el identificador de elección, solicítalo a tu autoridad electoral antes de continuar.
-          </p>
-        </div>
+          <form onSubmit={handleEnrollmentRequest} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <FilePlus2 className="h-4 w-4 text-indigo-600" />
+              Solicitar enrolamiento
+            </div>
+            <textarea
+              className="min-h-24 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Escribe una nota breve para la autoridad electoral si necesitas enrolarte o reactivar tu expediente."
+              value={requestNotes}
+              onChange={(event) => setRequestNotes(event.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={!canLookup || busy !== null}
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-50"
+            >
+              {busy === "REQUEST" ? "Enviando solicitud..." : "Crear solicitud"}
+            </button>
+          </form>
+
+          {errorMsg ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {errorMsg}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="card p-8 space-y-5">
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-slate-900">Estado actual</h3>
+            <p className="text-sm text-slate-600">Lo que sabe el sistema sobre tu registro y tu autorización.</p>
+          </div>
+
+          {!lookup ? (
+            <div className="rounded-xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
+              Consulta tu expediente para ver habilitación, solicitud, wallet y autorización por elección.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{lookup.record?.fullName}</div>
+                    <div className="text-xs text-slate-500">DNI {lookup.record?.dni}</div>
+                  </div>
+                  <span className={statusTone(lookup.record?.habilitationStatus)}>{lookup.record?.habilitationStatus}</span>
+                </div>
+                <div className="text-sm text-slate-700">{lookup.record?.statusReason || "Sin observaciones registradas."}</div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Search className="h-4 w-4 text-indigo-600" />
+                  Última solicitud de enrolamiento
+                </div>
+                {lookup.latestRequest ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={statusTone(lookup.latestRequest.status)}>{lookup.latestRequest.status}</span>
+                      <span className="text-xs text-slate-500">{formatTimestamp(lookup.latestRequest.requestedAt)}</span>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      revisada: {formatTimestamp(lookup.latestRequest.reviewedAt)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-slate-500">No existe solicitud todavía.</div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Wallet className="h-4 w-4 text-indigo-600" />
+                  Wallet vinculada
+                </div>
+                {lookup.walletLink ? (
+                  <>
+                    <code className="hash-display">{lookup.walletLink.walletAddress}</code>
+                    <div className="text-xs text-slate-500">método={lookup.walletLink.verificationMethod}</div>
+                  </>
+                ) : (
+                  <div className="text-sm text-slate-500">Todavía no hay wallet provisionada.</div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  Autorización por elección
+                </div>
+                {lookup.authorizations && lookup.authorizations.length > 0 ? (
+                  <div className="space-y-2">
+                    {lookup.authorizations.map((authorization) => (
+                      <div key={`${authorization.electionId}-${authorization.authorizedAt}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-slate-900">Elección #{authorization.electionId}</div>
+                          <span className={statusTone(authorization.status)}>{authorization.status}</span>
+                        </div>
+                        <div className="text-xs text-slate-500">autorizado: {formatTimestamp(authorization.authorizedAt)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                    <ShieldAlert className="h-4 w-4 mt-0.5" />
+                    <span>No existe autorización activa para ninguna elección.</span>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={goToVote}
+                disabled={!selectedAuthorization || busy !== null || !electionId.trim()}
+                className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-black disabled:opacity-50"
+              >
+                {busy === "GO" ? "Abriendo votación..." : "Ir al flujo de votación"}
+              </button>
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );

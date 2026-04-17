@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Pool } from "pg";
 
 const SCHEMA_SQL = `
@@ -233,7 +234,7 @@ export type HondurasCensusStatus = "HABILITADO" | "INHABILITADO" | "SUSPENDIDO" 
 
 export type HondurasWalletLinkStatus = "ACTIVE" | "PENDING" | "REVOKED";
 
-export type HondurasWalletVerificationMethod = "MANUAL_AEA" | "SELF_ATTESTED" | "CENSUS_VERIFIED" | "DEMO_SYSTEM";
+export type HondurasWalletVerificationMethod = "MANUAL_AEA" | "SELF_ATTESTED" | "CENSUS_VERIFIED" | "DEMO_SYSTEM" | "SYSTEM_MANAGED";
 
 export type HondurasVoterRegistryRow = {
   dni: string;
@@ -702,6 +703,223 @@ export async function listHondurasWalletLinksByDni(params: {
     linkedAt: row.linkedAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     revokedAt: row.revokedAt?.toISOString() ?? null,
+  }));
+}
+
+export async function createHondurasEnrollmentRequest(params: {
+  pool: Pool;
+  dni: string;
+  requestedWalletAddress?: string | null;
+  requestChannel?: string;
+  requestNotes?: string | null;
+  metadataJson?: unknown;
+}): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await params.pool.query(
+    `INSERT INTO hn_enrollment_requests(
+      request_id, dni, status, requested_wallet_address, request_channel, request_notes, metadata_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [
+      requestId,
+      params.dni,
+      "PENDING_REVIEW",
+      params.requestedWalletAddress ?? null,
+      params.requestChannel ?? "CITIZEN_PORTAL",
+      params.requestNotes ?? null,
+      JSON.stringify(params.metadataJson ?? {}),
+    ],
+  );
+  return requestId;
+}
+
+export async function listHondurasEnrollmentRequests(params: {
+  pool: Pool;
+  limit?: number;
+  dni?: string;
+  status?: HondurasEnrollmentRequestStatus;
+}): Promise<HondurasEnrollmentRequestRow[]> {
+  const max = Math.max(1, Math.min(100, Number(params.limit ?? 25)));
+  const clauses = ["1=1"];
+  const values: unknown[] = [];
+
+  if (params.dni) {
+    values.push(params.dni);
+    clauses.push(`dni=$${values.length}`);
+  }
+  if (params.status) {
+    values.push(params.status);
+    clauses.push(`status=$${values.length}`);
+  }
+
+  values.push(max);
+
+  const res = await params.pool.query<{
+    requestId: string;
+    dni: string;
+    status: HondurasEnrollmentRequestStatus;
+    requestedWalletAddress: string | null;
+    requestChannel: string;
+    requestNotes: string | null;
+    metadataJson: unknown;
+    reviewedBy: string | null;
+    reviewNotes: string | null;
+    requestedAt: Date;
+    reviewedAt: Date | null;
+  }>(
+    `SELECT
+      request_id AS "requestId",
+      dni,
+      status,
+      requested_wallet_address AS "requestedWalletAddress",
+      request_channel AS "requestChannel",
+      request_notes AS "requestNotes",
+      metadata_json AS "metadataJson",
+      reviewed_by AS "reviewedBy",
+      review_notes AS "reviewNotes",
+      requested_at AS "requestedAt",
+      reviewed_at AS "reviewedAt"
+    FROM hn_enrollment_requests
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY requested_at DESC
+    LIMIT $${values.length}`,
+    values,
+  );
+
+  return res.rows.map((row) => ({
+    ...row,
+    requestedAt: row.requestedAt.toISOString(),
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+  }));
+}
+
+export async function reviewHondurasEnrollmentRequest(params: {
+  pool: Pool;
+  requestId: string;
+  status: Extract<HondurasEnrollmentRequestStatus, "APPROVED" | "REJECTED" | "CANCELLED">;
+  reviewedBy: string;
+  reviewNotes?: string | null;
+}): Promise<number> {
+  const res = await params.pool.query(
+    `UPDATE hn_enrollment_requests
+     SET status=$2, reviewed_by=$3, review_notes=$4, reviewed_at=NOW()
+     WHERE request_id=$1`,
+    [params.requestId, params.status, params.reviewedBy, params.reviewNotes ?? null],
+  );
+  return res.rowCount ?? 0;
+}
+
+export async function createHondurasVoterAuthorization(params: {
+  pool: Pool;
+  chainId: string;
+  contractAddress: string;
+  electionId: string | number;
+  dni: string;
+  walletAddress: string;
+  enrollmentRequestId?: string | null;
+  status?: HondurasVoterAuthorizationStatus;
+  authorizedBy?: string | null;
+  authorizationNotes?: string | null;
+  metadataJson?: unknown;
+}): Promise<string> {
+  const authorizationId = crypto.randomUUID();
+  await params.pool.query(
+    `INSERT INTO hn_voter_authorizations(
+      authorization_id, chain_id, contract_address, election_id, dni, wallet_address,
+      enrollment_request_id, status, authorized_by, authorization_notes, metadata_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    ON CONFLICT (chain_id, contract_address, election_id, dni)
+    WHERE status = 'AUTHORIZED' AND revoked_at IS NULL
+    DO UPDATE SET
+      wallet_address=EXCLUDED.wallet_address,
+      enrollment_request_id=EXCLUDED.enrollment_request_id,
+      status=EXCLUDED.status,
+      authorized_by=EXCLUDED.authorized_by,
+      authorization_notes=EXCLUDED.authorization_notes,
+      metadata_json=EXCLUDED.metadata_json,
+      revoked_at=NULL,
+      authorized_at=NOW()`,
+    [
+      authorizationId,
+      params.chainId,
+      params.contractAddress,
+      BigInt(params.electionId),
+      params.dni,
+      params.walletAddress,
+      params.enrollmentRequestId ?? null,
+      params.status ?? "AUTHORIZED",
+      params.authorizedBy ?? null,
+      params.authorizationNotes ?? null,
+      JSON.stringify(params.metadataJson ?? {}),
+    ],
+  );
+  return authorizationId;
+}
+
+export async function listHondurasVoterAuthorizations(params: {
+  pool: Pool;
+  chainId: string;
+  contractAddress: string;
+  electionId?: string | number;
+  dni?: string;
+  limit?: number;
+}): Promise<HondurasVoterAuthorizationRow[]> {
+  const max = Math.max(1, Math.min(100, Number(params.limit ?? 25)));
+  const clauses = ["chain_id=$1", "contract_address=$2"];
+  const values: unknown[] = [params.chainId, params.contractAddress];
+
+  if (params.electionId !== undefined) {
+    values.push(BigInt(params.electionId));
+    clauses.push(`election_id=$${values.length}`);
+  }
+  if (params.dni) {
+    values.push(params.dni);
+    clauses.push(`dni=$${values.length}`);
+  }
+  values.push(max);
+
+  const res = await params.pool.query<{
+    authorizationId: string;
+    chainId: string;
+    contractAddress: string;
+    electionId: string;
+    dni: string;
+    walletAddress: string;
+    enrollmentRequestId: string | null;
+    status: HondurasVoterAuthorizationStatus;
+    authorizedBy: string | null;
+    authorizationNotes: string | null;
+    metadataJson: unknown;
+    authorizedAt: Date;
+    revokedAt: Date | null;
+    createdAt: Date;
+  }>(
+    `SELECT
+      authorization_id AS "authorizationId",
+      chain_id AS "chainId",
+      contract_address AS "contractAddress",
+      election_id::text AS "electionId",
+      dni,
+      wallet_address AS "walletAddress",
+      enrollment_request_id AS "enrollmentRequestId",
+      status,
+      authorized_by AS "authorizedBy",
+      authorization_notes AS "authorizationNotes",
+      metadata_json AS "metadataJson",
+      authorized_at AS "authorizedAt",
+      revoked_at AS "revokedAt",
+      created_at AS "createdAt"
+    FROM hn_voter_authorizations
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY authorized_at DESC, created_at DESC
+    LIMIT $${values.length}`,
+    values,
+  );
+
+  return res.rows.map((row) => ({
+    ...row,
+    authorizedAt: row.authorizedAt.toISOString(),
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
   }));
 }
 

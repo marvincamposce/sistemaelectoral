@@ -65,8 +65,10 @@ type DemoBootstrapResponse = {
     registryNullifier: string;
     permitSig: string;
   };
-  demoAuth?: {
-    method: string;
+  authorization?: {
+    authorizationId: string;
+    status: string;
+    authorizedAt: string;
   };
 };
 
@@ -88,7 +90,6 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
 
   const [step, setStep] = useState<WizardStep>("SETUP");
   const [dni, setDni] = useState("");
-  const [demoPin, setDemoPin] = useState("");
   const [voterIdentity, setVoterIdentity] = useState<VoterIdentity | null>(null);
   const [votingKeys, setVotingKeys] = useState<{ pub: string; priv: string } | null>(null);
   const [subId, setSubId] = useState<string | null>(null);
@@ -112,7 +113,6 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         const parsed = JSON.parse(saved);
         if (parsed.step) setStep(parsed.step);
         if (parsed.dni) setDni(parsed.dni);
-        if (parsed.demoPin) setDemoPin(parsed.demoPin);
         if (parsed.voterIdentity) setVoterIdentity(parsed.voterIdentity);
         if (parsed.votingKeys) setVotingKeys(parsed.votingKeys);
         if (parsed.subId) setSubId(parsed.subId);
@@ -130,10 +130,10 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
     if (step === "RECEIPT") {
       sessionStorage.removeItem(`bu_vote_state_${electionId}`);
     } else {
-      const state = { step, dni, demoPin, voterIdentity, votingKeys, subId, ballotHash, txHash, selection };
+      const state = { step, dni, voterIdentity, votingKeys, subId, ballotHash, txHash, selection };
       sessionStorage.setItem(`bu_vote_state_${electionId}`, JSON.stringify(state));
     }
-  }, [step, dni, demoPin, voterIdentity, votingKeys, subId, ballotHash, txHash, selection, electionId]);
+  }, [step, dni, voterIdentity, votingKeys, subId, ballotHash, txHash, selection, electionId]);
 
   const handleSignup = async () => {
     setIsSubmitting(true);
@@ -145,24 +145,23 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
       }
 
       const bootstrapRes = await fetch(
-        `${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/demo/elections/${electionId}/bootstrap-voter`,
+        `${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/elections/${electionId}/prepare-signup`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             dni: normalizedDni,
-            pin: demoPin.trim() || undefined,
           }),
         },
       );
 
       const bootstrapData = (await bootstrapRes.json()) as DemoBootstrapResponse;
       if (!bootstrapRes.ok || !bootstrapData.ok) {
-        if (bootstrapData.error === "invalid_demo_pin") {
-          throw new Error("El PIN demo no coincide con el DNI cargado.");
-        }
         if (bootstrapData.error === "dni_not_eligible") {
           throw new Error("Este DNI no está habilitado para votar en el censo del demo.");
+        }
+        if (bootstrapData.error === "voter_not_authorized_for_election") {
+          throw new Error("Tu expediente existe, pero todavía no estás autorizado para esta elección.");
         }
         throw new Error(bootstrapData.error || "No se pudo preparar la credencial de votación.");
       }
@@ -178,7 +177,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         fullName: bootstrapData.record?.fullName ?? "Votante demo",
         walletAddress: bootstrapData.walletLink?.walletAddress ?? null,
         verificationMethod: bootstrapData.walletLink?.verificationMethod ?? null,
-        authMethod: bootstrapData.demoAuth?.method ?? null,
+        authMethod: bootstrapData.authorization?.status ?? null,
       });
 
       const res = await fetch(`${env.NEXT_PUBLIC_MRD_API_URL}/v1/mrd/elections/${electionId}/signup`, {
@@ -417,9 +416,9 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
           <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
               <span className="bg-indigo-100 text-indigo-700 w-6 h-6 flex items-center justify-center rounded-full text-xs">1</span>
-              Acceso al Demo
+              Acceso ciudadano
             </h2>
-            <span className="badge badge-info bg-indigo-100 text-indigo-800 uppercase tracking-wider text-[10px] font-bold">DNI + credencial demo</span>
+            <span className="badge badge-info bg-indigo-100 text-indigo-800 uppercase tracking-wider text-[10px] font-bold">DNI + autorización</span>
           </div>
           <div className="p-6 space-y-5">
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2">
@@ -428,25 +427,19 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
                 Identidad y elegibilidad Honduras
               </p>
               <p className="text-xs text-slate-600">
-                Ingresa tu DNI del censo del demo. Si el registro tiene PIN demo configurado, escríbelo también. El sistema emitirá el permiso REA automáticamente y registrará una wallet embebida si aún no existe.
+                Ingresa tu DNI. El sistema comprobará tu expediente, validará si estás autorizado para esta elección y emitirá el permiso REA automáticamente.
               </p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4">
               <input
                 className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder:text-slate-400"
                 placeholder="DNI hondureño"
                 value={dni}
                 onChange={(e) => setDni(e.target.value)}
               />
-              <input
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder:text-slate-400"
-                placeholder="PIN demo (si aplica)"
-                value={demoPin}
-                onChange={(e) => setDemoPin(e.target.value)}
-              />
             </div>
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900">
-              Este flujo elimina MetaMask y el JSON manual. La API de evidencias valida tu `DNI`, revisa habilitación, asegura una wallet embebida demo y genera el `SignupPermit` en tiempo real.
+              La API de evidencias valida tu `DNI`, comprueba que tu expediente esté autorizado para esta elección y emite el `SignupPermit` sin archivos manuales.
             </div>
             <button 
               onClick={handleSignup} 

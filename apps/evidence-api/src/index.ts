@@ -211,12 +211,55 @@ type HondurasWalletLinkRow = {
   revokedAt: Date | null;
 };
 
-type DemoBootstrapBody = {
-  dni?: string;
-  pin?: string;
+type HondurasEnrollmentRequestRow = {
+  requestId: string;
+  dni: string;
+  status: string;
+  requestedWalletAddress: string | null;
+  requestChannel: string;
+  requestNotes: string | null;
+  metadataJson: unknown;
+  reviewedBy: string | null;
+  reviewNotes: string | null;
+  requestedAt: Date;
+  reviewedAt: Date | null;
 };
 
-type DemoRegistryCredential = {
+type HondurasVoterAuthorizationRow = {
+  authorizationId: string;
+  chainId: string;
+  contractAddress: string;
+  electionId: string;
+  dni: string;
+  walletAddress: string;
+  enrollmentRequestId: string | null;
+  status: string;
+  authorizedBy: string | null;
+  authorizationNotes: string | null;
+  metadataJson: unknown;
+  authorizedAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+};
+
+type ElectionEnrollmentRequestRow = HondurasEnrollmentRequestRow & {
+  fullName: string | null;
+};
+
+type ElectionAuthorizationRow = HondurasVoterAuthorizationRow & {
+  fullName: string | null;
+  verificationMethod: string | null;
+  walletLinkStatus: string | null;
+};
+
+type EnrollmentRequestBody = {
+  dni?: string;
+  electionId?: string;
+  requestedWalletAddress?: string;
+  requestNotes?: string;
+};
+
+type EnrollmentRegistryCredential = {
   credentialVersion: "1";
   protocolVersion: "BU-PVP-1";
   credentialId: string;
@@ -240,7 +283,7 @@ function mapProofStateToResultMode(proofState: string | null | undefined): strin
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "VERIFIED";
   if (state === "TRANSCRIPT_VERIFIED") return "TRANSCRIPT_VERIFIED";
-  if (state === "SIMULATED") return "SIMULATED";
+  if (state === "SIMULATED") return "LEGACY_SIMULATED";
   if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
   return state;
 }
@@ -251,7 +294,7 @@ function honestyNoteForProofState(proofState: string | null | undefined): string
   if (state === "TRANSCRIPT_VERIFIED") {
     return "Descifrado y conteo reales con transcript comprometido en cadena; la verificación ZK sigue en un flujo separado.";
   }
-  if (state === "SIMULATED") return "Resultado marcado como simulado.";
+  if (state === "SIMULATED") return "Resultado heredado desde un flujo antiguo no verificable; no debe tratarse como publicación robusta.";
   return "Resultado aún no verificado.";
 }
 
@@ -422,12 +465,6 @@ function getActiveWalletLink(rows: HondurasWalletLinkRow[]): HondurasWalletLinkR
   );
 }
 
-function getDemoPinForRecord(record: HondurasCensusRow): string | null {
-  const metadata = getObjectRecord(record.metadataJson);
-  const pin = metadata.demoPin;
-  return typeof pin === "string" && pin.trim().length > 0 ? pin.trim() : null;
-}
-
 function deriveCredentialId(secretHex: string): string {
   return ethers.keccak256(secretHex).toLowerCase();
 }
@@ -464,7 +501,7 @@ async function issueSignupPermitLocally(params: {
   chainId: string;
   contractAddress: string;
   electionId: string;
-  credential: DemoRegistryCredential;
+  credential: EnrollmentRegistryCredential;
   reaPrivateKey: string;
 }) {
   const registryNullifier = deriveRegistryNullifier({
@@ -489,6 +526,57 @@ async function issueSignupPermitLocally(params: {
     issuedAt: new Date().toISOString(),
     issuerAddress: normalizeAddress(wallet.address),
     permitSig,
+  };
+}
+
+function normalizeHondurasEnrollmentRequest(row: HondurasEnrollmentRequestRow) {
+  return {
+    requestId: row.requestId,
+    dni: row.dni,
+    status: row.status,
+    requestedWalletAddress: row.requestedWalletAddress,
+    requestChannel: row.requestChannel,
+    requestNotes: row.requestNotes,
+    metadata: row.metadataJson ?? {},
+    reviewedBy: row.reviewedBy,
+    reviewNotes: row.reviewNotes,
+    requestedAt: row.requestedAt.toISOString(),
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+  };
+}
+
+function normalizeHondurasVoterAuthorization(row: HondurasVoterAuthorizationRow) {
+  return {
+    authorizationId: row.authorizationId,
+    chainId: row.chainId,
+    contractAddress: row.contractAddress,
+    electionId: row.electionId,
+    dni: row.dni,
+    walletAddress: row.walletAddress,
+    enrollmentRequestId: row.enrollmentRequestId,
+    status: row.status,
+    authorizedBy: row.authorizedBy,
+    authorizationNotes: row.authorizationNotes,
+    metadata: row.metadataJson ?? {},
+    authorizedAt: row.authorizedAt.toISOString(),
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function normalizeElectionEnrollmentRequest(row: ElectionEnrollmentRequestRow) {
+  return {
+    ...normalizeHondurasEnrollmentRequest(row),
+    fullName: row.fullName,
+  };
+}
+
+function normalizeElectionAuthorization(row: ElectionAuthorizationRow) {
+  return {
+    ...normalizeHondurasVoterAuthorization(row),
+    fullName: row.fullName,
+    verificationMethod: row.verificationMethod,
+    walletLinkStatus: row.walletLinkStatus,
   };
 }
 
@@ -670,7 +758,10 @@ async function main() {
         "/v1/hn/wallet-links/:dni",
         "/v1/hn/wallet-links/by-wallet/:wallet",
         "/v1/hn/eligibility/:dni",
-        "/v1/hn/demo/elections/:id/bootstrap-voter",
+        "/v1/hn/enrollment-requests",
+        "/v1/hn/enrollment/:dni",
+        "/v1/hn/elections/:id/prepare-signup",
+        "/v1/elections/:id/enrollment",
         "/v1/elections/:id/phases",
         "/v1/elections/:id/phase-changes",
         "/v1/elections/:id/candidates",
@@ -759,21 +850,102 @@ async function main() {
     return res.rows;
   }
 
-  async function ensureDemoWalletLinkForDni(record: HondurasCensusRow): Promise<HondurasWalletLinkRow> {
+  async function listHondurasEnrollmentRequestsByDni(dni: string): Promise<HondurasEnrollmentRequestRow[]> {
+    const res = await pool.query<HondurasEnrollmentRequestRow>(
+      `SELECT
+        request_id AS "requestId",
+        dni,
+        status,
+        requested_wallet_address AS "requestedWalletAddress",
+        request_channel AS "requestChannel",
+        request_notes AS "requestNotes",
+        metadata_json AS "metadataJson",
+        reviewed_by AS "reviewedBy",
+        review_notes AS "reviewNotes",
+        requested_at AS "requestedAt",
+        reviewed_at AS "reviewedAt"
+      FROM hn_enrollment_requests
+      WHERE dni=$1
+      ORDER BY requested_at DESC`,
+      [dni],
+    );
+    return res.rows;
+  }
+
+  async function listHondurasVoterAuthorizations(params: {
+    dni: string;
+    electionId?: string;
+  }): Promise<HondurasVoterAuthorizationRow[]> {
+    const values: unknown[] = [chainId, contractAddress, params.dni];
+    let query = `SELECT
+        authorization_id AS "authorizationId",
+        chain_id AS "chainId",
+        contract_address AS "contractAddress",
+        election_id::text AS "electionId",
+        dni,
+        wallet_address AS "walletAddress",
+        enrollment_request_id AS "enrollmentRequestId",
+        status,
+        authorized_by AS "authorizedBy",
+        authorization_notes AS "authorizationNotes",
+        metadata_json AS "metadataJson",
+        authorized_at AS "authorizedAt",
+        revoked_at AS "revokedAt",
+        created_at AS "createdAt"
+      FROM hn_voter_authorizations
+      WHERE chain_id=$1 AND contract_address=$2 AND dni=$3`;
+    if (params.electionId) {
+      values.push(BigInt(params.electionId));
+      query += ` AND election_id=$${values.length}`;
+    }
+    query += ` ORDER BY authorized_at DESC, created_at DESC`;
+    const res = await pool.query<HondurasVoterAuthorizationRow>(query, values);
+    return res.rows;
+  }
+
+  async function createEnrollmentRequest(params: {
+    dni: string;
+    requestedWalletAddress?: string | null;
+    electionId?: string | null;
+    requestNotes?: string | null;
+  }): Promise<HondurasEnrollmentRequestRow> {
+    const requestId = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO hn_enrollment_requests(
+        request_id, dni, status, requested_wallet_address, request_channel, request_notes, metadata_json
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        requestId,
+        params.dni,
+        "PENDING_REVIEW",
+        params.requestedWalletAddress ?? null,
+        "CITIZEN_PORTAL",
+        params.requestNotes ?? null,
+        JSON.stringify({ electionId: params.electionId ?? null }),
+      ],
+    );
+    const created = await listHondurasEnrollmentRequestsByDni(params.dni);
+    const latest = created[0];
+    if (!latest) throw new Error("enrollment_request_creation_failed");
+    return latest;
+  }
+
+  async function ensureManagedWalletLinkForDni(record: HondurasCensusRow): Promise<HondurasWalletLinkRow> {
     const links = await listHondurasWalletLinksByDni(record.dni);
     const active = getActiveWalletLink(links);
     if (active) {
       const evidence = getObjectRecord(active.evidenceJson);
       const hasSecret =
-        typeof evidence.demoCredentialSecretHex === "string" &&
-        /^0x[0-9a-fA-F]{64}$/.test(evidence.demoCredentialSecretHex);
+        typeof evidence.credentialSecretHex === "string" &&
+        /^0x[0-9a-fA-F]{64}$/.test(evidence.credentialSecretHex);
       if (hasSecret) {
         return active;
       }
 
       const seededEvidence = {
         ...evidence,
-        demoCredentialSecretHex: ethers.hexlify(ethers.randomBytes(32)).toLowerCase(),
+        credentialSecretHex: ethers.hexlify(ethers.randomBytes(32)).toLowerCase(),
+        walletProvisioningMode: "SYSTEM_MANAGED",
       };
       await pool.query(
         `UPDATE hn_wallet_links
@@ -790,9 +962,10 @@ async function main() {
 
     const embeddedWallet = ethers.Wallet.createRandom();
     const evidence = {
-      demoEmbeddedWallet: true,
-      demoPrivateKeyHex: embeddedWallet.privateKey.toLowerCase(),
-      demoCredentialSecretHex: ethers.hexlify(ethers.randomBytes(32)).toLowerCase(),
+      systemManagedWallet: true,
+      managedPrivateKeyHex: embeddedWallet.privateKey.toLowerCase(),
+      credentialSecretHex: ethers.hexlify(ethers.randomBytes(32)).toLowerCase(),
+      walletProvisioningMode: "SYSTEM_MANAGED",
     };
 
     await pool.query(
@@ -809,7 +982,7 @@ async function main() {
         record.dni,
         embeddedWallet.address.toLowerCase(),
         "ACTIVE",
-        "DEMO_SYSTEM",
+        "SYSTEM_MANAGED",
         JSON.stringify(evidence),
       ],
     );
@@ -822,7 +995,7 @@ async function main() {
     return createdActive;
   }
 
-  async function issueDemoSignupPermit(params: {
+  async function issueAuthorizedSignupPermit(params: {
     electionId: string;
     election: ElectionMetaRow;
     record: HondurasCensusRow;
@@ -838,19 +1011,19 @@ async function main() {
     }
 
     const evidence = getObjectRecord(params.walletLink.evidenceJson);
-    const demoCredentialSecretHex = evidence.demoCredentialSecretHex;
-    if (typeof demoCredentialSecretHex !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(demoCredentialSecretHex)) {
-      throw new Error("wallet_link_missing_demo_credential_secret");
+    const credentialSecretHex = evidence.credentialSecretHex ?? evidence.demoCredentialSecretHex;
+    if (typeof credentialSecretHex !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(credentialSecretHex)) {
+      throw new Error("wallet_link_missing_credential_secret");
     }
 
-    const credential: DemoRegistryCredential = {
+    const credential: EnrollmentRegistryCredential = {
       credentialVersion: "1",
       protocolVersion: "BU-PVP-1",
-      credentialId: deriveCredentialId(demoCredentialSecretHex),
+      credentialId: deriveCredentialId(credentialSecretHex),
       issuedAt: new Date().toISOString(),
       registryAuthority: params.election.registryAuthority,
       subjectLabel: `${params.record.dni}:${params.walletLink.walletAddress}`,
-      secretHex: demoCredentialSecretHex,
+      secretHex: credentialSecretHex,
     };
 
     const permit = await issueSignupPermitLocally({
@@ -942,9 +1115,11 @@ async function main() {
   app.get<{ Params: { dni: string } }>("/v1/hn/eligibility/:dni", async (req, reply) => {
     try {
       const dni = requireHondurasDni(req.params.dni);
-      const [record, links] = await Promise.all([
+      const [record, links, requests, authorizations] = await Promise.all([
         getHondurasCensusRecord(dni),
         listHondurasWalletLinksByDni(dni),
+        listHondurasEnrollmentRequestsByDni(dni),
+        listHondurasVoterAuthorizations({ dni }),
       ]);
 
       if (!record) {
@@ -959,6 +1134,8 @@ async function main() {
         dni,
         habilitado: String(record.habilitationStatus).toUpperCase() === "HABILITADO",
         record: normalizeHondurasCensusRecord(record),
+        latestRequest: requests[0] ? normalizeHondurasEnrollmentRequest(requests[0]) : null,
+        latestAuthorization: authorizations[0] ? normalizeHondurasVoterAuthorization(authorizations[0]) : null,
         walletLink: activeLink ? normalizeHondurasWalletLink(activeLink) : null,
         walletLinks: links.map(normalizeHondurasWalletLink),
       };
@@ -968,18 +1145,15 @@ async function main() {
     }
   });
 
-  app.post<{ Params: { id: string }; Body: DemoBootstrapBody }>(
-    "/v1/hn/demo/elections/:id/bootstrap-voter",
+  app.post<{ Body: EnrollmentRequestBody }>(
+    "/v1/hn/enrollment-requests",
     async (req, reply) => {
       try {
-        const electionId = requireElectionId(req.params.id);
         const dni = requireHondurasDni(String(req.body?.dni ?? ""));
-        const pin = String(req.body?.pin ?? "").trim();
-        const election = await getElectionMeta(electionId);
-        if (!election) {
-          reply.status(404);
-          return { ok: false, error: "election_not_found" };
-        }
+        const electionId = req.body?.electionId ? requireElectionId(String(req.body.electionId)) : null;
+        const requestedWalletAddress = req.body?.requestedWalletAddress
+          ? requireWalletAddress(String(req.body.requestedWalletAddress))
+          : null;
 
         const record = await getHondurasCensusRecord(dni);
         if (!record) {
@@ -987,28 +1161,127 @@ async function main() {
           return { ok: false, error: "dni_not_found", dni };
         }
 
-        if (String(record.habilitationStatus).toUpperCase() !== "HABILITADO") {
-          reply.status(403);
+        const existing = await listHondurasEnrollmentRequestsByDni(dni);
+        const latestPending = existing.find((row) => String(row.status).toUpperCase() === "PENDING_REVIEW");
+        if (latestPending) {
           return {
-            ok: false,
-            error: "dni_not_eligible",
+            ok: true,
             dni,
+            request: normalizeHondurasEnrollmentRequest(latestPending),
             record: normalizeHondurasCensusRecord(record),
+            idempotent: true,
           };
         }
 
-        const expectedPin = getDemoPinForRecord(record);
-        if (expectedPin && pin !== expectedPin) {
-          reply.status(401);
-          return { ok: false, error: "invalid_demo_pin", dni };
+        const request = await createEnrollmentRequest({
+          dni,
+          electionId,
+          requestedWalletAddress,
+          requestNotes: req.body?.requestNotes ? String(req.body.requestNotes) : null,
+        });
+
+        return {
+          ok: true,
+          dni,
+          request: normalizeHondurasEnrollmentRequest(request),
+          record: normalizeHondurasCensusRecord(record),
+        };
+      } catch (err: unknown) {
+        reply.status(400);
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  app.get<{ Params: { dni: string } }>("/v1/hn/enrollment/:dni", async (req, reply) => {
+    try {
+      const dni = requireHondurasDni(req.params.dni);
+      const [record, links, requests, authorizations] = await Promise.all([
+        getHondurasCensusRecord(dni),
+        listHondurasWalletLinksByDni(dni),
+        listHondurasEnrollmentRequestsByDni(dni),
+        listHondurasVoterAuthorizations({ dni }),
+      ]);
+
+      if (!record) {
+        reply.status(404);
+        return { ok: false, error: "dni_not_found", dni };
+      }
+
+      return {
+        ok: true,
+        dni,
+        record: normalizeHondurasCensusRecord(record),
+        latestRequest: requests[0] ? normalizeHondurasEnrollmentRequest(requests[0]) : null,
+        requests: requests.map(normalizeHondurasEnrollmentRequest),
+        walletLink: getActiveWalletLink(links) ? normalizeHondurasWalletLink(getActiveWalletLink(links)!) : null,
+        walletLinks: links.map(normalizeHondurasWalletLink),
+        authorizations: authorizations.map(normalizeHondurasVoterAuthorization),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: EnrollmentRequestBody }>(
+    "/v1/hn/elections/:id/prepare-signup",
+    async (req, reply) => {
+      try {
+        const electionId = requireElectionId(req.params.id);
+        const dni = requireHondurasDni(String(req.body?.dni ?? ""));
+        const election = await getElectionMeta(electionId);
+        if (!election) {
+          reply.status(404);
+          return { ok: false, error: "election_not_found" };
         }
 
-        const walletLink = await ensureDemoWalletLinkForDni(record);
-        const permit = await issueDemoSignupPermit({
+        const [record, authorizations, requests] = await Promise.all([
+          getHondurasCensusRecord(dni),
+          listHondurasVoterAuthorizations({ dni, electionId }),
+          listHondurasEnrollmentRequestsByDni(dni),
+        ]);
+        if (!record) {
+          reply.status(404);
+          return { ok: false, error: "dni_not_found", dni };
+        }
+        if (String(record.habilitationStatus).toUpperCase() !== "HABILITADO") {
+          reply.status(403);
+          return { ok: false, error: "dni_not_eligible", dni, record: normalizeHondurasCensusRecord(record) };
+        }
+
+        const activeAuthorization =
+          authorizations.find((row) => String(row.status).toUpperCase() === "AUTHORIZED" && !row.revokedAt) ?? null;
+        if (!activeAuthorization) {
+          reply.status(403);
+          return {
+            ok: false,
+            error: "voter_not_authorized_for_election",
+            dni,
+            latestRequest: requests[0] ? normalizeHondurasEnrollmentRequest(requests[0]) : null,
+          };
+        }
+
+        const walletLinks = await listHondurasWalletLinksByDni(dni);
+        const walletLink =
+          walletLinks.find(
+            (link) =>
+              link.walletAddress.toLowerCase() === activeAuthorization.walletAddress.toLowerCase() &&
+              String(link.linkStatus).toUpperCase() === "ACTIVE" &&
+              !link.revokedAt,
+          ) ?? getActiveWalletLink(walletLinks);
+        if (!walletLink) {
+          throw new Error("authorized_wallet_link_not_found");
+        }
+
+        const hardenedWalletLink = await ensureManagedWalletLinkForDni(record);
+        const permit = await issueAuthorizedSignupPermit({
           electionId,
           election,
           record,
-          walletLink,
+          walletLink: hardenedWalletLink.walletAddress.toLowerCase() === walletLink.walletAddress.toLowerCase()
+            ? hardenedWalletLink
+            : walletLink,
         });
 
         return {
@@ -1016,11 +1289,13 @@ async function main() {
           dni,
           electionId,
           record: normalizeHondurasCensusRecord(record),
-          walletLink: normalizeHondurasWalletLink(walletLink),
+          walletLink: normalizeHondurasWalletLink(
+            hardenedWalletLink.walletAddress.toLowerCase() === walletLink.walletAddress.toLowerCase()
+              ? hardenedWalletLink
+              : walletLink,
+          ),
           permit,
-          demoAuth: {
-            method: expectedPin ? "DNI_PIN" : "DNI_ONLY",
-          },
+          authorization: normalizeHondurasVoterAuthorization(activeAuthorization),
         };
       } catch (err: unknown) {
         const message = (err as Error).message;
@@ -2487,6 +2762,114 @@ async function main() {
           relatedBlockTimestamp: r.relatedBlockTimestamp?.toISOString() ?? null,
           resolvedAt: r.resolvedAt?.toISOString() ?? null,
         })),
+      };
+    } catch (err: unknown) {
+      reply.status(400);
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/v1/elections/:id/enrollment", async (req, reply) => {
+    try {
+      const electionId = requireElectionId(req.params.id);
+      const election = await getElectionMeta(electionId);
+      if (!election) {
+        reply.status(404);
+        return { ok: false, error: "election_not_found" };
+      }
+
+      const [requestsRes, authorizationsRes, requestCountsRes] = await Promise.all([
+        pool.query<ElectionEnrollmentRequestRow>(
+          `SELECT
+            r.request_id AS "requestId",
+            r.dni,
+            r.status,
+            r.requested_wallet_address AS "requestedWalletAddress",
+            r.request_channel AS "requestChannel",
+            r.request_notes AS "requestNotes",
+            r.metadata_json AS "metadataJson",
+            r.reviewed_by AS "reviewedBy",
+            r.review_notes AS "reviewNotes",
+            r.requested_at AS "requestedAt",
+            r.reviewed_at AS "reviewedAt",
+            v.full_name AS "fullName"
+          FROM hn_enrollment_requests r
+          LEFT JOIN hn_voter_registry v ON v.dni=r.dni
+          WHERE COALESCE(r.metadata_json->>'electionId', '') = $3
+          ORDER BY r.requested_at DESC
+          LIMIT 100`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query<ElectionAuthorizationRow>(
+          `SELECT
+            a.authorization_id AS "authorizationId",
+            a.chain_id AS "chainId",
+            a.contract_address AS "contractAddress",
+            a.election_id::text AS "electionId",
+            a.dni,
+            a.wallet_address AS "walletAddress",
+            a.enrollment_request_id AS "enrollmentRequestId",
+            a.status,
+            a.authorized_by AS "authorizedBy",
+            a.authorization_notes AS "authorizationNotes",
+            a.metadata_json AS "metadataJson",
+            a.authorized_at AS "authorizedAt",
+            a.revoked_at AS "revokedAt",
+            a.created_at AS "createdAt",
+            v.full_name AS "fullName",
+            w.verification_method AS "verificationMethod",
+            w.link_status AS "walletLinkStatus"
+          FROM hn_voter_authorizations a
+          LEFT JOIN hn_voter_registry v ON v.dni=a.dni
+          LEFT JOIN hn_wallet_links w ON w.dni=a.dni AND w.wallet_address=a.wallet_address
+          WHERE a.chain_id=$1 AND a.contract_address=$2 AND a.election_id=$3
+          ORDER BY a.authorized_at DESC, a.created_at DESC
+          LIMIT 100`,
+          [chainId, contractAddress, electionId],
+        ),
+        pool.query<{
+          totalRequests: number;
+          pendingReview: number;
+          approvedRequests: number;
+          rejectedRequests: number;
+        }>(
+          `SELECT
+            COUNT(*)::int AS "totalRequests",
+            COUNT(*) FILTER (WHERE status='PENDING_REVIEW')::int AS "pendingReview",
+            COUNT(*) FILTER (WHERE status='APPROVED')::int AS "approvedRequests",
+            COUNT(*) FILTER (WHERE status='REJECTED')::int AS "rejectedRequests"
+          FROM hn_enrollment_requests
+          WHERE COALESCE(metadata_json->>'electionId', '') = $1`,
+          [electionId],
+        ),
+      ]);
+
+      const activeAuthorizations = authorizationsRes.rows.filter(
+        (row) => String(row.status).toUpperCase() === "AUTHORIZED" && !row.revokedAt,
+      );
+      const activeWalletCoverage = activeAuthorizations.filter(
+        (row) =>
+          String(row.walletLinkStatus ?? "").toUpperCase() === "ACTIVE" &&
+          typeof row.walletAddress === "string" &&
+          row.walletAddress.length > 0,
+      ).length;
+
+      return {
+        ok: true,
+        chainId,
+        contractAddress,
+        electionId: electionId.toString(),
+        summary: {
+          totalRequests: requestCountsRes.rows[0]?.totalRequests ?? 0,
+          pendingReview: requestCountsRes.rows[0]?.pendingReview ?? 0,
+          approvedRequests: requestCountsRes.rows[0]?.approvedRequests ?? 0,
+          rejectedRequests: requestCountsRes.rows[0]?.rejectedRequests ?? 0,
+          totalAuthorizations: authorizationsRes.rows.length,
+          activeAuthorizations: activeAuthorizations.length,
+          activeWalletCoverage,
+        },
+        requests: requestsRes.rows.map(normalizeElectionEnrollmentRequest),
+        authorizations: authorizationsRes.rows.map(normalizeElectionAuthorization),
       };
     } catch (err: unknown) {
       reply.status(400);
