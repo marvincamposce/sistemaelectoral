@@ -8,22 +8,41 @@ export async function runWorkerLoop(pool: pg.Pool, provider: ethers.JsonRpcProvi
 
   while (true) {
     try {
-      const res = await pool.query(
-        `SELECT id, election_id, kind, payload FROM mrd_submissions 
-         WHERE status = 'PENDING' 
-         ORDER BY created_at ASC 
-         LIMIT 1 FOR UPDATE SKIP LOCKED`
-      );
+      // Bug 4.1 fix: Atomically SELECT + mark IN_FLIGHT inside a single transaction
+      // to prevent double-sending if the worker crashes between the two statements.
+      const client = await pool.connect();
+      let row: { id: string; election_id: string; kind: string; payload: any } | null = null;
+      try {
+        await client.query("BEGIN");
+        const res = await client.query(
+          `SELECT id, election_id, kind, payload FROM mrd_submissions 
+           WHERE status = 'PENDING' 
+           ORDER BY created_at ASC 
+           LIMIT 1 FOR UPDATE SKIP LOCKED`
+        );
 
-      if (res.rows.length === 0) {
-        await new Promise((r) => setTimeout(r, 2000));
-        continue;
+        if (res.rows.length === 0) {
+          await client.query("COMMIT");
+          client.release();
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+
+        row = res.rows[0] as { id: string; election_id: string; kind: string; payload: any };
+        await client.query(
+          `UPDATE mrd_submissions SET status = 'IN_FLIGHT', updated_at = NOW() WHERE id = $1`,
+          [row!.id],
+        );
+        await client.query("COMMIT");
+      } catch (lockErr) {
+        await client.query("ROLLBACK");
+        throw lockErr;
+      } finally {
+        client.release();
       }
 
-      const row = res.rows[0];
-      const { id, election_id, kind, payload } = row;
-
-      await pool.query(`UPDATE mrd_submissions SET status = 'IN_FLIGHT', updated_at = NOW() WHERE id = $1`, [id]);
+      // row is guaranteed non-null here — the null case is handled by the `continue` above.
+      const { id, election_id, kind, payload } = row!;
 
       try {
         let tx;
@@ -54,6 +73,25 @@ export async function runWorkerLoop(pool: pg.Pool, provider: ethers.JsonRpcProvi
       } catch (err: any) {
         console.error("Relayer execution error:", err);
         const errMsg = err?.message || String(err);
+
+        // Bug 4.2 fix: Before marking FAILED, check if the tx was actually mined.
+        // tx.wait() can throw on timeout/network even if the tx succeeded on-chain.
+        const txHash = err?.transaction?.hash ?? err?.transactionHash ?? null;
+        if (txHash) {
+          try {
+            const receipt = await provider.getTransactionReceipt(txHash);
+            if (receipt && receipt.status === 1) {
+              console.warn(`Worker: tx ${txHash} was mined successfully despite wait() error. Marking SUCCESS.`);
+              await pool.query(
+                `UPDATE mrd_submissions SET status = 'SUCCESS', tx_hash = $1, updated_at = NOW() WHERE id = $2`,
+                [txHash, id],
+              );
+              continue;
+            }
+          } catch {
+            // Receipt lookup failed — fall through to FAILED
+          }
+        }
         
         await pool.query(
           `UPDATE mrd_submissions SET status = 'FAILED', error_message = $1, updated_at = NOW() WHERE id = $2`,

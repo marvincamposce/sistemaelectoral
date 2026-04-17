@@ -152,22 +152,8 @@ CREATE INDEX IF NOT EXISTS acta_contents_election_idx
 CREATE UNIQUE INDEX IF NOT EXISTS acta_contents_content_hash_uniq
   ON acta_contents(chain_id, contract_address, election_id, content_hash);
 
-CREATE TABLE IF NOT EXISTS signups (
-  chain_id TEXT NOT NULL,
-  contract_address TEXT NOT NULL,
-  tx_hash TEXT NOT NULL,
-  log_index INTEGER NOT NULL,
-  block_number BIGINT NOT NULL,
-  block_timestamp TIMESTAMPTZ,
-  election_id BIGINT NOT NULL,
-  registry_nullifier TEXT NOT NULL,
-  voting_pub_key TEXT NOT NULL,
-  PRIMARY KEY (chain_id, contract_address, tx_hash, log_index)
-);
-ALTER TABLE signups
-  ADD COLUMN IF NOT EXISTS block_timestamp TIMESTAMPTZ;
-CREATE INDEX IF NOT EXISTS signups_election_idx
-  ON signups(chain_id, contract_address, election_id, block_number, log_index);
+
+/* Legacy signups table removed. Use signup_records exclusively. */
 
 CREATE TABLE IF NOT EXISTS signup_records (
   chain_id TEXT NOT NULL,
@@ -290,23 +276,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS hn_voter_authorizations_active_dni_uniq
   ON hn_voter_authorizations(chain_id, contract_address, election_id, dni)
   WHERE status = 'AUTHORIZED' AND revoked_at IS NULL;
 
-CREATE TABLE IF NOT EXISTS ballots (
-  chain_id TEXT NOT NULL,
-  contract_address TEXT NOT NULL,
-  tx_hash TEXT NOT NULL,
-  log_index INTEGER NOT NULL,
-  block_number BIGINT NOT NULL,
-  block_timestamp TIMESTAMPTZ,
-  election_id BIGINT NOT NULL,
-  ballot_index BIGINT NOT NULL,
-  ballot_hash TEXT NOT NULL,
-  ciphertext TEXT NOT NULL,
-  PRIMARY KEY (chain_id, contract_address, tx_hash, log_index)
-);
-ALTER TABLE ballots
-  ADD COLUMN IF NOT EXISTS block_timestamp TIMESTAMPTZ;
-CREATE INDEX IF NOT EXISTS ballots_election_idx
-  ON ballots(chain_id, contract_address, election_id, block_number, log_index);
+
+/* Legacy ballots table removed. Use ballot_records exclusively. */
 
 CREATE TABLE IF NOT EXISTS ballot_records (
   chain_id TEXT NOT NULL,
@@ -588,8 +559,6 @@ export async function resetEvidenceForContract(params: {
   await pool.query("DELETE FROM acta_contents WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM signup_records WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM ballot_records WHERE chain_id=$1 AND contract_address=$2", args);
-  await pool.query("DELETE FROM signups WHERE chain_id=$1 AND contract_address=$2", args);
-  await pool.query("DELETE FROM ballots WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM tally_proofs WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM processing_batches WHERE chain_id=$1 AND contract_address=$2", args);
   await pool.query("DELETE FROM tally_jobs WHERE chain_id=$1 AND contract_address=$2", args);

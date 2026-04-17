@@ -3,7 +3,7 @@ import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { ethers } from "ethers";
-import { canonicalizeJson, sha256Hex, verifySignedSnapshot, verifyActaECDSASignature } from "@blockurna/crypto";
+import { verifyActaECDSASignature } from "@blockurna/crypto";
 
 import { getEnv } from "./env.js";
 import { createPool, ensureSchema } from "./db.js";
@@ -282,6 +282,9 @@ function isWarningSeverity(severity: string): boolean {
 function mapProofStateToResultMode(proofState: string | null | undefined): string {
   const state = String(proofState ?? "").toUpperCase();
   if (state === "VERIFIED") return "VERIFIED";
+  // Bug 5.1 fix: Add missing mappings that exist in tally-board to ensure consistency.
+  if (state === "TALLY_VERIFIED_ONCHAIN") return "PENDING_ZK_DECRYPTION";
+  if (state === "TRANSCRIPT_COMMITTED") return "PENDING";
   if (state === "TRANSCRIPT_VERIFIED") return "TRANSCRIPT_VERIFIED";
   if (state === "SIMULATED") return "LEGACY_SIMULATED";
   if (state === "NOT_IMPLEMENTED" || state.length === 0) return "PENDING";
@@ -344,7 +347,10 @@ function requireElectionId(id: string): string {
   if (!/^[0-9]+$/.test(id)) {
     throw new Error("Invalid election id");
   }
-  return id;
+  // Bug 8.2 fix: Normalize to canonical form by stripping leading zeros.
+  // Without this, JS string comparisons of "01" vs "1" would fail even though
+  // PostgreSQL BIGINT treats both identically, causing silent data mismatches.
+  return String(BigInt(id));
 }
 
 function requireHondurasDni(dni: string): string {
@@ -785,7 +791,33 @@ async function main() {
 
   app.get("/healthz", async () => {
     await pool.query("SELECT 1");
-    return { ok: true };
+
+    // Bug 8.1 fix: Expose indexer lag info so clients (e.g. voter portal)
+    // can calculate appropriate polling timeouts based on actual indexer lag.
+    const indexerStateRes = await pool.query<{
+      last_indexed_block: string | null;
+      next_block: string;
+      updated_at: Date;
+    }>(
+      `SELECT last_indexed_block::text, next_block::text, updated_at
+       FROM indexer_state
+       ORDER BY updated_at DESC
+       LIMIT 1`
+    );
+    const indexerState = indexerStateRes.rows[0] ?? null;
+
+    return {
+      ok: true,
+      indexer: indexerState
+        ? {
+            lastIndexedBlock: indexerState.last_indexed_block
+              ? Number(indexerState.last_indexed_block)
+              : null,
+            nextBlock: Number(indexerState.next_block),
+            updatedAt: indexerState.updated_at?.toISOString() ?? null,
+          }
+        : null,
+    };
   });
 
   async function getHondurasCensusRecord(dni: string): Promise<HondurasCensusRow | null> {
@@ -3215,7 +3247,7 @@ async function main() {
     "/v1/elections/:id/zk-proof",
     async (req, reply) => {
       try {
-        const electionId = BigInt(req.params.id);
+        const electionId = requireElectionId(req.params.id);
         const res = await pool.query<{
           jobId: string;
           tallyJobId: string;

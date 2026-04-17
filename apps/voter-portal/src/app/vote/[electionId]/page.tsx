@@ -111,10 +111,29 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.step) setStep(parsed.step);
+        const recoveredStep = parsed.step as WizardStep | undefined;
+        const recoveredKeys = parsed.votingKeys as { pub: string; priv?: string } | null;
+
+        // Bug R2-3: If recovering to a step that requires the private key
+        // (VOTING or BALLOT_FLIGHT) but the key was not persisted (per Bug 2.1
+        // security fix), gracefully degrade to SETUP instead of letting the
+        // user encounter a crash when trying to sign the ballot.
+        const needsPrivKey = recoveredStep === "VOTING" || recoveredStep === "BALLOT_FLIGHT";
+        if (needsPrivKey && (!recoveredKeys?.priv)) {
+          setStep("SETUP");
+          if (parsed.dni) setDni(parsed.dni);
+          if (parsed.voterIdentity) setVoterIdentity(parsed.voterIdentity);
+          setErrorMsg(
+            "Tu sesión fue restaurada pero la clave de votación no se pudo recuperar por seguridad. " +
+            "Debes volver a registrarte para emitir tu voto."
+          );
+          return;
+        }
+
+        if (recoveredStep) setStep(recoveredStep);
         if (parsed.dni) setDni(parsed.dni);
         if (parsed.voterIdentity) setVoterIdentity(parsed.voterIdentity);
-        if (parsed.votingKeys) setVotingKeys(parsed.votingKeys);
+        if (recoveredKeys) setVotingKeys(recoveredKeys as { pub: string; priv: string });
         if (parsed.subId) setSubId(parsed.subId);
         if (parsed.ballotHash) setBallotHash(parsed.ballotHash);
         if (parsed.txHash) setTxHash(parsed.txHash);
@@ -125,12 +144,18 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
     }
   }, [electionId]);
 
-  // Persistence
+  // Persistence — Bug 2.1 fix: DO NOT persist votingKeys.priv in sessionStorage.
+  // Private keys in sessionStorage are vulnerable to XSS exfiltration.
+  // Only persist the public address for session recovery; the private key
+  // lives solely in React state and is lost on page refresh.
   useEffect(() => {
     if (step === "RECEIPT") {
       sessionStorage.removeItem(`bu_vote_state_${electionId}`);
     } else {
-      const state = { step, dni, voterIdentity, votingKeys, subId, ballotHash, txHash, selection };
+      const safeVotingKeys = votingKeys
+        ? { pub: votingKeys.pub }
+        : null;
+      const state = { step, dni, voterIdentity, votingKeys: safeVotingKeys, subId, ballotHash, txHash, selection };
       sessionStorage.setItem(`bu_vote_state_${electionId}`, JSON.stringify(state));
     }
   }, [step, dni, voterIdentity, votingKeys, subId, ballotHash, txHash, selection, electionId]);
@@ -229,8 +254,14 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         throw new Error("La clave pública del coordinador no está disponible para esta elección.");
       }
 
-      const selectionIndex = Number(selectedCandidate.ballotOrder) - 1;
-      if (!Number.isInteger(selectionIndex) || selectionIndex < 0) {
+      // Bug 2.4 fix: Use positional index in the sorted candidates array, not ballotOrder - 1.
+      // ballotOrder may be non-sequential (e.g. [1, 3, 5]), which would produce non-contiguous
+      // indices that break ZK circuit expectations requiring [0, 1, 2, ...].
+      const activeCandidatesSorted = candidates
+        .filter((c: any) => String(c.status ?? "ACTIVE").toUpperCase() === "ACTIVE")
+        .sort((a: any, b: any) => Number(a.ballotOrder) - Number(b.ballotOrder));
+      const selectionIndex = activeCandidatesSorted.findIndex((c: any) => c.id === selectedCandidate.id);
+      if (selectionIndex < 0) {
         throw new Error("No se pudo calcular un índice de selección válido para la boleta.");
       }
 
@@ -344,7 +375,23 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     if (step === "SIGNUP_FLIGHT" || step === "BALLOT_FLIGHT") {
+      // Bug 2.3 fix: Add a 2-minute timeout to prevent infinite polling.
+      // If the relayer/indexer fails permanently, the user gets a clear error
+      // instead of being trapped in a spinner forever.
+      const POLLING_TIMEOUT_MS = 120_000;
+      timeout = setTimeout(() => {
+        clearInterval(interval);
+        setErrorMsg(
+          "La operación está tardando más de lo esperado. " +
+          "Es posible que tu transacción ya se haya procesado — verifica en el portal de observación. " +
+          "Si el problema persiste, contacta al soporte."
+        );
+        if (step === "SIGNUP_FLIGHT") setStep("SETUP");
+        if (step === "BALLOT_FLIGHT") setStep("VOTING");
+      }, POLLING_TIMEOUT_MS);
+
       interval = setInterval(async () => {
         if (!subId) return;
         try {
@@ -394,7 +441,10 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         }
       }, 3000);
     }
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
   }, [step, subId, electionId, env.NEXT_PUBLIC_EVIDENCE_API_URL, env.NEXT_PUBLIC_MRD_API_URL]);
 
   return (
@@ -616,7 +666,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
               </div>
             </div>
             <a 
-              href={`${env.NEXT_PUBLIC_EVIDENCE_API_URL.replace("8000", "3011")}`} 
+              href={`${env.NEXT_PUBLIC_OBSERVER_PORTAL_URL}`} 
               target="_blank" 
               className="w-full flex justify-center items-center gap-2 bg-slate-100 text-slate-700 py-4 px-4 rounded-xl text-xs font-bold uppercase tracking-wide hover:bg-slate-200 hover:text-slate-900 transition-all border border-slate-200"
             >

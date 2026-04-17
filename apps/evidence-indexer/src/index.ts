@@ -50,10 +50,6 @@ async function pickCanaryTx(params: {
        SELECT tx_hash, block_number, log_index FROM signup_records WHERE chain_id=$1 AND contract_address=$2
        UNION ALL
        SELECT tx_hash, block_number, log_index FROM ballot_records WHERE chain_id=$1 AND contract_address=$2
-       UNION ALL
-       SELECT tx_hash, block_number, log_index FROM signups WHERE chain_id=$1 AND contract_address=$2
-       UNION ALL
-       SELECT tx_hash, block_number, log_index FROM ballots WHERE chain_id=$1 AND contract_address=$2
      ) t
      ORDER BY block_number DESC, log_index DESC
      LIMIT 1`,
@@ -303,9 +299,18 @@ async function upsertActaContent(params: {
       canonical_json=EXCLUDED.canonical_json,
       signed_json=EXCLUDED.signed_json,
       signature=EXCLUDED.signature,
-      signer_key_id=EXCLUDED.signer_key_id,
-      signer_public_key=EXCLUDED.signer_public_key,
-      content_hash=EXCLUDED.content_hash`,
+      signer_key_id=COALESCE(EXCLUDED.signer_key_id, acta_contents.signer_key_id),
+      signer_public_key=COALESCE(EXCLUDED.signer_public_key, acta_contents.signer_public_key),
+      content_hash=EXCLUDED.content_hash,
+      -- Bug 8.3 fix: Preserve optional metadata fields that tally-board may have already written.
+      -- The indexer loads from disk and does not populate these, so COALESCE keeps existing values.
+      verification_status=COALESCE(acta_contents.verification_status, EXCLUDED.verification_status),
+      signature_scheme=COALESCE(acta_contents.signature_scheme, EXCLUDED.signature_scheme),
+      signer_address=COALESCE(acta_contents.signer_address, EXCLUDED.signer_address),
+      signing_digest=COALESCE(acta_contents.signing_digest, EXCLUDED.signing_digest),
+      signer_role=COALESCE(acta_contents.signer_role, EXCLUDED.signer_role),
+      expected_signer_address=COALESCE(acta_contents.expected_signer_address, EXCLUDED.expected_signer_address),
+      signing_payload=COALESCE(acta_contents.signing_payload, EXCLUDED.signing_payload)`,
     [
       chainId,
       contractAddress,
@@ -685,40 +690,14 @@ async function resolveRecoveredRelayerIncidents(params: {
   }
 }
 
-async function migrateLegacyEventTables(params: {
+// Legacy migration function removed — signups/ballots tables are fully deprecated.
+// All data now flows exclusively through signup_records/ballot_records.
+async function migrateLegacyEventTables(_params: {
   pool: ReturnType<typeof createPool>;
   chainId: string;
   contractAddress: string;
 }): Promise<void> {
-  const { pool, chainId, contractAddress } = params;
-
-  await pool.query(
-    `INSERT INTO signup_records(
-      chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
-      election_id, registry_nullifier, voting_pub_key
-    )
-    SELECT
-      chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
-      election_id, registry_nullifier, voting_pub_key
-    FROM signups
-    WHERE chain_id=$1 AND contract_address=$2
-    ON CONFLICT DO NOTHING`,
-    [chainId, contractAddress],
-  );
-
-  await pool.query(
-    `INSERT INTO ballot_records(
-      chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
-      election_id, ballot_index, ballot_hash, ciphertext
-    )
-    SELECT
-      chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
-      election_id, ballot_index, ballot_hash, ciphertext
-    FROM ballots
-    WHERE chain_id=$1 AND contract_address=$2
-    ON CONFLICT DO NOTHING`,
-    [chainId, contractAddress],
-  );
+  // No-op: legacy tables are no longer used.
 }
 
 async function backfillMissingBlockTimestamps(params: {
@@ -735,10 +714,6 @@ async function backfillMissingBlockTimestamps(params: {
       SELECT block_number FROM phase_changes WHERE chain_id=$1 AND contract_address=$2 AND block_timestamp IS NULL
       UNION
       SELECT block_number FROM acta_anchors WHERE chain_id=$1 AND contract_address=$2 AND block_timestamp IS NULL
-      UNION
-      SELECT block_number FROM signups WHERE chain_id=$1 AND contract_address=$2 AND block_timestamp IS NULL
-      UNION
-      SELECT block_number FROM ballots WHERE chain_id=$1 AND contract_address=$2 AND block_timestamp IS NULL
       UNION
       SELECT block_number FROM signup_records WHERE chain_id=$1 AND contract_address=$2 AND block_timestamp IS NULL
       UNION
@@ -761,14 +736,6 @@ async function backfillMissingBlockTimestamps(params: {
     );
     await pool.query(
       "UPDATE acta_anchors SET block_timestamp=$4 WHERE chain_id=$1 AND contract_address=$2 AND block_number=$3 AND block_timestamp IS NULL",
-      [chainId, contractAddress, blockNumber, ts],
-    );
-    await pool.query(
-      "UPDATE signups SET block_timestamp=$4 WHERE chain_id=$1 AND contract_address=$2 AND block_number=$3 AND block_timestamp IS NULL",
-      [chainId, contractAddress, blockNumber, ts],
-    );
-    await pool.query(
-      "UPDATE ballots SET block_timestamp=$4 WHERE chain_id=$1 AND contract_address=$2 AND block_number=$3 AND block_timestamp IS NULL",
       [chainId, contractAddress, blockNumber, ts],
     );
     await pool.query(
@@ -1801,25 +1768,6 @@ async function main() {
           touchedElectionIds.add(electionId.toString());
 
           await client.query(
-            `INSERT INTO signups(
-              chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
-              election_id, registry_nullifier, voting_pub_key
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            ON CONFLICT DO NOTHING`,
-            [
-              chainId,
-              contractAddress,
-              txHash,
-              logIndex,
-              blockNumber,
-              blockTimestamp,
-              electionId.toString(),
-              registryNullifier,
-              votingPubKey,
-            ],
-          );
-
-          await client.query(
             `INSERT INTO signup_records(
               chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
               election_id, registry_nullifier, voting_pub_key
@@ -1849,26 +1797,6 @@ async function main() {
           touchedElectionIds.add(electionId.toString());
 
           await client.query(
-            `INSERT INTO ballots(
-              chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
-              election_id, ballot_index, ballot_hash, ciphertext
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-            ON CONFLICT DO NOTHING`,
-            [
-              chainId,
-              contractAddress,
-              txHash,
-              logIndex,
-              blockNumber,
-              blockTimestamp,
-              electionId.toString(),
-              ballotIndex.toString(),
-              ballotHash,
-              ciphertext,
-            ],
-          );
-
-          await client.query(
             `INSERT INTO ballot_records(
               chain_id, contract_address, tx_hash, log_index, block_number, block_timestamp,
               election_id, ballot_index, ballot_hash, ciphertext
@@ -1887,8 +1815,11 @@ async function main() {
               ciphertext,
             ],
           );
+          continue;
         }
 
+        // Bug 3.1 fix: Add missing `continue` to match all other event handlers
+        // and prevent fallthrough to subsequent if-blocks.
         if (parsed.name === "TallyProofPublished") {
           const electionId = (parsed.args as any).electionId as bigint;
           const proofHash = String((parsed.args as any).proofHash);

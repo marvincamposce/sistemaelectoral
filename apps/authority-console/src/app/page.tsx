@@ -442,7 +442,7 @@ export default async function Page() {
   const electionsWithActivity = elections.filter(
     (e) => Number(e.counts?.signups ?? 0) > 0 || Number(e.counts?.ballots ?? 0) > 0,
   ).length;
-  const latestElection = elections[0] ?? null;
+  const latestElection = elections.length > 0 ? elections[elections.length - 1] : null;
 
   return (
     <main className="min-h-screen text-slate-900">

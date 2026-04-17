@@ -101,7 +101,8 @@ app.post("/v1/mrd/elections/:electionId/signup", async (request, reply) => {
     return reply.status(auth.status).send({ ok: false, error: auth.error });
   }
 
-  const { electionId } = request.params as any;
+  const { electionId: rawElectionId } = request.params as any;
+  const electionId = /^[0-9]+$/.test(rawElectionId) ? String(BigInt(rawElectionId)) : rawElectionId;
   const payload = request.body as any;
 
   if (!payload.registryNullifier || !payload.votingPubKey || !payload.permitSig) {
@@ -132,7 +133,8 @@ app.post("/v1/mrd/elections/:electionId/ballot", async (request, reply) => {
     return reply.status(auth.status).send({ ok: false, error: auth.error });
   }
 
-  const { electionId } = request.params as any;
+  const { electionId: rawElectionId } = request.params as any;
+  const electionId = /^[0-9]+$/.test(rawElectionId) ? String(BigInt(rawElectionId)) : rawElectionId;
   const payload = request.body as any;
   const ciphertext = typeof payload?.ciphertext === "string" ? payload.ciphertext : "";
   const votingPubKey = typeof payload?.votingPubKey === "string" ? payload.votingPubKey : "";
@@ -180,10 +182,16 @@ app.post("/v1/mrd/elections/:electionId/ballot", async (request, reply) => {
   return { ok: true, submissionId: res.rows[0].id };
 });
 
+// Bug 4.3 fix: GET is a read-only status poll. Use a lighter auth that allows
+// loopback access without origin, and only requires origin for non-loopback hosts.
 app.get("/v1/mrd/submissions/:id", async (request, reply) => {
-  const auth = authorizeSubmissionRequest(request);
-  if (!auth.ok) {
-    return reply.status(auth.status).send({ ok: false, error: auth.error });
+  const origin = getOrigin(request);
+  const clientIp = getClientIp(request);
+  const isLoopback = isLoopbackHost(clientIp);
+
+  // Allow loopback without origin (e.g. internal health checks, curl)
+  if (!isLoopback && (!origin || !env.ALLOWED_ORIGINS.includes(origin))) {
+    return reply.status(403).send({ ok: false, error: "Origin not allowed for MRD relayer" });
   }
 
   const { id } = request.params as any;
