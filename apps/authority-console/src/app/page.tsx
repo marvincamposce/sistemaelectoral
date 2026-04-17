@@ -426,7 +426,7 @@ export default async function Page() {
 
   const env = envRes.env;
   const defaultFormValues = {
-    title: `Elección Experimental ${new Date().getFullYear()}`,
+    title: `Elección Local Reproducible ${new Date().getFullYear()}`,
     notes: "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
     registryAuthority: resolveDefaultRegistryAuthority(env.AEA_PRIVATE_KEY),
     coordinatorPubKey: resolveDefaultCoordinatorPubKey(),

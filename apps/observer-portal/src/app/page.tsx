@@ -1325,7 +1325,7 @@ export default async function Page() {
                           )}
 
                           <div style={{ fontSize: "0.6875rem", color: "#64748b", marginBottom: "0.5rem" }}>
-                            Inclusión Merkle 9B: {e.zkProof.merkleInclusionVerified ? "verificada" : "pendiente"}
+                            Inclusión Merkle del escrutinio: {e.zkProof.merkleInclusionVerified ? "verificada" : "pendiente"}
                           </div>
 
                           {e.zkProof.merkleRootPoseidon && (
@@ -1344,7 +1344,7 @@ export default async function Page() {
                               fontSize: "0.6875rem",
                               color: "#854d0e",
                             }}>
-                              <strong>Pendiente de prueba ZK:</strong>
+                              <strong>Pendientes criptográficos:</strong>
                               <ul style={{ margin: "0.25rem 0 0 1rem", padding: 0 }}>
                                 {e.zkProofHonesty.whatIsNotProved.map((item: string, idx: number) => (
                                   <li key={idx}>{item}</li>
@@ -1368,7 +1368,7 @@ export default async function Page() {
                               }}
                             >
                               <div style={{ fontSize: "0.75rem", color: "#334155", fontWeight: 600 }}>
-                                Estado prueba de descifrado (9D): {e.decryptionProof.status}
+                                Estado de prueba de descifrado: {e.decryptionProof.status}
                               </div>
                               <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.25rem" }}>
                                 {e.decryptionProof.proofSystem} · {e.decryptionProof.circuitId} · Job {e.decryptionProof.jobId}
@@ -1559,7 +1559,7 @@ export default async function Page() {
                         </p>
                         <ul style={{ paddingLeft: "1.25rem", listStyle: "disc", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
                           <li><strong>Firma ECDSA del acta:</strong> REAL — verificable end-to-end con SECP256K1.</li>
-                          <li><strong>Prueba interactiva ZK (JED):</strong> SIMULADA — el kernel ZK aún no está integrado.</li>
+                          <li><strong>Pipeline ZK de escrutinio (JED):</strong> OPERATIVO - el kernel ZK esta integrado; revisa el panel "Prueba ZK" para el estado puntual (off-chain, on-chain y descifrado 9D).</li>
                           <li><strong>canonicalJson:</strong> Estructura canónica del contenido del acta.</li>
                           <li><strong>contentHash:</strong> Keccak256 sobre canonicalJson.</li>
                           <li><strong>signingDigest:</strong> Keccak256 sobre el signingPayload (contentHash prefijado).</li>

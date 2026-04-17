@@ -1,6 +1,6 @@
-# Casos de Prueba Experimentales (BU‑PVP‑1)
+# Casos de Prueba de Validación Reproducible (BU‑PVP‑1)
 
-Este documento define los escenarios experimentales nominales y adversariales a ejecutar durante la validación.
+Este documento define los escenarios nominales y adversariales para la validación reproducible del protocolo.
 
 ## A. Flujo nominal completo
 

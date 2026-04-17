@@ -514,7 +514,7 @@ export default async function HondurasPage(props: {
                   placeholder={`[
   {
     "dni": "0801199912345",
-    "fullName": "Ciudadana Demo",
+    "fullName": "Ciudadana Ejemplo",
     "habilitationStatus": "HABILITADO",
     "statusReason": "Verificado internamente",
     "source": "CENSO_HN_2026"

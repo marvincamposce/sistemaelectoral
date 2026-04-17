@@ -7,7 +7,7 @@ import { ethers } from "ethers";
 import { Pool } from "pg";
 
 import {
-  generateExperimentalRegistryCredential,
+  generateRegistryCredential,
   issueSignupPermit,
   verifyActaAnchoredOnChain,
   verifyActaFile,
@@ -437,7 +437,7 @@ program
   .option("--subject <label>", "Etiqueta del sujeto (opcional)")
   .option("--out <path>", "Ruta de salida (JSON)")
   .action(async (opts) => {
-    const credential = generateExperimentalRegistryCredential({
+    const credential = generateRegistryCredential({
       registryAuthority: opts.registryAuthority,
       subjectLabel: opts.subject,
     });

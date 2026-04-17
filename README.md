@@ -87,7 +87,7 @@ Este modo desacopla el portal del RPC: un indexer consume el RPC y persiste evid
 docker compose -f infra/compose/docker-compose.yml up -d
 ```
 
-2) Levanta un nodo local y crea evidencias experimentales:
+2) Levanta un nodo local y crea evidencias del entorno local reproducible:
 
 ```bash
 pnpm --filter @blockurna/contracts node

@@ -11,7 +11,7 @@ type CreateElectionFormDefaults = {
 };
 
 const FALLBACK_DEFAULTS: CreateElectionFormDefaults = {
-  title: "Elección Experimental BU-PVP-1",
+  title: "Elección Local Reproducible BU-PVP-1",
   notes: "Configuración local reproducible para pruebas de flujo electoral y auditoría.",
   registryAuthority: "",
   coordinatorPubKey: "0x1111111111111111111111111111111111111111111111111111111111111111",

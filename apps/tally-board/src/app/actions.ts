@@ -1335,7 +1335,7 @@ export async function createResultPayloadAction(
         };
       }
     }
-    const resultKind = options?.resultKind ?? "EXPERIMENTAL";
+    const resultKind = options?.resultKind ?? "LOCAL_REPRODUCIBLE";
     const publicationStatus = options?.publicationStatus ?? "PUBLISHED";
 
     const candidates = await loadElectionCandidates({
@@ -1603,7 +1603,7 @@ export async function generateZkProofAction(
       return {
         ok: false,
         error:
-          "Transcript missing allBallotHashes for Fase 9B witness generation or length mismatch with ballotsCount.",
+          "Transcript missing allBallotHashes for witness generation or length mismatch with ballotsCount.",
       };
     }
 
@@ -1864,7 +1864,7 @@ export async function generateZkProofAction(
           ...(decryptionVerified
             ? []
             : ["Descifrado correcto de ciphertexts (requiere circuito de descifrado)"]),
-          "Verificación en cadena (fase 9C)",
+          "Verificación en cadena",
         ],
         auditabilityNote: "El transcript completo permanece disponible para auditoría independiente fuera de cadena",
       },

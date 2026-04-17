@@ -353,7 +353,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
       const derivedRoot = tallyData.merkleRoot;
       addLog(`Raíz Merkle real (hash) derivada desde los ciphertexts: ${derivedRoot}`);
-      addLog(`Raíz Merkle Poseidon (fase 9B): ${tallyData.merkleRootPoseidon}`);
+      addLog(`Raíz Merkle Poseidon (inclusión verificable): ${tallyData.merkleRootPoseidon}`);
       addLog(
         `Conteo real listo. Válidas=${tallyData.validCount}, inválidas=${tallyData.invalidCount}. Resumen=${JSON.stringify(tallyData.summary)}`,
       );
@@ -883,7 +883,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                               Ejecutando transacción en cadena...
                             </>
                           ) : (
-                            "Verificar prueba en cadena (fase 9C)"
+                            "Verificar prueba en cadena"
                           )}
                         </button>
                       </div>

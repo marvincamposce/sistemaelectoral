@@ -22,7 +22,7 @@ BlockUrna no se presenta como apto para elecciones públicas vinculantes ni desp
 6. Arquitectura del sistema (TPE, indexación, observación, auditoría)
 7. Cadena de custodia digital y actas verificables
 8. Modelo de amenazas y supuestos de seguridad
-9. Metodología experimental, métricas y validación
+9. Metodología de validación reproducible y métricas
 10. Resultados (a completar)
 11. Discusión, limitaciones y trabajo futuro
 12. Conclusiones
@@ -141,15 +141,15 @@ Ver `docs/threat-model/ThreatModel.md` (a completar) y ADRs.
 
 ---
 
-## 9. Metodología experimental
+## 9. Metodología de validación reproducible
 
 ### 9.1 Métricas
 
-Definir métricas técnicas y experimentales (latencias, costos, reproducibilidad, detección de inconsistencias).
+Definir métricas técnicas y operativas (latencias, costos, reproducibilidad, detección de inconsistencias).
 
 ### 9.2 Casos de prueba
 
-Ver `docs/methodology/ExperimentalTestCases.md`.
+Ver `docs/methodology/ReproducibleValidationTestCases.md`.
 
 ---
 

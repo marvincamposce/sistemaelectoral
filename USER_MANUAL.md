@@ -1,6 +1,6 @@
-# 📖 Manual de Usuario: BlockUrna (Escrutinio Criptográfico Experimental)
+# 📖 Manual de Usuario: BlockUrna (Escrutinio Criptográfico Verificable)
 
-Este manual documenta el paso a paso estructurado para desplegar, operar y auditar una elección digital completa utilizando la plataforma **BlockUrna**, actualizada hasta la **Fase 9C**. Esta fase incorpora pruebas **Zero-Knowledge con backend de alto desempeño en Rust**, **pruebas de inclusión Merkle de Poseidon**, verificación **on-chain** de la proof Groth16 y firmas de Actas **ECDSA SECP256K1 Reales** mapeadas por roles estancos (AEA y JED), asegurando transacciones y content hashes exactos on-chain y off-chain.
+Este manual documenta el paso a paso estructurado para desplegar, operar y auditar una elección digital completa utilizando la plataforma **BlockUrna**, actualizada hasta la **Fase 9D**. Esta fase incorpora pruebas **Zero-Knowledge con backend de alto desempeño en Rust**, **pruebas de inclusión Merkle de Poseidon**, verificación **on-chain** de la proof Groth16, verificación **off-chain** del circuito de descifrado V2 y firmas de Actas **ECDSA SECP256K1 Reales** mapeadas por roles estancos (AEA y JED), asegurando transacciones y content hashes exactos on-chain y off-chain.
 
 ---
 
@@ -72,25 +72,25 @@ Esto levantará simultáneamente:
 1. Abre **Authority Console** en [http://localhost:3013](http://localhost:3013).
 2. Haz clic en "Nueva Elección" y emite un Manifiesto y una Fase `SETUP`. Fírmalos para publicar.
 3. Avanza la elección a **`REGISTRY_OPEN`**.
-4. Inscribe credenciales/votantes dummy en su módulo respectivo o simulando la carga.
+4. Inscribe credenciales/votantes del seed del entorno local reproducible en su módulo respectivo o mediante carga estructurada de prueba.
 5. Cierra el registro avanzando a **`REGISTRY_CLOSED`**.
 6. Abre la votación avanzando a **`VOTING_OPEN`** mediante el acta estructurada.
 
 ### B. Emisión de Votos (Ciudadanos)
 1. Ingresa interactuando mediante **Voter Portal** [http://localhost:3000](http://localhost:3000).
-2. Deberías poder ver la elección. Genera "votos de prueba" que representen tus sufragios crípticos (ciphertexts) a la bóveda conectada en red.
+2. Deberías poder ver la elección. Genera boletas de prueba que representen tus sufragios cifrados (ciphertexts) hacia la bóveda conectada en red.
 
 ### C. Cierre (AEA)
 De vuelta en **Authority Console**, publica el `ACTA_CIERRE` avanzando a fase **`VOTING_CLOSED`**.
 
-### D. Escrutinio Experimental ZK (JED)
+### D. Escrutinio ZK (JED)
 1. Entra al **Tally Board** [http://localhost:3005](http://localhost:3005).
 2. Ingresa al ID de tu elección finalizada.
-3. Lanza el escrutinio. Con la Fase 9B actual, el sistema desencadena el **motor ZK impulsado por Rust (`zk_tally_rs`)**. 
-4. El procesamiento computará la prueba ZK de recuento en tu máquina local (~8 a 15 segundos para 64 boletas simulando los Poseidon Merkle Verifiers) y publicará criptográficamente:
-   - `ACTA_ESCRUTINIO` (Con la validación de inclusión Merkle)
-   - `ACTA_RESULTADOS` 
-5. Revisa los terminales: **Tally-board ha emparejado las firmas ECDSA y la Inclusión lógica (ZKP). Por su parte, la Evidence API corroboró que las raíces computadas sean honestas de acuerdo a la cadena.**
+3. Lanza el escrutinio. Con el flujo 9C/9D actual, el sistema desencadena el **motor ZK impulsado por Rust (`zk_tally_rs`)**.
+4. El procesamiento computará el transcript y la prueba ZK de recuento en tu máquina local (~8 a 15 segundos para 64 boletas) y publicará criptográficamente:
+    - `ACTA_ESCRUTINIO` (con commitment de transcript y validación de inclusión Merkle)
+    - `ACTA_RESULTADOS` (solo cuando el gate criptográfico quede satisfecho para publicación final)
+5. Revisa los terminales: **Tally-board reporta estado de prueba de tally (off-chain/on-chain) y estado de descifrado 9D. Por su parte, la Evidence API corrobora que las raíces computadas sean consistentes con la cadena.**
 
 ---
 

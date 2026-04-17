@@ -3569,11 +3569,11 @@ async function main() {
                 ? "Los conteos publicados son la suma correcta de selecciones individuales y la inclusión de boletas en el árbol Merkle Poseidon (ZK verificada en cadena)"
                 : "Aún no se generó una prueba ZK. La auditabilidad depende de la verificación del transcript.",
             whatIsNotProved: [
-              ...(job?.merkleInclusionVerified ? [] : ["Inclusión de boletas en árbol Merkle (fase 9B)"]),
+              ...(job?.merkleInclusionVerified ? [] : ["Inclusión de boletas en árbol Merkle"]),
               ...(decryptionJob?.status === "VERIFIED_OFFCHAIN" || decryptionJob?.status === "VERIFIED_ONCHAIN"
                 ? []
                 : ["Descifrado correcto de ciphertexts (requiere circuito de descifrado)"]),
-              ...(job?.verifiedOnchain ? [] : ["Verificación en cadena (fase 9C)"]),
+              ...(job?.verifiedOnchain ? [] : ["Verificación en cadena"]),
             ],
             auditabilityNote: "El transcript completo permanece disponible para auditoría independiente fuera de cadena sin depender del estado de prueba ZK.",
           },

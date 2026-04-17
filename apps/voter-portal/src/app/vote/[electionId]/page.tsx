@@ -632,7 +632,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
               <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900">
                 <div className="font-semibold">{voterIdentity.fullName}</div>
                 <div className="mt-1 text-xs">
-                  DNI {voterIdentity.dni} · wallet embebida {voterIdentity.walletAddress ?? "no visible"} · acceso {voterIdentity.authMethod ?? "DEMO"}
+                  DNI {voterIdentity.dni} · wallet embebida {voterIdentity.walletAddress ?? "no visible"} · acceso {voterIdentity.authMethod ?? "NO_DECLARADO"}
                 </div>
               </div>
             ) : null}

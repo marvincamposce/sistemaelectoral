@@ -16,7 +16,7 @@ export function deriveCredentialId(secretHex: string): string {
   return ethers.keccak256(secretHex).toLowerCase();
 }
 
-export function generateExperimentalRegistryCredential(params?: {
+export function generateRegistryCredential(params?: {
   registryAuthority?: string;
   subjectLabel?: string;
   issuedAt?: string;
