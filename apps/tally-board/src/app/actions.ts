@@ -49,26 +49,106 @@ function getContract() {
   return new ethers.Contract(env.ELECTION_REGISTRY_ADDRESS, BU_PVP_1_ELECTION_REGISTRY_ABI, wallet);
 }
 
-function getTallyVerifierContract() {
+async function resolveVerifierAddressFromRegistry(
+  kind: "TALLY" | "DECRYPTION",
+): Promise<string> {
   const env = getEnv();
-  if (!env.TALLY_VERIFIER_ADDRESS) {
-    throw new Error("Missing TALLY_VERIFIER_ADDRESS in environment");
+  const provider = new ethers.JsonRpcProvider(env.RPC_URL);
+  const registry = getContract();
+
+  const configuredAddress =
+    kind === "TALLY"
+      ? String(await registry.tallyVerifier())
+      : String(await registry.decryptionVerifier());
+
+  const fallbackAddress =
+    kind === "TALLY" ? env.TALLY_VERIFIER_ADDRESS : env.DECRYPTION_VERIFIER_ADDRESS;
+  const selectedAddress =
+    configuredAddress && configuredAddress !== ethers.ZeroAddress
+      ? configuredAddress
+      : fallbackAddress;
+
+  if (!selectedAddress) {
+    const missingLabel = kind === "TALLY" ? "TALLY_VERIFIER_ADDRESS" : "DECRYPTION_VERIFIER_ADDRESS";
+    throw new Error(
+      `Missing ${missingLabel} in environment and ElectionRegistry has no ${kind.toLowerCase()} verifier configured`,
+    );
   }
 
-  const provider = new ethers.JsonRpcProvider(env.RPC_URL);
-  const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
-  return new ethers.Contract(env.TALLY_VERIFIER_ADDRESS, BU_PVP_1_TALLY_VERIFIER_ABI, wallet);
+  const code = await provider.getCode(selectedAddress);
+  if (code === "0x") {
+    throw new Error(
+      `${kind} verifier address has no bytecode: ${selectedAddress}. Revisa el despliegue y sincronización de direcciones.`,
+    );
+  }
+
+  return selectedAddress;
 }
 
-function getDecryptionVerifierContract() {
+async function getTallyVerifierContract() {
   const env = getEnv();
-  if (!env.DECRYPTION_VERIFIER_ADDRESS) {
-    throw new Error("Missing DECRYPTION_VERIFIER_ADDRESS in environment");
-  }
-
   const provider = new ethers.JsonRpcProvider(env.RPC_URL);
   const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
-  return new ethers.Contract(env.DECRYPTION_VERIFIER_ADDRESS, BU_PVP_1_DECRYPTION_VERIFIER_ABI, wallet);
+  const verifierAddress = await resolveVerifierAddressFromRegistry("TALLY");
+  return new ethers.Contract(verifierAddress, BU_PVP_1_TALLY_VERIFIER_ABI, wallet);
+}
+
+async function getDecryptionVerifierContract() {
+  const env = getEnv();
+  const provider = new ethers.JsonRpcProvider(env.RPC_URL);
+  const wallet = new ethers.Wallet(env.AE_PRIVATE_KEY, provider);
+  const verifierAddress = await resolveVerifierAddressFromRegistry("DECRYPTION");
+  return new ethers.Contract(verifierAddress, BU_PVP_1_DECRYPTION_VERIFIER_ABI, wallet);
+}
+
+const ELECTION_PHASE = {
+  SETUP: 0,
+  REGISTRY_OPEN: 1,
+  REGISTRY_CLOSED: 2,
+  VOTING_OPEN: 3,
+  VOTING_CLOSED: 4,
+  PROCESSING: 5,
+  TALLYING: 6,
+  RESULTS_PUBLISHED: 7,
+  AUDIT_WINDOW: 8,
+  ARCHIVED: 9,
+} as const;
+
+const ELECTION_PHASE_LABELS: Record<number, string> = {
+  [ELECTION_PHASE.SETUP]: "SETUP",
+  [ELECTION_PHASE.REGISTRY_OPEN]: "REGISTRY_OPEN",
+  [ELECTION_PHASE.REGISTRY_CLOSED]: "REGISTRY_CLOSED",
+  [ELECTION_PHASE.VOTING_OPEN]: "VOTING_OPEN",
+  [ELECTION_PHASE.VOTING_CLOSED]: "VOTING_CLOSED",
+  [ELECTION_PHASE.PROCESSING]: "PROCESSING",
+  [ELECTION_PHASE.TALLYING]: "TALLYING",
+  [ELECTION_PHASE.RESULTS_PUBLISHED]: "RESULTS_PUBLISHED",
+  [ELECTION_PHASE.AUDIT_WINDOW]: "AUDIT_WINDOW",
+  [ELECTION_PHASE.ARCHIVED]: "ARCHIVED",
+};
+
+function phaseLabel(phase: number): string {
+  return ELECTION_PHASE_LABELS[phase] ?? `UNKNOWN_${phase}`;
+}
+
+export async function getElectionPhaseAction(electionId: string) {
+  try {
+    const contract = getContract();
+    const election = await contract.getElection(BigInt(electionId));
+    const phase = Number(election.phase);
+    return {
+      ok: true,
+      phase,
+      phaseLabel: phaseLabel(phase),
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error: getErrorMessage(err),
+      phase: null,
+      phaseLabel: null,
+    };
+  }
 }
 
 function mapProofStateToResultMode(proofState: string): string {
@@ -367,12 +447,34 @@ async function loadZkPublicationGateState(params: {
 
   const decryptionProofRow = decryptionProofRes.rows[0] ?? null;
   const blockers: string[] = [];
-  const tallyVerifiedOnchain = Boolean(tallyProofRow?.verifiedOnchain) || tallyProofRow?.status === "VERIFIED_ONCHAIN";
+  const contract = getContract();
+  const [onchainTallyVerifiedRaw, onchainDecryptionVerifiedRaw] = await Promise.all([
+    contract.tallyProofVerified(BigInt(params.electionId)),
+    contract.decryptionProofVerified(BigInt(params.electionId)),
+  ]);
+
+  const onchainTallyVerified = Boolean(onchainTallyVerifiedRaw);
+  const onchainDecryptionVerified = Boolean(onchainDecryptionVerifiedRaw);
+  const tallyVerifiedOnchain = onchainTallyVerified;
   const decryptionRequired = true;
-  const decryptionVerified =
-    !decryptionRequired ||
-    Boolean(decryptionProofRow?.verifiedOnchain) ||
-    decryptionProofRow?.status === "VERIFIED_ONCHAIN";
+  const decryptionVerified = !decryptionRequired || onchainDecryptionVerified;
+
+  const dbTallyMarkedOnchain =
+    Boolean(tallyProofRow?.verifiedOnchain) || tallyProofRow?.status === "VERIFIED_ONCHAIN";
+  const dbDecryptionMarkedOnchain =
+    Boolean(decryptionProofRow?.verifiedOnchain) || decryptionProofRow?.status === "VERIFIED_ONCHAIN";
+
+  if (dbTallyMarkedOnchain && !onchainTallyVerified) {
+    blockers.push(
+      "Desalineación detectada: la base local marca tally como verificado on-chain, pero ElectionRegistry no lo confirma en la cadena actual.",
+    );
+  }
+
+  if (dbDecryptionMarkedOnchain && !onchainDecryptionVerified) {
+    blockers.push(
+      "Desalineación detectada: la base local marca descifrado como verificado on-chain, pero ElectionRegistry no lo confirma en la cadena actual.",
+    );
+  }
 
   if (!tallyProofRow) {
     blockers.push("No existe un job de prueba ZK de tally para esta eleccion.");
@@ -1043,7 +1145,7 @@ export async function computeRealTallyAction(electionId: string) {
 
       try {
         let decrypted: unknown;
-        const format: "BABYJUB_POSEIDON_V2" = "BABYJUB_POSEIDON_V2";
+        const format = "BABYJUB_POSEIDON_V2" as const;
         try {
           decrypted = await decryptBallotPayload(ciphertext, keyResolution.keyHex);
         } catch {
@@ -1125,12 +1227,89 @@ export async function computeRealTallyAction(electionId: string) {
   }
 }
 
+export async function ensureTallyingPhaseAction(electionId: string) {
+  try {
+    const contract = getContract();
+    const txHashes: string[] = [];
+
+    const readPhase = async (): Promise<number> => {
+      const election = await contract.getElection(BigInt(electionId));
+      return Number(election.phase);
+    };
+
+    let phase = await readPhase();
+
+    if (phase === ELECTION_PHASE.VOTING_OPEN) {
+      const closeVotingTx = await contract.closeVoting(BigInt(electionId));
+      const closeVotingReceipt = await closeVotingTx.wait();
+      txHashes.push(closeVotingReceipt.hash);
+      phase = await readPhase();
+    }
+
+    if (phase === ELECTION_PHASE.VOTING_CLOSED) {
+      const startProcessingTx = await contract.startProcessing(BigInt(electionId));
+      const startProcessingReceipt = await startProcessingTx.wait();
+      txHashes.push(startProcessingReceipt.hash);
+      phase = await readPhase();
+    }
+
+    if (phase === ELECTION_PHASE.PROCESSING) {
+      const finalizeProcessingTx = await contract.finalizeProcessing(BigInt(electionId));
+      const finalizeProcessingReceipt = await finalizeProcessingTx.wait();
+      txHashes.push(finalizeProcessingReceipt.hash);
+      phase = await readPhase();
+    }
+
+    if (phase !== ELECTION_PHASE.TALLYING) {
+      return {
+        ok: false,
+        error: `La elección debe estar en TALLYING para publicar el compromiso de transcript. Fase actual: ${phaseLabel(phase)} (${phase}).`,
+        phase,
+        phaseLabel: phaseLabel(phase),
+        txHashes,
+      };
+    }
+
+    return {
+      ok: true,
+      phase,
+      phaseLabel: phaseLabel(phase),
+      txHashes,
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error: getErrorMessage(err),
+      phase: null,
+      phaseLabel: null,
+      txHashes: [] as string[],
+    };
+  }
+}
+
 export async function publishTranscriptCommitmentAction(electionId: string, commitmentPayload: string) {
   try {
+    const phaseReady = await ensureTallyingPhaseAction(electionId);
+    if (!phaseReady.ok) {
+      return {
+        ok: false,
+        error: phaseReady.error,
+        phase: phaseReady.phase,
+        phaseLabel: phaseReady.phaseLabel,
+        phaseAdvanceTxHashes: phaseReady.txHashes,
+      };
+    }
+
     const contract = getContract();
     const tx = await contract.publishTallyTranscriptCommitment(BigInt(electionId), commitmentPayload);
     const receipt = await tx.wait();
-    return { ok: true, txHash: receipt.hash };
+    return {
+      ok: true,
+      txHash: receipt.hash,
+      phase: phaseReady.phase,
+      phaseLabel: phaseReady.phaseLabel,
+      phaseAdvanceTxHashes: phaseReady.txHashes,
+    };
   } catch (err: unknown) {
     return { ok: false, error: getErrorMessage(err) };
   }
@@ -1167,12 +1346,26 @@ export async function publishActaWithContentAction(
     const actId = finalSnapshotHash;
 
     const contract = getContract();
-    const tx = await contract.publishActa(BigInt(electionId), kind, finalSnapshotHash);
-    const receipt = await tx.wait();
-
-    // Persist full content to acta_contents so evidence-api can serve it
     const chainId = getEnv().CHAIN_ID;
     const contractAddress = (await contract.getAddress()).toLowerCase();
+
+    const existingAnchorRes = await pool.query<{ txHash: string }>(
+      `SELECT tx_hash AS "txHash"
+       FROM acta_anchors
+       WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 AND kind=$4 AND snapshot_hash=$5
+       ORDER BY block_number ASC, log_index ASC
+       LIMIT 1`,
+      [chainId, contractAddress, electionId, kind, finalSnapshotHash],
+    );
+
+    let txHash = existingAnchorRes.rows[0]?.txHash ?? null;
+    if (!txHash) {
+      const tx = await contract.publishActa(BigInt(electionId), kind, finalSnapshotHash);
+      const receipt = await tx.wait();
+      txHash = receipt.hash;
+    }
+
+    // Persist full content to acta_contents so evidence-api can serve it
 
     const expectedSignerAddress = new ethers.Wallet(signingKey).address.toLowerCase();
 
@@ -1209,7 +1402,13 @@ export async function publishActaWithContentAction(
       ]
     );
 
-    return { ok: true, txHash: receipt.hash, snapshotHash: finalSnapshotHash, actId };
+    return {
+      ok: true,
+      txHash,
+      snapshotHash: finalSnapshotHash,
+      actId,
+      reused: existingAnchorRes.rows.length > 0,
+    };
   } catch (err: unknown) {
     return { ok: false, error: getErrorMessage(err) };
   }
@@ -1231,6 +1430,44 @@ export async function advanceToResultsPublishedAction(electionId: string) {
     }
 
     const contract = getContract();
+    const election = await contract.getElection(BigInt(electionId));
+    const currentPhase = Number(election.phase);
+
+    if (
+      currentPhase === ELECTION_PHASE.RESULTS_PUBLISHED ||
+      currentPhase === ELECTION_PHASE.AUDIT_WINDOW ||
+      currentPhase === ELECTION_PHASE.ARCHIVED
+    ) {
+      return {
+        ok: true,
+        txHash: null,
+        alreadyPublished: true,
+        phase: currentPhase,
+        phaseLabel: phaseLabel(currentPhase),
+      };
+    }
+
+    if (currentPhase !== ELECTION_PHASE.TALLYING) {
+      return {
+        ok: false,
+        error: `La elección debe estar en TALLYING para publicar resultados. Fase actual: ${phaseLabel(currentPhase)} (${currentPhase}).`,
+      };
+    }
+
+    const [tallyVerified, decryptionVerified] = await Promise.all([
+      contract.tallyProofVerified(BigInt(electionId)),
+      contract.decryptionProofVerified(BigInt(electionId)),
+    ]);
+
+    if (!tallyVerified || !decryptionVerified) {
+      return {
+        ok: false,
+        error:
+          `No se puede publicar resultados: tallyProofVerified=${Boolean(tallyVerified)}, ` +
+          `decryptionProofVerified=${Boolean(decryptionVerified)}. Reenvía la verificación on-chain faltante.`,
+      };
+    }
+
     const tx = await contract.publishResults(BigInt(electionId));
     const receipt = await tx.wait();
     return { ok: true, txHash: receipt.hash };
@@ -1360,7 +1597,6 @@ export async function createResultPayloadAction(
   options?: { proofState?: string; resultKind?: string; publicationStatus?: string },
 ) {
   try {
-    const payloadId = crypto.randomUUID();
     const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
@@ -1386,6 +1622,39 @@ export async function createResultPayloadAction(
     }
     const resultKind = options?.resultKind ?? "LOCAL_REPRODUCIBLE";
     const publicationStatus = options?.publicationStatus ?? "PUBLISHED";
+
+    const existingPayloadRes = await pool.query<{
+      id: string;
+      payloadHash: string;
+      proofState: string;
+    }>(
+      `SELECT
+         id,
+         payload_hash AS "payloadHash",
+         proof_state AS "proofState"
+       FROM result_payloads
+       WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3
+         AND publication_status=$4 AND proof_state=$5
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [chainId, contractAddress, electionId, publicationStatus, proofState],
+    );
+
+    const existingPayload = existingPayloadRes.rows[0] ?? null;
+    if (existingPayload) {
+      return {
+        ok: true,
+        payloadId: existingPayload.id,
+        payloadHash: existingPayload.payloadHash,
+        proofState: existingPayload.proofState,
+        resultMode: mapProofStateToResultMode(existingPayload.proofState),
+        summaryItemsCount: 0,
+        unresolvedLabels: [] as string[],
+        idempotent: true,
+      };
+    }
+
+    const payloadId = crypto.randomUUID();
 
     const candidates = await loadElectionCandidates({
       chainId,
@@ -1501,6 +1770,20 @@ export async function openAuditWindowAction(electionId: string) {
     const chainId = getEnv().CHAIN_ID;
     const contract = getContract();
     const contractAddress = (await contract.getAddress()).toLowerCase();
+
+    const election = await contract.getElection(BigInt(electionId));
+    const currentPhase = Number(election.phase);
+
+    if (currentPhase === ELECTION_PHASE.AUDIT_WINDOW || currentPhase === ELECTION_PHASE.ARCHIVED) {
+      return { ok: true, alreadyOpen: true };
+    }
+
+    if (currentPhase !== ELECTION_PHASE.RESULTS_PUBLISHED) {
+      return {
+        ok: false,
+        error: `La elección debe estar en RESULTS_PUBLISHED para abrir auditoría. Fase actual: ${phaseLabel(currentPhase)} (${currentPhase}).`,
+      };
+    }
 
     // Smart contract call
     const tx = await contract.openAuditWindow(BigInt(electionId));
@@ -1640,8 +1923,46 @@ export async function generateZkProofAction(
       };
     }
 
-    // Determine candidate ordering (must be deterministic and match what the observer sees)
-    const candidateKeys = Object.keys(transcript.summary).sort();
+    // Determine candidate ordering from catalog (ballot_order) to keep
+    // decrypted selection indexes aligned with circuit candidate slots.
+    const catalogCandidates = await loadElectionCandidates({
+      chainId,
+      contractAddress,
+      electionId,
+    });
+
+    const activeCatalogCandidateKeys = Array.from(
+      new Set(
+        catalogCandidates
+          .filter((candidate) => String(candidate.status).toUpperCase() === "ACTIVE")
+          .map((candidate) => candidate.id.trim().toLowerCase())
+          .filter((id) => id.length > 0),
+      ),
+    );
+
+    const normalizedSummary: Record<string, number> = {};
+    for (const [rawKey, value] of Object.entries(transcript.summary ?? {})) {
+      const key = String(rawKey).trim().toLowerCase();
+      if (!key) continue;
+      const parsed = Number(value);
+      const count = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+      normalizedSummary[key] = (normalizedSummary[key] ?? 0) + count;
+    }
+
+    const summaryKeys = Object.keys(normalizedSummary);
+    const candidateKeys =
+      activeCatalogCandidateKeys.length > 0
+        ? [...activeCatalogCandidateKeys]
+        : [...summaryKeys].sort();
+
+    const unknownSummaryKeys = summaryKeys.filter((key) => !candidateKeys.includes(key));
+    if (unknownSummaryKeys.length > 0) {
+      return {
+        ok: false,
+        error: `Transcript summary contains candidates outside active catalog: ${unknownSummaryKeys.join(", ")}`,
+      };
+    }
+
     if (candidateKeys.length > ZK_NUM_CANDIDATES) {
       return {
         ok: false,
@@ -1653,6 +1974,15 @@ export async function generateZkProofAction(
     while (candidateKeys.length < ZK_NUM_CANDIDATES) {
       candidateKeys.push(`__UNUSED_${candidateKeys.length}`);
     }
+
+    const normalizedTranscript = {
+      ...transcript,
+      summary: normalizedSummary,
+      ballots: transcript.ballots.map((ballot) => ({
+        ...ballot,
+        selection: String(ballot.selection ?? "").trim().toLowerCase(),
+      })),
+    };
 
     const allBallotHashes = Array.isArray(transcript.allBallotHashes)
       ? transcript.allBallotHashes.map((hashHex) => String(hashHex))
@@ -1701,7 +2031,7 @@ export async function generateZkProofAction(
     );
 
     // Build witness from transcript
-    const witness = buildWitnessFromTranscript(transcript, candidateKeys, merkleBundle);
+    const witness = buildWitnessFromTranscript(normalizedTranscript, candidateKeys, merkleBundle);
 
     // Generate proof
     const proofResult = await proveTally(witness);
@@ -1826,12 +2156,12 @@ export async function generateZkProofAction(
 
       if (decryptionEntries.length !== transcript.ballotsCount) {
         throw new Error(
-          `Decryption proof witness mismatch: expected ${transcript.ballotsCount} ballots, got ${decryptionEntries.length}`,
+          `Decryption proof witness mismatch: expected ${normalizedTranscript.ballotsCount} ballots, got ${decryptionEntries.length}`,
         );
       }
 
       const decryptionWitness = await buildDecryptionWitness({
-        summary: transcript.summary,
+        summary: normalizedTranscript.summary,
         candidateOrder: candidateKeys,
         entries: decryptionEntries,
       });
@@ -2010,7 +2340,7 @@ export async function submitOnchainZkProofAction(
     const { chainId, contractAddress } = await resolveRuntimeContext();
     const submitCircuit = async (
       circuit: "TALLY" | "DECRYPTION",
-      forcedJobId?: string,
+      opts?: { forcedJobId?: string; forcedTallyJobId?: string | null },
     ): Promise<{
       jobId: string;
       tallyJobId: string | null;
@@ -2020,13 +2350,25 @@ export async function submitOnchainZkProofAction(
       alreadyVerified: boolean;
     }> => {
       const verifierContract =
-        circuit === "TALLY" ? getTallyVerifierContract() : getDecryptionVerifierContract();
+        circuit === "TALLY" ? await getTallyVerifierContract() : await getDecryptionVerifierContract();
       const circuitId = circuit === "TALLY" ? ZK_CIRCUIT_ID : ZK_DECRYPTION_CIRCUIT_ID;
-      const whereByJob = forcedJobId ? " AND job_id=$4" : "";
-      const circuitIdParam = forcedJobId ? 5 : 4;
-      const queryParams = forcedJobId
-        ? [chainId, contractAddress, electionId, forcedJobId, circuitId]
-        : [chainId, contractAddress, electionId, circuitId];
+      const whereByJob = opts?.forcedJobId ? " AND job_id=$4" : "";
+      const whereByTallyJob = !opts?.forcedJobId && opts?.forcedTallyJobId ? " AND tally_job_id=$4" : "";
+      const circuitIdParam = opts?.forcedJobId || opts?.forcedTallyJobId ? 5 : 4;
+      const queryParams = opts?.forcedJobId
+        ? [chainId, contractAddress, electionId, opts.forcedJobId, circuitId]
+        : opts?.forcedTallyJobId
+          ? [chainId, contractAddress, electionId, opts.forcedTallyJobId, circuitId]
+          : [chainId, contractAddress, electionId, circuitId];
+
+      const readOnchainVerificationFlag = async (): Promise<boolean> => {
+        const registry = getContract();
+        const verified =
+          circuit === "TALLY"
+            ? await registry.tallyProofVerified(BigInt(electionId))
+            : await registry.decryptionProofVerified(BigInt(electionId));
+        return Boolean(verified);
+      };
 
       const jobRes = await pool.query<{
         jobId: string;
@@ -2046,7 +2388,7 @@ export async function submitOnchainZkProofAction(
            public_inputs AS "publicInputs",
            onchain_verification_tx AS "onchainVerificationTx"
          FROM zk_proof_jobs
-         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3${whereByJob} AND circuit_id=$${circuitIdParam}
+         WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3${whereByJob}${whereByTallyJob} AND circuit_id=$${circuitIdParam}
          ${zkProofJobPriorityOrderSql()}
          LIMIT 1`,
         queryParams,
@@ -2064,6 +2406,19 @@ export async function submitOnchainZkProofAction(
       }
 
       if (job.status === "VERIFIED_ONCHAIN" && job.onchainVerificationTx) {
+        const stillVerified = await readOnchainVerificationFlag();
+        if (!stillVerified) {
+          await pool.query(
+            `UPDATE zk_proof_jobs
+             SET status='VERIFIED_OFFCHAIN',
+                 verified_onchain=false,
+                 onchain_verification_tx=NULL,
+                 onchain_verifier_address=NULL,
+                 error_message='Stored on-chain verification is stale for current chain; re-submission required.'
+             WHERE job_id=$1`,
+            [job.jobId],
+          );
+        } else {
         return {
           jobId: job.jobId,
           tallyJobId: job.tallyJobId,
@@ -2072,6 +2427,7 @@ export async function submitOnchainZkProofAction(
           verifierAddress: (await verifierContract.getAddress()).toLowerCase(),
           alreadyVerified: true,
         };
+        }
       }
 
       if (job.status !== "VERIFIED_OFFCHAIN" && job.status !== "PROVED") {
@@ -2122,6 +2478,13 @@ export async function submitOnchainZkProofAction(
       const receipt = await tx.wait();
       const txHash = receipt?.hash ?? tx.hash;
       const verifierAddress = (await verifierContract.getAddress()).toLowerCase();
+      const onchainVerified = await readOnchainVerificationFlag();
+      if (!onchainVerified) {
+        throw new Error(
+          `La transacción de verificación ${circuit.toLowerCase()} fue minada, pero ElectionRegistry no marcó la prueba como verificada. ` +
+          "Revisa la dirección del verificador configurada en cadena.",
+        );
+      }
 
       await pool.query(
         `UPDATE zk_proof_jobs
@@ -2145,13 +2508,25 @@ export async function submitOnchainZkProofAction(
     };
 
     const requestedCircuit = options?.circuit;
+    const forcedTallyProofJobId =
+      options?.jobId && (requestedCircuit === undefined || requestedCircuit === "TALLY")
+        ? options.jobId
+        : undefined;
+
     const tallySubmission =
-      requestedCircuit === "DECRYPTION" ? null : await submitCircuit("TALLY", requestedCircuit === "TALLY" ? options?.jobId : undefined);
+      requestedCircuit === "DECRYPTION"
+        ? null
+        : await submitCircuit("TALLY", { forcedJobId: forcedTallyProofJobId });
     const effectiveTallyJobId = tallySubmission?.tallyJobId ?? null;
     const decryptionSubmission =
       requestedCircuit === "TALLY"
         ? null
-        : await submitCircuit("DECRYPTION", requestedCircuit === "DECRYPTION" ? options?.jobId : undefined);
+        : await submitCircuit(
+            "DECRYPTION",
+            requestedCircuit === "DECRYPTION"
+              ? { forcedJobId: options?.jobId }
+              : { forcedTallyJobId: effectiveTallyJobId },
+          );
 
     const gate = await loadZkPublicationGateState({
       chainId,

@@ -223,6 +223,22 @@ export async function generateVotingKeypair(): Promise<{ publicKey: string; priv
   };
 }
 
+export async function deriveCoordinatorPublicKey(coordinatorPrivateKeyHex: string): Promise<string> {
+  const babyJub = await getBabyJub();
+  const coordinatorScalar = parseCoordinatorPrivateScalar(coordinatorPrivateKeyHex, babyJub.subOrder);
+  const publicPoint = babyJub.mulPointEscalar(babyJub.Base8, coordinatorScalar);
+  return packBabyJubPoint(publicPoint, babyJub);
+}
+
+export async function isValidZkFriendlyCoordinatorPublicKey(coordinatorPubKeyHex: string): Promise<boolean> {
+  try {
+    const babyJub = await getBabyJub();
+    return unpackBabyJubPoint(coordinatorPubKeyHex, babyJub) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function encodeBallotCiphertextEnvelope(envelope: BallotCiphertextEnvelope): string {
   const normalized = BallotCiphertextEnvelopeSchema.parse(envelope);
   return ethers.hexlify(ethers.toUtf8Bytes(JSON.stringify(normalized)));

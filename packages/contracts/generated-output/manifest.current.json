@@ -5,7 +5,7 @@
   "generatedAt": "2025-01-01T00:00:00.000Z",
   "authority": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
   "registryAuthority": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
-  "coordinatorPubKey": "0x2222222222222222222222222222222222222222222222222222222222222222",
+  "coordinatorPubKey": "0xd1bf72b633b977b38647bf80dccaaf533ddd5a0a154ed51652fe77261a4c979a",
   "catalogSource": "SEED_LOCAL_REPRODUCIBLE",
   "candidates": [
     {

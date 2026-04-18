@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Manrope } from "next/font/google";
 import "./globals.css";
 
@@ -19,7 +20,25 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es">
-      <body className={manrope.variable}>{children}</body>
+      <body className={manrope.variable}>
+        <div className="app-shell">
+          <header className="app-topbar">
+            <div className="app-frame app-topbar-inner">
+              <div>
+                <div className="app-kicker">BlockUrna</div>
+                <div className="app-title">Observatorio electoral</div>
+              </div>
+              <nav className="app-nav" aria-label="Aplicaciones">
+                <Link href="http://localhost:3012/" className="app-navlink">Autoridad</Link>
+                <Link href="http://localhost:3004/" className="app-navlink">Ciudadanía</Link>
+                <Link href="http://localhost:3005/" className="app-navlink">Escrutinio</Link>
+                <Link href="http://localhost:3011/" className="app-navlink app-navlink-active">Observer</Link>
+              </nav>
+            </div>
+          </header>
+          <div className="app-frame app-content">{children}</div>
+        </div>
+      </body>
     </html>
   );
 }

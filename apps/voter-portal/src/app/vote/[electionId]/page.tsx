@@ -104,9 +104,37 @@ type VoterIdentity = {
 };
 
 const CITIZEN_SESSION_STORAGE_KEY = "bu_citizen_session";
+const NOTICE_STORAGE_PREFIX = "bu_vote_notice_";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type NoticeState = {
+  kind: "ok" | "info";
+  title: string;
+  body: string;
+};
+
+function explicarErrorRelayer(raw: string, flow: "signup" | "ballot"): string {
+  const value = String(raw ?? "").toLowerCase();
+
+  if (value.includes("missing revert data") || value.includes("call_exception")) {
+    if (flow === "signup") {
+      return "La red rechazó la inscripción antes de enviarla. Normalmente esto ocurre porque la elección no existe, no está en registro abierto o el permiso de inscripción ya no es válido.";
+    }
+    return "La red rechazó la boleta antes de enviarla. Normalmente esto ocurre porque la elección no está en votación abierta o la llave de votación ya no es válida para esta operación.";
+  }
+
+  if (value.includes("origin not allowed")) {
+    return "El relayer rechazó la solicitud por origen no permitido. Revisa la configuración local del navegador y del relayer.";
+  }
+
+  if (value.includes("unauthorized")) {
+    return "El relayer rechazó la solicitud por autorización inválida.";
+  }
+
+  return raw;
 }
 
 export default function VotePage({ params }: { params: Promise<{ electionId: string }> }) {
@@ -129,12 +157,24 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ballotHash, setBallotHash] = useState("");
   const [txHash, setTxHash] = useState("");
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
 
   const env = getPublicEnv();
+  const electionIdIsValid = /^[0-9]+$/.test(electionId);
+  const stepItems: Array<{ key: WizardStep; label: string }> = [
+    { key: "SETUP", label: "Autenticación" },
+    { key: "SIGNUP_FLIGHT", label: "Inscripción" },
+    { key: "VOTING", label: "Selección" },
+    { key: "BALLOT_FLIGHT", label: "Emisión" },
+    { key: "RECEIPT", label: "Recibo" },
+  ];
+  const currentStepIndex = stepItems.findIndex((item) => item.key === step);
 
   // Recovery
   useEffect(() => {
     const saved = sessionStorage.getItem(`bu_vote_state_${electionId}`);
+    const savedNotice = sessionStorage.getItem(`${NOTICE_STORAGE_PREFIX}${electionId}`);
     const storedCitizenSessionRaw = sessionStorage.getItem(CITIZEN_SESSION_STORAGE_KEY);
     if (storedCitizenSessionRaw) {
       try {
@@ -181,6 +221,13 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         console.error("Failed to recover session state", e);
       }
     }
+    if (savedNotice) {
+      try {
+        setNotice(JSON.parse(savedNotice) as NoticeState);
+      } catch {
+        sessionStorage.removeItem(`${NOTICE_STORAGE_PREFIX}${electionId}`);
+      }
+    }
   }, [electionId]);
 
   // Persistence — Bug 2.1 fix: DO NOT persist votingKeys.priv in sessionStorage.
@@ -199,10 +246,61 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
     }
   }, [step, dni, voterIdentity, votingKeys, subId, ballotHash, txHash, selection, electionId]);
 
+  useEffect(() => {
+    const key = `${NOTICE_STORAGE_PREFIX}${electionId}`;
+    if (!notice) {
+      sessionStorage.removeItem(key);
+      return;
+    }
+    sessionStorage.setItem(key, JSON.stringify(notice));
+  }, [notice, electionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!electionIdIsValid) {
+      setNotice(null);
+      setSubId(null);
+      setStep("SETUP");
+      setRouteError("La ruta de votación es inválida. Debe contener un identificador numérico de elección.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const validateElection = async () => {
+      try {
+        const res = await fetch(`${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/elections/${electionId}/phases`, {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error("La elección solicitada no existe o no está disponible en la API de evidencias.");
+        }
+        if (!cancelled) setRouteError(null);
+      } catch (error: unknown) {
+        if (!cancelled) {
+          setNotice(null);
+          setSubId(null);
+          setStep("SETUP");
+          setRouteError(getErrorMessage(error));
+        }
+      }
+    };
+
+    void validateElection();
+    return () => {
+      cancelled = true;
+    };
+  }, [electionId, electionIdIsValid, env.NEXT_PUBLIC_EVIDENCE_API_URL]);
+
   const handleSignup = async () => {
     setIsSubmitting(true);
     setErrorMsg("");
+    setNotice(null);
     try {
+      if (routeError) {
+        throw new Error(routeError);
+      }
       const normalizedDni = dni.replace(/\D/g, "");
       if (!/^[0-9]{13}$/.test(normalizedDni)) {
         throw new Error("Debes ingresar un DNI hondureño válido de 13 dígitos.");
@@ -295,8 +393,14 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
       if (!data.ok) throw new Error(data.error || "No se pudo enviar la inscripción.");
 
       setSubId(data.submissionId);
+      setNotice({
+        kind: "info",
+        title: "Inscripción enviada",
+        body: "La identidad ya fue enviada al relayer. Ahora estamos esperando confirmación en la red y en la indexación pública.",
+      });
       setStep("SIGNUP_FLIGHT");
     } catch (err: unknown) {
+      setNotice(null);
       setErrorMsg(getErrorMessage(err));
     } finally {
       setIsSubmitting(false);
@@ -306,7 +410,11 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
   const handleBallot = async () => {
     setIsSubmitting(true);
     setErrorMsg("");
+    setNotice(null);
     try {
+      if (routeError) {
+        throw new Error(routeError);
+      }
       if (!votingKeys?.pub || !votingKeys?.priv) {
         throw new Error("No existe una llave de votación registrada para esta sesión.");
       }
@@ -382,8 +490,14 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
       if (!data.ok) throw new Error(data.error || "No se pudo enviar la boleta.");
 
       setSubId(data.submissionId);
+      setNotice({
+        kind: "info",
+        title: "Boleta cifrada enviada",
+        body: "La boleta ya salió hacia la red. El sistema confirmará primero la transacción y luego su aparición en la evidencia pública.",
+      });
       setStep("BALLOT_FLIGHT");
     } catch (err: unknown) {
+      setNotice(null);
       setErrorMsg(getErrorMessage(err));
     } finally {
       setIsSubmitting(false);
@@ -464,6 +578,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
           "Es posible que tu transacción ya se haya procesado — verifica en el portal de observación. " +
           "Si el problema persiste, contacta al soporte."
         );
+        setNotice(null);
         if (step === "SIGNUP_FLIGHT") setStep("SETUP");
         if (step === "BALLOT_FLIGHT") setStep("VOTING");
       }, POLLING_TIMEOUT_MS);
@@ -485,6 +600,11 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
                   const evData = (await evRes.json()) as SignupsListResponse;
                   const found = evData.signups?.find((s) => String(s.txHash).toLowerCase() === relayerTxHash);
                   if (found) {
+                    setNotice({
+                      kind: "ok",
+                      title: "Inscripción confirmada",
+                      body: "Tu identidad electoral ya quedó registrada y validada. Ahora puedes pasar a la selección de candidatura.",
+                    });
                     setStep("VOTING");
                   }
                 }
@@ -500,6 +620,11 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
                   const evData = (await evRes.json()) as BallotsListResponse;
                   const found = evData.ballots?.find((b) => String(b.txHash).toLowerCase() === relayerTxHash);
                   if (found) {
+                    setNotice({
+                      kind: "ok",
+                      title: "Boleta confirmada",
+                      body: "La boleta cifrada ya quedó publicada y observada. Puedes conservar este recibo como comprobante de emisión.",
+                    });
                     setStep("RECEIPT");
                   }
                 }
@@ -508,7 +633,13 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
               }
             }
           } else if (data.ok && data.submission?.status === "FAILED") {
-            setErrorMsg(`Ocurrió un error en el relayer: ${data.submission.error_message}`);
+            setNotice(null);
+            setErrorMsg(
+              explicarErrorRelayer(
+                data.submission.error_message || "El relayer rechazó la operación.",
+                step === "SIGNUP_FLIGHT" ? "signup" : "ballot",
+              ),
+            );
             if (step === "SIGNUP_FLIGHT") setStep("SETUP");
             if (step === "BALLOT_FLIGHT") setStep("VOTING");
           }
@@ -525,6 +656,79 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
 
   return (
     <main className="space-y-6">
+      <section className="card p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
+              {routeError ? "Elección no disponible" : `Elección #${electionId}`}
+            </div>
+            <h2 className="text-xl font-bold text-slate-900">Flujo guiado de voto</h2>
+          </div>
+          <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+            Estado actual: {stepItems[currentStepIndex]?.label ?? step}
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-5">
+          {stepItems.map((item, index) => {
+            const active = index === currentStepIndex;
+            const done = index < currentStepIndex;
+            return (
+              <div
+                key={item.key}
+                className={`rounded-2xl border px-3 py-3 ${
+                  active
+                    ? "border-indigo-300 bg-indigo-50"
+                    : done
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-slate-200 bg-slate-50"
+                }`}
+              >
+                <div className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${active ? "text-indigo-700" : done ? "text-emerald-700" : "text-slate-500"}`}>
+                  {done ? "Completo" : active ? "En curso" : "Pendiente"}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{item.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {routeError && (
+        <div className="card p-4 border-amber-200 bg-amber-50 flex items-start gap-3 shadow-sm">
+          <svg className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-amber-900">Ruta de elección inválida o no disponible</h3>
+            <p className="text-sm text-amber-800 mt-1">{routeError}</p>
+          </div>
+        </div>
+      )}
+
+      {notice && (
+        <div
+          className={`card p-4 flex items-start gap-3 shadow-sm ${
+            notice.kind === "ok"
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-indigo-200 bg-indigo-50"
+          }`}
+        >
+          <div
+            className={`mt-0.5 h-2.5 w-2.5 rounded-full ${
+              notice.kind === "ok" ? "bg-emerald-500" : "bg-indigo-500"
+            }`}
+          />
+          <div className="flex-1">
+            <h3 className={`text-sm font-bold ${notice.kind === "ok" ? "text-emerald-900" : "text-indigo-900"}`}>
+              {notice.title}
+            </h3>
+            <p className={`mt-1 text-sm ${notice.kind === "ok" ? "text-emerald-800" : "text-indigo-900"}`}>
+              {notice.body}
+            </p>
+          </div>
+        </div>
+      )}
+
       {errorMsg && (
         <div className="card p-4 border-rose-200 bg-rose-50 flex items-start gap-3 shadow-sm">
           <svg className="w-5 h-5 text-rose-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -574,9 +778,23 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900">
               La API de evidencias valida tu sesión ciudadana, comprueba que tu expediente esté autorizado para esta elección y emite el `SignupPermit` sin archivos manuales.
             </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">DNI</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{dni || "Pendiente"}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Sesión</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{citizenSession ? "Activa" : "No abierta"}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Permiso</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">REA automática</div>
+              </div>
+            </div>
             <button 
               onClick={handleSignup} 
-              disabled={isSubmitting || !dni.trim() || ((!citizenSession || citizenSession.dni !== dni.replace(/\D/g, "")) && accessCode.trim().length < 6)}
+              disabled={Boolean(routeError) || isSubmitting || !dni.trim() || ((!citizenSession || citizenSession.dni !== dni.replace(/\D/g, "")) && accessCode.trim().length < 6)}
               className="w-full rounded-xl bg-indigo-600 py-3.5 px-4 text-sm font-extrabold tracking-wide uppercase text-white hover:bg-indigo-700 hover:shadow-lg transition-all focus:ring-4 focus:ring-indigo-100 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isSubmitting ? (
@@ -646,6 +864,21 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
               <p className="text-[11px] font-mono text-slate-500 bg-white border border-slate-200 px-3 py-2 rounded-md break-all">
                 {votingKeys?.pub}
               </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Expediente</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{voterIdentity?.fullName ?? "No resuelto"}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Wallet</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{voterIdentity?.walletAddress ? "Provisionada" : "No visible"}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Opciones activas</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{candidates.length}</div>
+              </div>
             </div>
 
             <div className="space-y-4">

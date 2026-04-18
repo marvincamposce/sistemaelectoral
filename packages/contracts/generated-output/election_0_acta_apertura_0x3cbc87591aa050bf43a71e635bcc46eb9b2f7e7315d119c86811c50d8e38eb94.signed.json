@@ -1,0 +1,28 @@
+{
+  "snapshot": {
+    "snapshotVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "electionId": "0",
+    "kind": "ACTA_APERTURA",
+    "generatedAt": "2025-01-01T00:00:00.000Z",
+    "chainId": "31337",
+    "blockRange": {
+      "fromBlock": 0,
+      "toBlock": 9
+    },
+    "commitments": {
+      "manifestHash": "0x7ce64e8fcd74c58c0f714e1bcf43db146d3cc04a56f8f1cd14ea080db5bbf63a"
+    },
+    "counts": {
+      "signups": 0,
+      "ballots": 0
+    },
+    "notes": "Seed generado para pruebas reproducibles"
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x86969a4f2626a8cba12320bcd22cdd71c5810a54c07bf884ff0825c1dc50145f492b4bbc6b0161ecd4716b3693de5e8b979c22adda605cd56ad603015258860c",
+    "snapshotHashHex": "0x3cbc87591aa050bf43a71e635bcc46eb9b2f7e7315d119c86811c50d8e38eb94"
+  }
+}

@@ -8,6 +8,9 @@ async function main() {
 
   const { ethers } = await network.connect();
   const [deployer] = await ethers.getSigners();
+  if (!deployer) {
+    throw new Error("No deployer signer available");
+  }
 
   const groth16VerifierFactory = await ethers.getContractFactory("Groth16Verifier", deployer);
   const groth16Verifier = await groth16VerifierFactory.deploy();
@@ -38,8 +41,14 @@ async function main() {
   await decryptionVerifier.waitForDeployment();
 
   const registry = await ethers.getContractAt("BU_PVP_1_ElectionRegistry", registryAddress, deployer);
-  await (await registry.setTallyVerifier(await tallyVerifier.getAddress())).wait();
-  await (await registry.setDecryptionVerifier(await decryptionVerifier.getAddress())).wait();
+  const setTallyVerifier = registry.setTallyVerifier;
+  const setDecryptionVerifier = registry.setDecryptionVerifier;
+  if (!setTallyVerifier || !setDecryptionVerifier) {
+    throw new Error("Registry contract does not expose verifier setter functions");
+  }
+
+  await (await setTallyVerifier(await tallyVerifier.getAddress())).wait();
+  await (await setDecryptionVerifier(await decryptionVerifier.getAddress())).wait();
 
   console.log(
     JSON.stringify(

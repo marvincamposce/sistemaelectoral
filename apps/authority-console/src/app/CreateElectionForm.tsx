@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Settings, Shield, Edit3, Key, FileJson, Users } from "lucide-react";
+import { PendingSubmitButton } from "./components/PendingSubmitButton";
 
 type CreateElectionFormDefaults = {
   title: string;
@@ -14,7 +15,7 @@ const FALLBACK_DEFAULTS: CreateElectionFormDefaults = {
   title: "Elección Local Reproducible BU-PVP-1",
   notes: "Configuración local reproducible para pruebas de flujo electoral y auditoría.",
   registryAuthority: "",
-  coordinatorPubKey: "0x1111111111111111111111111111111111111111111111111111111111111111",
+  coordinatorPubKey: "",
 };
 
 export function CreateElectionForm({
@@ -79,90 +80,87 @@ export function CreateElectionForm({
     <form action={createElectionAction} className="space-y-6">
       
       {/* Título y Notas */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-800" htmlFor="title">
-            <Edit3 className="w-4 h-4 text-indigo-500" /> Título Público de la Elección
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <label className="admin-label flex items-center gap-2" htmlFor="title">
+            <Edit3 className="w-4 h-4 text-brand-500" /> Título Público de la Elección
           </label>
           <input
             id="title"
             name="title"
             required
-            className="w-full rounded-md border border-slate-300 px-4 py-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm transition-all"
+            className="admin-input"
             placeholder="Ej: Elección General Presidencial 2026..."
             defaultValue={formDefaults.title}
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="text-sm font-semibold text-slate-800 pl-6" htmlFor="notes">
+        <div className="space-y-2">
+          <label className="admin-label" htmlFor="notes">
             Descripción Institucional (opcional)
           </label>
-          <textarea
+          <input
             id="notes"
             name="notes"
-            className="w-full rounded-md border border-slate-300 px-4 py-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm transition-all"
-            rows={2}
-            placeholder="Notas de contexto para el documento constitutivo..."
+            className="admin-input"
+            placeholder="Notas de contexto..."
             defaultValue={formDefaults.notes}
           />
         </div>
       </div>
 
-      <div className="w-full h-px bg-slate-200 my-4" />
-
       {/* Criptografía */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-5">
-        <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-          <Shield className="w-5 h-5 text-indigo-600" />
-          <h3 className="text-sm font-bold text-slate-800">Configuración criptográfica principal</h3>
+      <div className="admin-card mt-6">
+        <div className="admin-card-header bg-slate-50">
+          <h3 className="admin-section-title mb-0">
+            <Shield className="w-5 h-5 text-emerald-600" />
+            Configuración Criptográfica
+          </h3>
         </div>
         
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800" htmlFor="registryAuthority">
+        <div className="admin-card-body space-y-5">
+          <div className="space-y-2">
+            <label className="admin-label flex items-center gap-2" htmlFor="registryAuthority">
               <Key className="w-4 h-4 text-slate-500" />
-              Clave de la Autoridad de Registro (REA)
+              Autoridad de Registro (REA)
             </label>
-            <p className="text-xs text-slate-500 ml-6">Dirección pública (0x) del organismo que firmará la matriz de electores (Permits).</p>
+            <p className="text-xs text-slate-500 mb-2">Dirección pública (0x) del organismo que firmará la matriz de electores.</p>
             <input
               id="registryAuthority"
               name="registryAuthority"
               required
-              className="w-full rounded-md border border-slate-300 px-4 py-2 text-sm font-mono bg-white shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+              className="admin-input font-mono text-xs"
               placeholder="0x..."
               defaultValue={formDefaults.registryAuthority}
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-800" htmlFor="coordinatorPubKey">
+          <div className="space-y-2">
+            <label className="admin-label flex items-center gap-2" htmlFor="coordinatorPubKey">
               <Key className="w-4 h-4 text-slate-500" />
-              Clave pública del coordinador (PubKey)
+              Clave Pública del Coordinador
             </label>
-            <p className="text-xs text-slate-500 ml-6">Llave criptográfica de 32 bytes utilizada por la JED para cifrar las boletas de forma anónima.</p>
+            <p className="text-xs text-slate-500 mb-2">Clave BabyJub comprimida de 32 bytes para cifrar las boletas.</p>
             <input
               id="coordinatorPubKey"
               name="coordinatorPubKey"
               required
-              className="w-full rounded-md border border-slate-300 px-4 py-2 text-sm font-mono bg-white shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-              placeholder="0x1111111111111111111111111111111111111111111111111111111111111111"
+              className="admin-input font-mono text-xs"
+              placeholder="0x... (32 bytes BabyJub)"
               defaultValue={formDefaults.coordinatorPubKey}
             />
           </div>
         </div>
       </div>
 
-      <div className="w-full h-px bg-slate-200 my-4" />
-
       {/* Catálogo */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 gap-3">
-          <div className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-indigo-600" />
+      <div className="admin-card mt-6">
+        <div className="admin-card-header bg-slate-50 flex-col sm:flex-row gap-4 items-start sm:items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Users size={20} /></div>
             <div>
-              <h3 className="text-sm font-bold text-slate-800">Catálogo de candidaturas</h3>
-              <p className="text-xs text-slate-500 font-normal">Define las candidaturas que el circuito ZK validará.</p>
+              <h3 className="admin-section-title mb-0">Catálogo de Candidaturas</h3>
+              <p className="text-xs text-slate-500 font-normal mt-1">Define los candidatos que el circuito ZK validará.</p>
             </div>
           </div>
           <div className="flex bg-slate-200 p-1 rounded-lg">
@@ -171,56 +169,58 @@ export function CreateElectionForm({
               onClick={() => setCandidatesMode("visual")}
               className={`text-xs px-3 py-1.5 rounded-md transition-all font-semibold ${
                 candidatesMode === "visual"
-                  ? "bg-white text-indigo-700 shadow-sm"
-                  : "text-slate-600 hover:text-slate-800"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
             >
-              Vista guiada
+              Visual
             </button>
             <button
               type="button"
               onClick={() => setCandidatesMode("raw")}
               className={`text-xs px-3 py-1.5 rounded-md transition-all font-semibold flex items-center gap-1 ${
                 candidatesMode === "raw"
-                  ? "bg-white text-indigo-700 shadow-sm"
-                  : "text-slate-600 hover:text-slate-800"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
             >
               <FileJson className="w-3 h-3" />
-              Editor de JSON
+              JSON
             </button>
           </div>
         </div>
 
-        <div className="p-5">
+        <div className="admin-card-body">
           <textarea
             id="candidatesJson"
             name="candidatesJson"
             className={`${
               candidatesMode === "raw" ? "block" : "hidden"
-            } w-full rounded-md border border-slate-300 px-4 py-3 text-xs font-mono bg-white shadow-inner focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500`}
-            rows={12}
+            } w-full rounded-md border border-slate-300 p-4 text-xs font-mono bg-slate-50 shadow-inner focus:border-blue-500 outline-none`}
+            rows={10}
             value={candidatesVal}
             onChange={(e) => setCandidatesVal(e.target.value)}
           />
 
           {candidatesMode === "visual" && (
-            <div className="space-y-3">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {parsedCandidates.length > 0 ? (
                 parsedCandidates.map((c, i) => (
-                  <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-white rounded-lg border border-slate-200 shadow-sm hover:border-indigo-200 transition-colors">
-                    <div className="flex items-center gap-4">
+                  <div key={i} className="flex flex-col gap-3 p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 transition-colors">
+                    <div className="flex items-center gap-3">
                       <div
-                        className="w-6 h-6 rounded-full flex-shrink-0 shadow-sm border border-slate-100"
-                        style={{ backgroundColor: c.colorHex || "#ccc" }}
-                      />
-                      <div className="flex flex-col">
-                        <span className="text-base font-bold text-slate-900">{c.displayName}</span>
-                        <span className="text-xs font-medium text-slate-500">{c.partyName}</span>
+                        className="w-10 h-10 rounded-full flex-shrink-0 shadow-sm border border-slate-100 flex items-center justify-center text-white font-bold"
+                        style={{ backgroundColor: c.colorHex || "#cbd5e1" }}
+                      >
+                        {c.displayName?.charAt(0)}
+                      </div>
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="text-sm font-bold text-slate-900 truncate">{c.displayName}</span>
+                        <span className="text-xs font-medium text-slate-500 truncate">{c.partyName}</span>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end">
-                      <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Código de candidatura</div>
+                    <div className="pt-3 border-t border-slate-100 flex justify-between items-center mt-auto">
+                      <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Código</div>
                       <div className="text-xs font-mono bg-slate-100 px-2 py-1 rounded text-slate-700 font-semibold border border-slate-200">
                         {c.candidateCode}
                       </div>
@@ -228,21 +228,22 @@ export function CreateElectionForm({
                   </div>
                 ))
               ) : (
-                <div className="text-sm text-slate-500 text-center py-8 font-medium">No se detectó un JSON válido para candidatos.</div>
+                <div className="col-span-full text-sm text-slate-500 text-center py-8 font-medium bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                  No se detectó un JSON válido para candidatos.
+                </div>
               )}
             </div>
           )}
         </div>
       </div>
 
-      <div className="pt-6">
-        <button
-          type="submit"
-          className="w-full rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg focus:ring-4 focus:ring-indigo-200 px-4 py-4 text-sm font-bold transition-all"
-        >
-          Crear elección y publicar manifiesto en cadena
-        </button>
-        <p className="text-center text-xs text-slate-500 mt-3 font-medium">Se publicará el manifiesto y quedará anclada su huella criptográfica (hash).</p>
+      <div className="pt-6 flex flex-col items-end">
+        <PendingSubmitButton
+          idleLabel="Crear Elección y Anclar Manifiesto"
+          pendingLabel="Creando elección..."
+          className="admin-btn-primary !px-8 !py-3 !text-base"
+        />
+        <p className="text-xs text-slate-500 mt-2 text-right">Esta acción publicará el manifiesto en cadena inmutablemente.</p>
       </div>
     </form>
   );

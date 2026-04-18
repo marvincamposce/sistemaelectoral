@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-18T01:25:05.349Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "Elección Local Reproducible 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0xd1bf72b633b977b38647bf80dccaaf533ddd5a0a154ed51652fe77261a4c979a",
+    "notes": "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "cand-1",
+        "candidateCode": "CAND_1",
+        "displayName": "Mariana Soto",
+        "shortName": "M. Soto",
+        "partyName": "Alianza Cívica",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "cand-2",
+        "candidateCode": "CAND_2",
+        "displayName": "Tomás Rivas",
+        "shortName": "T. Rivas",
+        "partyName": "Movimiento Federal",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      },
+      {
+        "id": "cand-3",
+        "candidateCode": "CAND_3",
+        "displayName": "Lucía Peña",
+        "shortName": "L. Peña",
+        "partyName": "Pacto Social",
+        "ballotOrder": 3,
+        "status": "ACTIVE",
+        "colorHex": "#B45309",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x4adffeeb27aa0c46652fc3260a0ba277a8af5e9bea829224b3012cdc9ba0c3dfebccc85015fe38cdea42bad26b4ba3b333e6599090d2385dd0221e00a374570b",
+    "manifestHashHex": "0xb506ee6285031a439d1eb2f9eb827c76b82077891d14436506514207f01cd2b4"
+  }
+}

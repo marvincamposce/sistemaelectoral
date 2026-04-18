@@ -11,3 +11,4 @@ if (typeof BigInt !== "undefined" && !("toJSON" in BigInt.prototype)) {
 
 export * from "./stateMachine.js";
 export * from "./domain.js";
+export * from "./presentacion.js";

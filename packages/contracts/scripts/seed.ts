@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { network } from "hardhat";
 
-import { signSnapshot } from "@blockurna/crypto";
+import { deriveCoordinatorPublicKey, signSnapshot } from "@blockurna/crypto";
 
 const { ethers } = await network.connect();
 
@@ -18,7 +18,10 @@ await registry.waitForDeployment();
 const registryAddress = await registry.getAddress();
 
 const seedTimestamp = process.env.BU_SEED_TIMESTAMP ?? "2025-01-01T00:00:00.000Z";
-const coordinatorPubKey = ("0x" + "22".repeat(32)) as `0x${string}`;
+const coordinatorPrivateKey =
+  process.env.COORDINATOR_PRIVATE_KEY ??
+  "0x0312ff2054471efe7bc08b7a7abcaaf141cb4a64d41a5e46586450ad24b366fa";
+const coordinatorPubKey = (await deriveCoordinatorPublicKey(coordinatorPrivateKey)) as `0x${string}`;
 
 const candidateCatalog = [
   {

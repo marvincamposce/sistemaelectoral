@@ -9,6 +9,7 @@ import {
   canonicalizeJson,
   deriveCoordinatorPublicKey,
   getPublicKeyHex,
+  isValidZkFriendlyCoordinatorPublicKey,
   sha256Hex,
   signEd25519Hex,
   utf8ToBytes,
@@ -18,7 +19,12 @@ import { z } from "zod";
 import { getEnv, getEnvResult } from "../lib/env";
 import { ensureSchema, getPool, insertAdminLogEntry, upsertCandidate, upsertElectionManifest } from "../lib/db";
 import { getRegistry, parseElectionCreatedFromReceipt } from "../lib/registry";
+import { LiveRefresh } from "./components/LiveRefresh";
+import { ActionNotice, construirRutaConAviso } from "./components/ActionNotice";
 import { CreateElectionForm } from "./CreateElectionForm";
+import { DashboardStats } from "./components/DashboardStats";
+import { ElectionList } from "./components/ElectionList";
+import { SystemStatus } from "./components/SystemStatus";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -109,6 +115,8 @@ function phaseLabelEs(label: string | undefined, phase: number): string {
 }
 
 const HEX32_REGEX = /^0x[0-9a-fA-F]{64}$/;
+const DEFAULT_LOCAL_COORDINATOR_PRIVATE_KEY =
+  "0x0312ff2054471efe7bc08b7a7abcaaf141cb4a64d41a5e46586450ad24b366fa";
 
 function resolveDefaultRegistryAuthority(aeaPrivateKey: string): string {
   const fromEnv = String(process.env.DEFAULT_REGISTRY_AUTHORITY ?? "").trim();
@@ -125,16 +133,20 @@ function resolveDefaultRegistryAuthority(aeaPrivateKey: string): string {
 
 async function resolveDefaultCoordinatorPubKey(): Promise<string> {
   const fromEnv = String(process.env.DEFAULT_COORDINATOR_PUBKEY ?? "").trim();
-  if (HEX32_REGEX.test(fromEnv)) return fromEnv;
-  const coordinatorPrivateKey = String(process.env.COORDINATOR_PRIVATE_KEY ?? "").trim();
+  if (HEX32_REGEX.test(fromEnv) && (await isValidZkFriendlyCoordinatorPublicKey(fromEnv))) {
+    return fromEnv;
+  }
+
+  const coordinatorPrivateKey =
+    String(process.env.COORDINATOR_PRIVATE_KEY ?? "").trim() || DEFAULT_LOCAL_COORDINATOR_PRIVATE_KEY;
   if (HEX32_REGEX.test(coordinatorPrivateKey)) {
     try {
       return await deriveCoordinatorPublicKey(coordinatorPrivateKey);
     } catch {
-      // Ignore invalid derivation and fall back to the placeholder for explicit operator input.
+      // Ignore invalid derivation and require explicit operator input.
     }
   }
-  return "0x1111111111111111111111111111111111111111111111111111111111111111";
+  return "";
 }
 
 const CreateElectionInputSchema = z
@@ -236,7 +248,13 @@ async function createElectionAction(formData: FormData) {
   }
 
   const registryAuthority = ethers.getAddress(parsed.data.registryAuthority);
-  const coordinatorPubKey = parsed.data.coordinatorPubKey;
+  const coordinatorPubKey = parsed.data.coordinatorPubKey.toLowerCase();
+  const validCoordinatorPubKey = await isValidZkFriendlyCoordinatorPublicKey(coordinatorPubKey);
+  if (!validCoordinatorPubKey) {
+    throw new Error(
+      "coordinatorPubKey invalida para cifrado ZK. Debe ser una clave BabyJub comprimida de 32 bytes derivada desde COORDINATOR_PRIVATE_KEY.",
+    );
+  }
   const candidatesCatalog = parseCandidatesCatalog(parsed.data.candidatesJson ?? "");
 
   const manifestBody = {
@@ -370,66 +388,55 @@ async function createElectionAction(formData: FormData) {
 
   if (electionId === null) {
     revalidatePath("/");
-    redirect("/");
+    redirect(construirRutaConAviso("/", "eleccion-creada"));
   }
 
   revalidatePath("/");
   revalidatePath(`/elections/${electionId}`);
-  redirect(`/elections/${electionId}`);
+  redirect(construirRutaConAviso(`/elections/${electionId}`, "eleccion-creada"));
 }
 
-export default async function Page() {
+export default async function Page(props: {
+  searchParams?: Promise<{ aviso?: string; tipo?: string }>;
+}) {
+  const searchParams = props.searchParams ? await props.searchParams : undefined;
   const envRes = getEnvResult();
   if (!envRes.ok) {
     return (
-      <main className="min-h-screen text-slate-900">
-        <div className="mx-auto max-w-5xl p-6 space-y-6">
-          <header className="card p-5 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="text-3xl font-semibold">Consola AEA (BU‑PVP‑1)</h1>
-              <span className="badge badge-critical">Configuración incompleta</span>
-            </div>
-            <p className="text-sm text-slate-700">
-              Herramienta operativa para entorno local reproducible. Completa variables de entorno para habilitar operaciones on-chain.
-            </p>
-          </header>
+      <div className="space-y-6">
+        <header className="admin-card p-6 border-l-4 border-l-red-500">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h1 className="admin-page-title m-0">Configuración Incompleta</h1>
+            <span className="admin-badge admin-badge-error">Faltan Variables</span>
+          </div>
+          <p className="admin-page-subtitle">
+            Completa las variables de entorno para habilitar operaciones on-chain.
+          </p>
 
-          <section className="card p-4 space-y-3">
-            <div className="text-sm font-medium">Configuración requerida</div>
-            <div className="text-sm text-slate-700">
-              Faltan variables de entorno para iniciar la consola en modo operativo.
-            </div>
-
-            {envRes.missingKeys.length > 0 ? (
-              <div className="space-y-1">
-                <div className="text-xs text-slate-700 font-semibold">Variables faltantes</div>
-                <ul className="text-xs text-slate-700 font-mono list-disc pl-5">
-                  {envRes.missingKeys.map((k) => (
-                    <li key={k}>{k}</li>
-                  ))}
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+            {envRes.missingKeys.length > 0 && (
+              <div className="mb-4">
+                <div className="text-sm font-bold text-slate-800 mb-2">Variables faltantes:</div>
+                <ul className="list-disc pl-5 text-sm text-slate-600 font-mono">
+                  {envRes.missingKeys.map(k => <li key={k}>{k}</li>)}
                 </ul>
               </div>
-            ) : null}
-
-            {envRes.problems.length > 0 ? (
-              <div className="space-y-1">
-                <div className="text-xs text-slate-700 font-semibold">Problemas detectados</div>
-                <ul className="text-xs text-slate-700 font-mono list-disc pl-5">
-                  {envRes.problems.map((p, idx) => (
-                    <li key={`${p.key}:${idx}`}>{p.key}: {p.message}</li>
-                  ))}
+            )}
+            {envRes.problems.length > 0 && (
+              <div>
+                <div className="text-sm font-bold text-slate-800 mb-2">Problemas detectados:</div>
+                <ul className="list-disc pl-5 text-sm text-slate-600">
+                  {envRes.problems.map((p, idx) => <li key={`${p.key}:${idx}`}>{p.key}: {p.message}</li>)}
                 </ul>
               </div>
-            ) : null}
-
-            <div className="text-xs text-slate-700">Crear archivo de configuración local:</div>
-            <pre className="rounded-md bg-slate-50 border border-slate-200 p-3 text-xs overflow-x-auto">cp apps/authority-console/.env.example apps/authority-console/.env.local</pre>
-            <div className="text-xs text-slate-600">
-              Luego completa <span className="font-mono">ELECTION_REGISTRY_ADDRESS</span> y las claves de AEA.
+            )}
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <div className="text-xs text-slate-600 mb-2">Comando rápido:</div>
+              <code className="admin-hash block p-3 bg-white">cp apps/authority-console/.env.example apps/authority-console/.env.local</code>
             </div>
-          </section>
-        </div>
-      </main>
+          </div>
+        </header>
+      </div>
     );
   }
 
@@ -449,110 +456,47 @@ export default async function Page() {
     (e) => Number(e.counts?.signups ?? 0) > 0 || Number(e.counts?.ballots ?? 0) > 0,
   ).length;
   const latestElection = elections.length > 0 ? elections[elections.length - 1] : null;
+  const mostRecentThree = elections.slice().sort((a, b) => Number(b.electionId) - Number(a.electionId)).slice(0, 3);
 
   return (
-    <main className="min-h-screen text-slate-900">
-      <div className="mx-auto max-w-5xl p-6 space-y-6">
-        <header className="card p-5 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-3xl font-semibold">Consola AEA (BU‑PVP‑1)</h1>
-            <span className="badge badge-info">Operación AEA</span>
-          </div>
-          <p className="text-sm text-slate-700">
-            Gestión de elecciones, transición de fases y publicación de actas con evidencia materializada.
-          </p>
-          <div className="text-xs text-slate-500 break-all">
-            chainId={env.CHAIN_ID} · contract={env.CONTRACT_ADDRESS} · API={env.EVIDENCE_API_URL}
-          </div>
-          {!electionsRes ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              La consola no pudo consultar la Evidence API. No se está mostrando una lista vacía como si fuera real.
-            </div>
-          ) : null}
-          {latestElection ? (
-            <div className="rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
-              Última elección indexada: #{latestElection.electionId} · fase {phaseLabelEs(latestElection.phaseLabel, latestElection.phase)} · {formatTimestamp(latestElection.createdAtTimestamp)}
-            </div>
-          ) : null}
-        </header>
-
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="stat-card">
-            <span className="text-xs text-slate-500 uppercase tracking-wide">Elecciones</span>
-            <span className="text-2xl font-semibold text-slate-900">{elections.length}</span>
-          </article>
-          <article className="stat-card">
-            <span className="text-xs text-slate-500 uppercase tracking-wide">Con actividad</span>
-            <span className="text-2xl font-semibold text-slate-900">{electionsWithActivity}</span>
-          </article>
-          <article className="stat-card">
-            <span className="text-xs text-slate-500 uppercase tracking-wide">Inscripciones</span>
-            <span className="text-2xl font-semibold text-slate-900">{totalSignups}</span>
-          </article>
-          <article className="stat-card">
-            <span className="text-xs text-slate-500 uppercase tracking-wide">Boletas</span>
-            <span className="text-2xl font-semibold text-slate-900">{totalBallots}</span>
-          </article>
-        </section>
-
-        <section className="card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="section-title">Scope Honduras</div>
-              <div className="text-sm text-slate-600">
-                Censo mínimo para el proyecto: consulta de DNI, habilitación y vínculo con wallets.
-              </div>
-            </div>
-            <Link
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              href="/honduras"
-            >
-              Abrir módulo
-            </Link>
-          </div>
-        </section>
-
-        <section className="card p-4 space-y-3">
-          <div className="section-title">Elecciones</div>
-          {electionsRes === null ? (
-            <div className="text-sm text-slate-600">(API de evidencias no disponible)</div>
-          ) : elections.length === 0 ? (
-            <div className="text-sm text-slate-600">(Sin elecciones indexadas todavía)</div>
-          ) : (
-            <div className="space-y-2">
-              {elections.map((e) => (
-                <div key={e.electionId} className="rounded-md border border-slate-200 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold">Elección #{e.electionId}</div>
-                        <span className={phaseBadgeClass(e.phaseLabel)}>{phaseLabelEs(e.phaseLabel, e.phase)}</span>
-                      </div>
-                      <div className="hash-display break-all" title={e.manifestHash}>huella de manifiesto (hash): {shortHash(e.manifestHash)}</div>
-                      <div className="text-xs text-slate-700">
-                        inscripciones={e.counts?.signups ?? 0} · boletas={e.counts?.ballots ?? 0}
-                      </div>
-                      <div className="text-xs text-slate-500">creada: {formatTimestamp(e.createdAtTimestamp)}</div>
-                      <div className="hash-display break-all" title={e.createdTxHash}>tx: {shortHash(e.createdTxHash)}</div>
-                    </div>
-                    <Link
-                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      href={`/elections/${encodeURIComponent(e.electionId)}`}
-                    >
-                      Ver detalle
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="card p-4 space-y-3">
-          <div className="section-title">Crear nueva elección asistida</div>
-          <CreateElectionForm createElectionAction={createElectionAction} defaults={defaultFormValues} />
-        </section>
+    <div className="space-y-8">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="admin-page-title">Panel de Control</h1>
+          <p className="admin-page-subtitle mb-0">Vista general operativa de elecciones activas e indexación.</p>
+        </div>
+        <LiveRefresh label="Consola en vivo" intervalMs={15000} />
       </div>
-    </main>
+
+      <ActionNotice codigo={searchParams?.aviso} tipo={searchParams?.tipo} />
+
+      {/* Metrics Row */}
+      <DashboardStats
+        electionsTotal={elections.length}
+        electionsActive={electionsWithActivity}
+        totalSignups={totalSignups}
+        totalBallots={totalBallots}
+      />
+
+      <div className="grid lg:grid-cols-2 gap-8">
+        {/* Left Column */}
+        <div className="space-y-8">
+          <div className="admin-card">
+            <div className="admin-card-header">
+              <h2 className="admin-section-title mb-0">Crear Nueva Elección</h2>
+            </div>
+            <div className="admin-card-body">
+              <CreateElectionForm createElectionAction={createElectionAction} defaults={defaultFormValues} />
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column */}
+        <div className="space-y-8">
+          <ElectionList elections={mostRecentThree} phaseLabelEs={phaseLabelEs} />
+          <SystemStatus chainId={env.CHAIN_ID} contractAddress={env.CONTRACT_ADDRESS} />
+        </div>
+      </div>
+    </div>
   );
 }

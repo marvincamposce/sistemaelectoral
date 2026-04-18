@@ -2,12 +2,14 @@
 
 import { use, useState, useEffect } from "react";
 import { ethers } from "ethers";
+import { etiquetaEstado } from "@blockurna/shared";
 import { 
   closeDecryptionCeremonyAction,
   computeRealTallyAction,
   createDecryptionCeremonyAction,
   generateCoordinatorSharesAction,
   getDecryptionCeremonyStateAction,
+  getElectionPhaseAction,
   getDecryptionShareSigningMessageAction,
   publishTranscriptCommitmentAction, 
   publishActaWithContentAction, 
@@ -73,6 +75,32 @@ type ZkPublicationGateState = {
   proofState: string;
   blockers: string[];
 };
+type NoticeState = {
+  kind: "ok" | "info";
+  title: string;
+  body: string;
+};
+
+const NOTICE_STORAGE_PREFIX = "bu_tally_notice_";
+
+function estadoProcesoVisible(status: TallyStatus | string | null | undefined): string {
+  const value = String(status ?? "").toUpperCase();
+  const labels: Record<string, string> = {
+    IDLE: "En espera",
+    FETCHING_CIPHERTEXTS: "Descargando boletas",
+    COMPUTING_TALLY: "Calculando escrutinio",
+    PUBLISHING_TRANSCRIPT: "Publicando transcript",
+    PUBLISHING_ACTA: "Publicando acta",
+    DONE: "Escrutinio base completo",
+    OPEN: "Abierta",
+    CLOSED: "Cerrada",
+  };
+  return labels[value] ?? (status && status.length > 0 ? status : "Sin estado");
+}
+
+function estadoPruebaVisible(status: string | null | undefined): string {
+  return etiquetaEstado(status, "Pendiente");
+}
 
 export default function TallyPage({ params }: { params: Promise<{ electionId: string }> }) {
   const resolvedParams = use(params);
@@ -100,6 +128,37 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
   const [onchainVerifyTx, setOnchainVerifyTx] = useState<string | null>(null);
   const [onchainSubmitting, setOnchainSubmitting] = useState(false);
   const [zkGate, setZkGate] = useState<ZkPublicationGateState | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const ceremonyReady = Boolean(ceremony && ceremony.shareCount >= ceremony.thresholdRequired);
+  const tallyReady = Boolean(tallyComputation);
+  const zkReady = Boolean(zkGate?.ready);
+  const processSteps = [
+    {
+      label: "Ceremonia",
+      state: ceremony?.status === "CLOSED" ? "complete" : ceremony ? "active" : "pending",
+      note: ceremony ? `${ceremony.shareCount}/${ceremony.thresholdRequired} fragmentos` : "Sin abrir",
+    },
+    {
+      label: "Escrutinio",
+      state: tallyComputation ? "complete" : status !== "IDLE" ? "active" : "pending",
+      note: tallyComputation ? `${tallyComputation.validCount} válidas` : "Sin correr",
+    },
+    {
+      label: "Prueba ZK",
+      state:
+        zkProofStatus === "VERIFIED" || zkProofStatus === "VERIFIED_ONCHAIN" || zkProofStatus === "VERIFIED_OFFCHAIN"
+          ? "active"
+          : zkProofStatus === "BUILDING"
+            ? "active"
+            : "pending",
+      note: estadoPruebaVisible(zkProofStatus),
+    },
+    {
+      label: "Gate final",
+      state: zkGate?.ready ? "complete" : zkGate ? "active" : "pending",
+      note: zkGate?.ready ? "Listo para publicar" : "Bloqueado",
+    },
+  ];
 
   const addLog = (msg: string) => setLogs(l => [...l, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
@@ -122,8 +181,35 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
   useEffect(() => {
     void refreshCeremonyState();
+    const savedNotice = sessionStorage.getItem(`${NOTICE_STORAGE_PREFIX}${electionId}`);
+    if (savedNotice) {
+      try {
+        setNotice(JSON.parse(savedNotice) as NoticeState);
+      } catch {
+        sessionStorage.removeItem(`${NOTICE_STORAGE_PREFIX}${electionId}`);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [electionId]);
+
+  useEffect(() => {
+    const key = `${NOTICE_STORAGE_PREFIX}${electionId}`;
+    if (!notice) {
+      sessionStorage.removeItem(key);
+      return;
+    }
+    sessionStorage.setItem(key, JSON.stringify(notice));
+  }, [notice, electionId]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshCeremonyState({ silent: true });
+      void refreshZkGate(lastJobId);
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [electionId, lastJobId]);
 
   const refreshZkGate = async (jobId?: string | null) => {
     const res = await getZkPublicationGateAction(electionId, { tallyJobId: jobId ?? lastJobId });
@@ -146,6 +232,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       if (!res.ok) throw new Error(res.error ?? "No se pudo crear la ceremonia");
       setCeremony((res.ceremony as DecryptionCeremonyState | null) ?? null);
       setCeremonyMsg(res.created ? "Ceremonia 2-de-3 abierta." : "Ya existía una ceremonia abierta/reutilizable.");
+      setNotice({
+        kind: "ok",
+        title: "Ceremonia disponible",
+        body: res.created
+          ? "La ceremonia de descifrado quedó abierta y ya puede recibir fragmentos válidos."
+          : "La ceremonia ya existía y quedó lista para seguir recibiendo o revisando fragmentos.",
+      });
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err));
     } finally {
@@ -161,6 +254,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       if (!res.ok) throw new Error(res.error ?? "No se pudieron generar fragmentos de clave.");
       setGeneratedShares(res.shares);
       setCeremonyMsg("Fragmentos de clave generados para distribución operativa (2 de 3).");
+      setNotice({
+        kind: "info",
+        title: "Fragmentos generados",
+        body: "Se generaron fragmentos locales para distribución controlada. Aún debes registrar los necesarios para alcanzar el umbral.",
+      });
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err));
     }
@@ -183,6 +281,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
       setCeremony((res.ceremony as DecryptionCeremonyState | null) ?? null);
       setCeremonyMsg(res.closed ? "Ceremonia cerrada. Ya no se aceptan nuevos fragmentos." : "La ceremonia ya estaba cerrada.");
+      setNotice({
+        kind: "ok",
+        title: "Ceremonia cerrada",
+        body: "La ceremonia quedó cerrada. A partir de este punto ya no se aceptarán nuevos fragmentos.",
+      });
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err));
     } finally {
@@ -203,13 +306,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       }
       if (submissionChannelInput === "API_SIGNED") {
         if (!ceremony?.ceremonyId) {
-          throw new Error("El canal API_SIGNED requiere una ceremonia activa.");
+          throw new Error("El canal de API firmada requiere una ceremonia activa.");
         }
         if (!signerAddressInput.trim()) {
-          throw new Error("Ingresa la dirección firmante (signerAddress) para usar API_SIGNED.");
+          throw new Error("Ingresa la dirección firmante para usar el canal de API firmada.");
         }
         if (!signatureInput.trim()) {
-          throw new Error("Ingresa la firma (signature) para usar API_SIGNED.");
+          throw new Error("Ingresa la firma para usar el canal de API firmada.");
         }
       }
 
@@ -234,6 +337,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
           ? "Fragmento registrado. Ceremonia lista para descifrado (umbral cumplido)."
           : "Fragmento registrado. Aún faltan fragmentos para alcanzar el umbral.",
       );
+      setNotice({
+        kind: res.ready ? "ok" : "info",
+        title: res.ready ? "Umbral cumplido" : "Fragmento registrado",
+        body: res.ready
+          ? "La ceremonia ya alcanzó el umbral criptográfico y el escrutinio puede continuar."
+          : "El fragmento fue aceptado, pero todavía faltan más aportes para alcanzar el umbral requerido.",
+      });
       setSharePayloadInput("");
       if (submissionChannelInput === "API_SIGNED") {
         setSignatureInput("");
@@ -294,7 +404,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
       const ceremonySnapshot = await refreshCeremonyState({ silent: true });
       if (!ceremonySnapshot) {
-        addLog("No existe una ceremonia 2-de-3 activa. El escrutinio no continuará hasta que existan shares válidas suficientes.");
+        addLog("No existe una ceremonia 2-de-3 activa. El escrutinio no continuará hasta que existan fragmentos válidos suficientes.");
       } else if (ceremonySnapshot.shareCount < ceremonySnapshot.thresholdRequired) {
         addLog(
           `Advertencia: ceremonia ${ceremonySnapshot.ceremonyId} con ${ceremonySnapshot.shareCount}/${ceremonySnapshot.thresholdRequired} fragmentos. ` +
@@ -328,9 +438,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       addLog("Descifrando boletas y calculando resumen real...");
       const tallyRes = await computeRealTallyAction(electionId);
       if (!tallyRes.ok) {
+        const failureSignature = String(tallyRes.error ?? "desconocido")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 180);
         await logIncidentAction(
           electionId,
-          `TALLY_DECRYPTION_FAILED:${new Date().toISOString()}`,
+          `TALLY_DECRYPTION_FAILED:${failureSignature}`,
           "TALLY_DECRYPTION_FAILED",
           `Fallo en descifrado/conteo real: ${tallyRes.error ?? "desconocido"}`,
           "CRITICAL",
@@ -383,9 +497,13 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       );
 
       setStatus("PUBLISHING_TRANSCRIPT");
-  addLog("Publicando compromiso del transcript de escrutinio en cadena...");
+  addLog("Publicando compromiso del transcript de escrutinio en cadena (sincronizando fase a TALLYING si hace falta)...");
       const commitmentResult = await publishTranscriptCommitmentAction(electionId, commitmentPayload);
   if (!commitmentResult.ok) throw new Error(`Fallo publicando el compromiso de transcript: ${commitmentResult.error}`);
+  const phaseAdvanceTxHashes = commitmentResult.phaseAdvanceTxHashes as string[] | undefined;
+  if (Array.isArray(phaseAdvanceTxHashes) && phaseAdvanceTxHashes.length > 0) {
+    addLog(`Sincronización de fase completada con ${phaseAdvanceTxHashes.length} transacciones.`);
+  }
   addLog(`Compromiso de transcript publicado en cadena. Tx: ${commitmentResult.txHash}`);
 
       await updateTallyJobStatusAction(
@@ -438,7 +556,6 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         merkleRootPoseidon: tallyData.merkleRootPoseidon,
         transcriptHash,
         commitmentPayload,
-        timestamp: new Date().toISOString()
       };
       
       // kind=2 = ACTA_ESCRUTINIO in Solidity enum
@@ -448,6 +565,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
       setStatus("DONE");
       addLog("Escrutinio base completado. Falta la prueba ZK y su verificación para publicar resultados finales.");
+      setNotice({
+        kind: "ok",
+        title: "Escrutinio base completado",
+        body: "El transcript y el acta de escrutinio ya quedaron generados. El siguiente paso obligatorio es cerrar la verificación ZK.",
+      });
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err));
       setStatus("IDLE");
@@ -459,6 +581,31 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       setErrorMsg("");
       if (!tallyComputation) {
         throw new Error("No existe un resultado real de escrutinio para publicar. Ejecuta primero el procesamiento.");
+      }
+
+      const phaseRes = await getElectionPhaseAction(electionId);
+      if (!phaseRes.ok) {
+        throw new Error(phaseRes.error ?? "No se pudo consultar la fase on-chain de la elección.");
+      }
+      if (typeof phaseRes.phase === "number" && phaseRes.phase >= 7) {
+        addLog(
+          `La elección ya se encuentra en ${phaseRes.phaseLabel}. Se omite la republicación de payload y actas.`,
+        );
+
+        const auditRes = await openAuditWindowAction(electionId);
+        if (!auditRes.ok) throw new Error(`Fallo validando auditoría: ${auditRes.error}`);
+        addLog("Estado de auditoría verificado.");
+
+        addLog("Materializando paquete de auditoría (audit bundle)...");
+        const bundleRes = await persistAuditBundleAction(electionId);
+        if (!bundleRes.ok) throw new Error(`Fallo materializando bundle: ${bundleRes.error}`);
+        addLog(`Paquete de auditoría materializado. bundleHash: ${bundleRes.bundleHash}`);
+        setNotice({
+          kind: "ok",
+          title: "Publicación final completada",
+          body: "Los resultados ya estaban cerrados y el paquete de auditoría quedó materializado para observación pública.",
+        });
+        return;
       }
 
       const jobId = lastJobId ?? "proceso-desconocido";
@@ -488,7 +635,6 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
           whatIsReal: "Descifrado, conteo, raíz Merkle, compromiso en cadena, prueba ZK y verificación final",
           whatIsPending: "Nada en el pipeline obligatorio antes de la publicación final."
         },
-        publicationTimestamp: new Date().toISOString(),
       };
 
       const payloadRes = await createResultPayloadAction(electionId, jobId, resultJson, {
@@ -508,7 +654,6 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
         validBallots: tallyComputation.validCount,
         invalidBallots: tallyComputation.invalidCount,
         payloadHash: payloadRes.payloadHash,
-        timestamp: new Date().toISOString()
       };
       // kind=3 = ACTA_RESULTADOS in Solidity enum
       const actaResult = await publishActaWithContentAction(electionId, actaJson, 3);
@@ -529,6 +674,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       const bundleRes = await persistAuditBundleAction(electionId);
       if (!bundleRes.ok) throw new Error(`Fallo materializando bundle: ${bundleRes.error}`);
       addLog(`Paquete de auditoría materializado. bundleHash: ${bundleRes.bundleHash}`);
+      setNotice({
+        kind: "ok",
+        title: "Publicación final completada",
+        body: "Los resultados, el acta final y el paquete de auditoría ya quedaron materializados y listos para observación pública.",
+      });
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err));
     }
@@ -536,6 +686,74 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
 
   return (
     <main className="space-y-6">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-700">Centro de control JED</div>
+            <h1 className="mt-2 text-2xl font-bold text-slate-900">Escrutinio guiado para la elección #{electionId}</h1>
+            <p className="mt-3 text-sm text-slate-600">
+              Esta pantalla está organizada por etapas reales del pipeline: primero ceremonia de descifrado, luego escrutinio determinista, después prueba ZK y finalmente publicación auditada.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Ceremonia</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{ceremonyReady ? "Lista" : ceremony ? "Incompleta" : "No abierta"}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Escrutinio</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{tallyReady ? "Calculado" : "Pendiente"}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Cierre final</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{zkReady ? "Desbloqueado" : "Bloqueado por ZK"}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {notice && (
+        <div
+          className={`rounded-2xl border px-4 py-4 ${
+            notice.kind === "ok"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border-indigo-200 bg-indigo-50 text-indigo-900"
+          }`}
+        >
+          <div className="text-sm font-bold">{notice.title}</div>
+          <div className="mt-1 text-sm">{notice.body}</div>
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-4">
+        {processSteps.map((stepItem) => (
+          <div
+            key={stepItem.label}
+            className={`rounded-2xl border px-4 py-4 ${
+              stepItem.state === "complete"
+                ? "border-emerald-200 bg-emerald-50"
+                : stepItem.state === "active"
+                  ? "border-indigo-200 bg-indigo-50"
+                  : "border-slate-200 bg-slate-50"
+            }`}
+          >
+            <div
+              className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
+                stepItem.state === "complete"
+                  ? "text-emerald-700"
+                  : stepItem.state === "active"
+                    ? "text-indigo-700"
+                    : "text-slate-500"
+              }`}
+            >
+              {stepItem.state === "complete" ? "Completo" : stepItem.state === "active" ? "En curso" : "Pendiente"}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{stepItem.label}</div>
+            <div className="mt-2 text-xs text-slate-600">{stepItem.note}</div>
+          </div>
+        ))}
+      </div>
+
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-amber-700 mb-2">Resumen operativo JED</h2>
         <p className="text-sm text-amber-700">
@@ -545,8 +763,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">Panel de escrutinio guiado</h2>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Panel de escrutinio guiado</h2>
+            <p className="mt-1 text-sm text-slate-600">Usa esta vista de arriba hacia abajo. Cada bloque se habilita por evidencia real, no por simulación.</p>
+          </div>
           <span className="text-xs font-mono text-slate-500">Elección #{electionId}</span>
         </div>
 
@@ -556,15 +777,30 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
           </div>
         )}
 
-        <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4 space-y-4">
-          <div className="flex items-start justify-between gap-4">
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Elección</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">#{electionId}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Estado del proceso</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{estadoProcesoVisible(status)}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Compuerta ZK</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{zkGate?.ready ? "Lista" : estadoPruebaVisible(zkGate?.proofState)}</div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-slate-800">Ceremonia de Descifrado 2-de-3</h3>
+              <h3 className="text-sm font-semibold text-slate-800">Etapa 1. Ceremonia de descifrado</h3>
               <p className="text-xs text-slate-500 mt-1">
-                El escrutinio requiere reconstrucción de clave desde fragmentos registrados. Si no hay umbral completo, el proceso queda bloqueado.
+                Aquí se reconstruye la clave 2-de-3 desde fragmentos válidos. Sin este umbral, el escrutinio no arranca.
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => void refreshCeremonyState()}
                 className="px-3 py-2 text-xs rounded border border-slate-300 text-slate-800 hover:bg-slate-100"
@@ -595,7 +831,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
             ) : ceremony ? (
               <div className="space-y-1">
                 <div>ID de ceremonia: <span className="font-mono">{ceremony.ceremonyId}</span></div>
-                <div>Estado: <span className="font-semibold">{ceremony.status}</span></div>
+                <div>Estado: <span className="font-semibold">{estadoProcesoVisible(ceremony.status)}</span></div>
                 <div>
                   Fragmentos: <span className="font-semibold">{ceremony.shareCount}</span> / {ceremony.thresholdRequired}
                 </div>
@@ -615,161 +851,181 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
             )}
           </div>
 
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleGenerateShares}
-                className="px-3 py-2 text-xs rounded border border-sky-600 text-sky-700 hover:bg-sky-100"
-              >
-                Generar fragmentos locales
-              </button>
+          <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-sm font-semibold text-slate-800">Operaciones de ceremonia</div>
+              <p className="text-xs text-slate-500">
+                Genera fragmentos locales para pruebas controladas o registra fragmentos externos por canal manual o firmado.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleGenerateShares}
+                  className="px-3 py-2 text-xs rounded border border-sky-600 text-sky-700 hover:bg-sky-100"
+                >
+                  Generar fragmentos locales
+                </button>
+              </div>
+
+              {generatedShares.length > 0 && (
+                <div className="space-y-2 rounded border border-sky-200 bg-sky-50 p-3">
+                  <div className="text-xs text-sky-700">Fragmentos generados (distribúyelos por canal seguro):</div>
+                  {generatedShares.map((share, idx) => (
+                    <div key={share} className="flex flex-col md:flex-row md:items-center gap-2">
+                      <span className="text-[11px] text-sky-700 font-mono">T{idx + 1}</span>
+                      <input
+                        readOnly
+                        value={share}
+                        className="w-full rounded bg-slate-50 border border-slate-200 px-2 py-1 text-[11px] font-mono text-slate-800"
+                      />
+                      <button
+                        onClick={() => {
+                          setTrusteeIdInput(`TRUSTEE_${idx + 1}`);
+                          setSharePayloadInput(share);
+                        }}
+                        className="px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-800 hover:bg-slate-100"
+                      >
+                        Usar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {generatedShares.length > 0 && (
-              <div className="space-y-2 rounded border border-sky-200 bg-sky-50 p-3">
-                <div className="text-xs text-sky-700">Fragmentos generados (distribúyelos por canal seguro):</div>
-                {generatedShares.map((share, idx) => (
-                  <div key={share} className="flex flex-col md:flex-row md:items-center gap-2">
-                    <span className="text-[11px] text-sky-700 font-mono">T{idx + 1}</span>
-                    <input
-                      readOnly
-                      value={share}
-                      className="w-full rounded bg-slate-50 border border-slate-200 px-2 py-1 text-[11px] font-mono text-slate-800"
-                    />
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-sm font-semibold text-slate-800">Registrar fragmento</div>
+              <div className="grid gap-2 md:grid-cols-[180px_1fr_auto]">
+                <input
+                  value={trusteeIdInput}
+                  onChange={(e) => setTrusteeIdInput(e.target.value)}
+                  placeholder="TRUSTEE_1"
+                  className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900"
+                />
+                <input
+                  value={sharePayloadInput}
+                  onChange={(e) => setSharePayloadInput(e.target.value)}
+                  placeholder="BU-PVP-1_THRESHOLD_2_OF_3_V1:x:0x..."
+                  className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
+                />
+                <button
+                  onClick={handleSubmitShare}
+                  disabled={shareSubmitting}
+                  className="px-3 py-2 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:bg-slate-300"
+                >
+                  {shareSubmitting ? "Enviando..." : "Registrar fragmento"}
+                </button>
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-[220px_1fr]">
+                <select
+                  value={submissionChannelInput}
+                  onChange={(e) => setSubmissionChannelInput(e.target.value as "MANUAL" | "API_SIGNED")}
+                  className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900"
+                >
+                  <option value="MANUAL">Manual</option>
+                  <option value="API_SIGNED">API firmada</option>
+                </select>
+                <div className="text-xs text-slate-500 flex items-center">
+                  La API firmada valida la firma ECDSA del custodio sobre el mensaje canónico del fragmento.
+                </div>
+              </div>
+
+              {submissionChannelInput === "API_SIGNED" && (
+                <div className="space-y-2 rounded border border-cyan-200 bg-cyan-50 p-3">
+                  <div className="flex flex-wrap gap-2">
                     <button
-                      onClick={() => {
-                        setTrusteeIdInput(`TRUSTEE_${idx + 1}`);
-                        setSharePayloadInput(share);
-                      }}
-                      className="px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-800 hover:bg-slate-100"
+                      onClick={handleBuildSigningMessage}
+                      disabled={signingMessageLoading}
+                      className="px-3 py-2 text-xs rounded border border-cyan-300 text-cyan-700 hover:bg-cyan-100 disabled:bg-slate-300"
                     >
-                      Usar
+                      {signingMessageLoading ? "Generando..." : "Generar mensaje de firma"}
                     </button>
                   </div>
-                ))}
-              </div>
-            )}
 
-            <div className="grid gap-2 md:grid-cols-[180px_1fr_auto]">
-              <input
-                value={trusteeIdInput}
-                onChange={(e) => setTrusteeIdInput(e.target.value)}
-                placeholder="TRUSTEE_1"
-                className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900"
-              />
-              <input
-                value={sharePayloadInput}
-                onChange={(e) => setSharePayloadInput(e.target.value)}
-                placeholder="BU-PVP-1_THRESHOLD_2_OF_3_V1:x:0x..."
-                className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
-              />
-              <button
-                onClick={handleSubmitShare}
-                disabled={shareSubmitting}
-                className="px-3 py-2 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:bg-slate-300"
-              >
-                {shareSubmitting ? "Enviando..." : "Registrar fragmento"}
-              </button>
-            </div>
+                  <textarea
+                    readOnly
+                    value={signingMessage}
+                    placeholder="El mensaje canónico aparecerá aquí para firmarlo con la billetera del custodio"
+                    className="w-full min-h-24 rounded bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] font-mono text-slate-800"
+                  />
 
-            <div className="grid gap-2 md:grid-cols-[220px_1fr]">
-              <select
-                value={submissionChannelInput}
-                onChange={(e) => setSubmissionChannelInput(e.target.value as "MANUAL" | "API_SIGNED")}
-                className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900"
-              >
-                <option value="MANUAL">Manual</option>
-                <option value="API_SIGNED">Firmada por API (API_SIGNED)</option>
-              </select>
-              <div className="text-xs text-slate-500 flex items-center">
-                API_SIGNED valida firma ECDSA del custodio sobre el mensaje canónico del fragmento.
-              </div>
-            </div>
-
-            {submissionChannelInput === "API_SIGNED" && (
-              <div className="space-y-2 rounded border border-cyan-200 bg-cyan-50 p-3">
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={handleBuildSigningMessage}
-                    disabled={signingMessageLoading}
-                    className="px-3 py-2 text-xs rounded border border-cyan-300 text-cyan-700 hover:bg-cyan-100 disabled:bg-slate-300"
-                  >
-                    {signingMessageLoading ? "Generando..." : "Generar mensaje de firma"}
-                  </button>
+                  <input
+                    value={signerAddressInput}
+                    onChange={(e) => setSignerAddressInput(e.target.value)}
+                      placeholder="0x... dirección firmante"
+                    className="w-full rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
+                  />
+                  <input
+                    value={signatureInput}
+                    onChange={(e) => setSignatureInput(e.target.value)}
+                      placeholder="0x... firma"
+                    className="w-full rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
+                  />
                 </div>
+              )}
 
-                <textarea
-                  readOnly
-                  value={signingMessage}
-                  placeholder="El mensaje canónico aparecerá aquí para firmarlo con la billetera del custodio"
-                  className="w-full min-h-24 rounded bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] font-mono text-slate-800"
-                />
-
-                <input
-                  value={signerAddressInput}
-                  onChange={(e) => setSignerAddressInput(e.target.value)}
-                  placeholder="0x... dirección firmante (signerAddress)"
-                  className="w-full rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
-                />
-                <input
-                  value={signatureInput}
-                  onChange={(e) => setSignatureInput(e.target.value)}
-                  placeholder="0x... firma (signature)"
-                  className="w-full rounded bg-slate-50 border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900"
-                />
-              </div>
-            )}
-
-            {ceremonyMsg && <div className="text-xs text-emerald-700">{ceremonyMsg}</div>}
+              {ceremonyMsg && <div className="text-xs text-emerald-700">{ceremonyMsg}</div>}
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div className="mt-8 flex flex-col space-y-5 border-t border-slate-200 pt-6">
-          <button 
-            disabled={status !== "IDLE" || ceremonyLoading}
-            onClick={handleStartTally}
-            className={`w-full px-6 py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-3 transition-all ${
-              status === "IDLE" && !ceremonyLoading
-              ? "bg-slate-900 hover:bg-black text-white shadow-lg hover:shadow-xl ring-2 ring-transparent focus:ring-slate-400" 
-              : "bg-slate-200 text-slate-500 cursor-not-allowed"
-            }`}
-          >
-            {status === "IDLE" ? (
-              <>
-                <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                Iniciar descifrado y escrutinio
-              </>
-            ) : (
-              <>
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-400 border-t-slate-600" />
-                Ejecutando cálculos de conteo...
-              </>
-            )}
-          </button>
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Etapa 2. Escrutinio determinista</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Este paso descarga boletas, descifra, calcula transcript, ancla compromiso y genera el acta de escrutinio.
+              </p>
+            </div>
+            <button 
+              disabled={status !== "IDLE" || ceremonyLoading}
+              onClick={handleStartTally}
+              className={`px-6 py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-3 transition-all ${
+                status === "IDLE" && !ceremonyLoading
+                ? "bg-slate-900 hover:bg-black text-white shadow-lg hover:shadow-xl ring-2 ring-transparent focus:ring-slate-400" 
+                : "bg-slate-200 text-slate-500 cursor-not-allowed"
+              }`}
+            >
+              {status === "IDLE" ? (
+                <>
+                  <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                  Iniciar descifrado y escrutinio
+                </>
+              ) : (
+                <>
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-400 border-t-slate-600" />
+                  Ejecutando cálculos de conteo...
+                </>
+              )}
+            </button>
+          </div>
+
+          {tallyComputation ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Boletas</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{tallyComputation.ballotsCount}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Válidas</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{tallyComputation.validCount}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Inválidas</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{tallyComputation.invalidCount}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Tally Job</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{lastJobId ? "Creado" : "Pendiente"}</div>
+              </div>
+            </div>
+          ) : null}
+        </section>
           
           {status === "DONE" && (
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
-              
-              <div className="space-y-2">
-                <button 
-                  onClick={handlePublishResults}
-                  disabled={!zkGate?.ready}
-                  className="w-full px-6 py-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:hover:bg-slate-300"
-                >
-                  <svg className="w-5 h-5 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                  Publicar resultados y abrir auditoría pública
-                </button>
-                <p className="text-center text-xs text-slate-500 font-medium">Publica el acta matemática y abre la ventana temporal para impugnaciones públicas solo cuando el gate ZK esté completo.</p>
-                {zkGate && !zkGate.ready && (
-                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                    {zkGate.blockers.join(" ")}
-                  </div>
-                )}
-              </div>
-
-              <div className="h-px w-full bg-slate-200" />
-
-              <div className="bg-violet-50 border border-violet-100 rounded-xl p-5">
+              <div className="grid gap-6 xl:grid-cols-[1fr_0.92fr]">
+                <div className="bg-violet-50 border border-violet-100 rounded-xl p-5">
                 <div className="flex items-start gap-3">
                   <svg className="w-6 h-6 text-violet-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
                   <div>
@@ -797,6 +1053,11 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                             }
                             setZkProofJobId(res.jobId ?? null);
                             setZkProofStatus(res.status ?? "VERIFIED_OFFCHAIN");
+                            setNotice({
+                              kind: "ok",
+                              title: "Pruebas ZK generadas",
+                              body: "Las pruebas criptográficas quedaron generadas y verificadas fuera de cadena. El siguiente paso es registrarlas en cadena.",
+                            });
                             await refreshZkGate(lastJobId);
                             addLog(`Pruebas ZK generadas y verificadas fuera de cadena. JobId tally: ${res.jobId}`);
                           } catch (err: unknown) {
@@ -821,7 +1082,7 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                         {zkProofStatus === "VERIFIED_OFFCHAIN" && <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
                         
                         <div>
-                          Estado ZK: <span className="uppercase">{zkProofStatus}</span>
+                          Estado ZK: <span className="uppercase">{estadoPruebaVisible(zkProofStatus)}</span>
                           {zkProofJobId && <div className="text-[10px] font-normal text-emerald-700/80 mt-0.5">ID de prueba: {zkProofJobId}</div>}
                         </div>
                       </div>
@@ -833,8 +1094,8 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                           ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                           : "border-slate-200 bg-slate-50 text-slate-700"
                       }`}>
-                        <div className="font-semibold">Gate de publicación: {zkGate.ready ? "LISTO" : "BLOQUEADO"}</div>
-                        <div className="mt-1">Estado criptográfico actual: {zkGate.proofState}</div>
+                        <div className="font-semibold">Compuerta de publicación: {zkGate.ready ? "LISTA" : "BLOQUEADA"}</div>
+                        <div className="mt-1">Estado criptográfico actual: {estadoPruebaVisible(zkGate.proofState)}</div>
                         {zkGate.blockers.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {zkGate.blockers.map((blocker) => (
@@ -864,9 +1125,14 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                               if (!res.ok) throw new Error(res.error ?? "Falló la verificación en cadena.");
                               setZkProofStatus(res.status ?? "VERIFIED_ONCHAIN");
                               setOnchainVerifyTx(res.txHash ?? null);
+                              setNotice({
+                                kind: "ok",
+                                title: "Verificación en cadena completada",
+                                body: "La prueba obligatoria ya quedó registrada en cadena. Si no quedan bloqueos, ahora puedes publicar el resultado final.",
+                              });
                               const gateRes = await refreshZkGate(lastJobId);
                               if (gateRes.ok && gateRes.ready) {
-                                addLog("Gate ZK satisfecho. Ya se puede publicar el resultado final.");
+                                addLog("Compuerta ZK satisfecha. Ya se puede publicar el resultado final.");
                               }
                             } catch (err: unknown) {
                               setErrorMsg(getErrorMessage(err));
@@ -896,10 +1162,51 @@ export default function TallyPage({ params }: { params: Promise<{ electionId: st
                     )}
                   </div>
                 </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-white p-5">
+                    <h3 className="text-sm font-bold text-slate-900">Etapa 4. Publicación final</h3>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Solo se habilita cuando la compuerta ZK está completa. Aquí se publica el contenido final, el acta de resultados y se abre la ventana de auditoría.
+                    </p>
+                    <div className="mt-4 space-y-2">
+                      <button 
+                        onClick={handlePublishResults}
+                        disabled={!zkGate?.ready}
+                        className="w-full px-6 py-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:hover:bg-slate-300"
+                      >
+                        <svg className="w-5 h-5 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                        Publicar resultados y abrir auditoría pública
+                      </button>
+                      {zkGate && !zkGate.ready && (
+                        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                          {zkGate.blockers.join(" ")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-5">
+                    <div className="text-sm font-semibold text-slate-900">Checklist de cierre</div>
+                    <div className="mt-3 space-y-2">
+                      {[
+                        ["Ceremonia cerrada", ceremonyReady],
+                        ["Escrutinio calculado", tallyReady],
+                        ["Prueba ZK generada", Boolean(zkProofStatus)],
+                        ["Gate listo para publicar", zkReady],
+                      ].map(([label, done]) => (
+                        <div key={String(label)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                          <span className="text-slate-700">{label}</span>
+                          <span className={`badge ${done ? "badge-valid" : "badge-warning"}`}>{done ? "Sí" : "No"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
-        </div>
+        
 
         {logs.length > 0 && (
           <div className="mt-8 bg-slate-900 rounded-2xl overflow-hidden shadow-xl border border-slate-700">

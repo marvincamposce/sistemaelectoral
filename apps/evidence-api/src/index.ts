@@ -60,6 +60,7 @@ type ActRefRow = {
   verificationStatus: string | null;
   signatureScheme: string | null;
   signerAddress: string | null;
+  expectedSignerAddress: string | null;
   signerRole: string | null;
   signingDigest: string | null;
   hasCritical: boolean;
@@ -1019,6 +1020,8 @@ async function main() {
         params.requestNotes ?? null,
         JSON.stringify({
           electionId: params.electionId ?? null,
+          chainId,
+          contractAddress,
           ...(params.metadataJson ?? {}),
         }),
       ],
@@ -2047,6 +2050,7 @@ async function main() {
            c.verification_status AS "verificationStatus",
            c.signature_scheme AS "signatureScheme",
            c.signer_address AS "signerAddress",
+           c.expected_signer_address AS "expectedSignerAddress",
            c.signer_role AS "signerRole",
            c.signing_digest AS "signingDigest",
            COALESCE(i.has_critical, false) AS "hasCritical",
@@ -2094,6 +2098,7 @@ async function main() {
           createdAt: r.createdAt?.toISOString() ?? null,
           signatureScheme: r.signatureScheme ?? null,
           signerAddress: r.signerAddress ?? null,
+          expectedSignerAddress: r.expectedSignerAddress ?? null,
           signerRole: r.signerRole ?? null,
           signingDigest: r.signingDigest ?? null,
         })),
@@ -3140,10 +3145,17 @@ async function main() {
             v.full_name AS "fullName"
           FROM hn_enrollment_requests r
           LEFT JOIN hn_voter_registry v ON v.dni=r.dni
-          WHERE COALESCE(r.metadata_json->>'electionId', '') = $3
+          WHERE COALESCE(r.metadata_json->>'electionId', '') = $1
+            AND (
+              (COALESCE(r.metadata_json->>'chainId', '') = '' AND COALESCE(r.metadata_json->>'contractAddress', '') = '')
+              OR (
+                COALESCE(r.metadata_json->>'chainId', '') = $2
+                AND LOWER(COALESCE(r.metadata_json->>'contractAddress', '')) = LOWER($3)
+              )
+            )
           ORDER BY r.requested_at DESC
           LIMIT 100`,
-          [chainId, contractAddress, electionId],
+          [electionId, chainId, contractAddress],
         ),
         pool.query<ElectionAuthorizationRow>(
           `SELECT
@@ -3184,8 +3196,15 @@ async function main() {
             COUNT(*) FILTER (WHERE status='APPROVED')::int AS "approvedRequests",
             COUNT(*) FILTER (WHERE status='REJECTED')::int AS "rejectedRequests"
           FROM hn_enrollment_requests
-          WHERE COALESCE(metadata_json->>'electionId', '') = $1`,
-          [electionId],
+          WHERE COALESCE(metadata_json->>'electionId', '') = $1
+            AND (
+              (COALESCE(metadata_json->>'chainId', '') = '' AND COALESCE(metadata_json->>'contractAddress', '') = '')
+              OR (
+                COALESCE(metadata_json->>'chainId', '') = $2
+                AND LOWER(COALESCE(metadata_json->>'contractAddress', '')) = LOWER($3)
+              )
+            )`,
+          [electionId, chainId, contractAddress],
         ),
       ]);
 
@@ -3463,7 +3482,7 @@ async function main() {
           [chainId, contractAddress, electionId],
         ),
         pool.query(
-          `SELECT act_id AS "actId", act_type AS "actType", content_hash AS "contentHash", verification_status AS "verificationStatus", signature_scheme AS "signatureScheme", signer_address AS "signerAddress", signer_role AS "signerRole", signing_digest AS "signingDigest", created_at AS "createdAt"
+          `SELECT act_id AS "actId", act_type AS "actType", content_hash AS "contentHash", verification_status AS "verificationStatus", signature_scheme AS "signatureScheme", signer_address AS "signerAddress", expected_signer_address AS "expectedSignerAddress", signer_role AS "signerRole", signing_digest AS "signingDigest", created_at AS "createdAt"
            FROM acta_contents WHERE chain_id=$1 AND contract_address=$2 AND election_id=$3 ORDER BY created_at`,
           [chainId, contractAddress, electionId],
         ),

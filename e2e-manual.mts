@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { deriveCoordinatorPublicKey } from "@blockurna/crypto";
 
 const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
 const AEA_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -34,8 +35,8 @@ const registry = new ethers.Contract(CONTRACT, ABI, aeaWallet);
 const step = process.argv[2];
 
 async function createElection() {
-  const coordPubKey = coordWallet.signingKey.publicKey; // uncompressed 0x04...
-  console.log("Coordinator uncompressed pubkey:", coordPubKey);
+  const coordPubKey = await deriveCoordinatorPublicKey(COORD_KEY);
+  console.log("Coordinator BabyJub pubkey:", coordPubKey);
   console.log("Coordinator address:", coordWallet.address);
   
   const manifestHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify({

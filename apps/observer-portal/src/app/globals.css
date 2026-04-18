@@ -37,6 +37,95 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-frame {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 88rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  backdrop-filter: blur(14px);
+  background: rgba(248, 250, 252, 0.82);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.84);
+}
+
+.app-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.9rem;
+  padding-bottom: 0.9rem;
+}
+
+.app-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4338ca;
+}
+
+.app-title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.app-navlink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.8rem;
+  border-radius: 9999px;
+  border: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.8);
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.18s ease;
+}
+
+.app-navlink:hover {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.app-navlink-active {
+  border-color: #4338ca;
+  background: #4338ca;
+  color: white;
+}
+
+.app-content {
+  padding-top: 1.25rem;
+  padding-bottom: 2rem;
+}
+
+@media (max-width: 768px) {
+  .app-topbar-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 /* Subtle card elevation */
 .card {
   background: white;

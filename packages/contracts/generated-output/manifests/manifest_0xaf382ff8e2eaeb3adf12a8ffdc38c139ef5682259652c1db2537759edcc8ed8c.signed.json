@@ -1,0 +1,49 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-17T20:16:23.367Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "E2E Manual ZK localhost",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "notes": "Prueba manual UI end-to-end con ZK obligatoria",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "manual-cand-a",
+        "candidateCode": "MANA",
+        "displayName": "Manual Candidate A",
+        "shortName": "Cand A",
+        "partyName": "Manual Party A",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "manual-cand-b",
+        "candidateCode": "MANB",
+        "displayName": "Manual Candidate B",
+        "shortName": "Cand B",
+        "partyName": "Manual Party B",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0xe23d8e8905258b1e43eea05e362c1d140efe1231b0772b1e7936ec81f6b28650b09c93612005ca6614d9f203c0676304db9693a832bdb760adfb623fbc354309",
+    "manifestHashHex": "0xaf382ff8e2eaeb3adf12a8ffdc38c139ef5682259652c1db2537759edcc8ed8c"
+  }
+}

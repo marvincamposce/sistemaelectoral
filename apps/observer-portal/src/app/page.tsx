@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { etiquetaCanalSolicitud, etiquetaEstado, etiquetaMetodoBilletera } from "@blockurna/shared";
 import { getPublicEnv } from "./../lib/env";
+import { LiveRefresh } from "./components/LiveRefresh";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -561,6 +563,16 @@ export default async function Page() {
     }),
   );
 
+  const globalElectionCount = electionsDetailed.length;
+  const globalActiveIncidents = electionsDetailed.reduce(
+    (acc, election) => acc + (election.incidents ?? []).filter((incident) => incident.active !== false).length,
+    0,
+  );
+  const globalAuditOpen = electionsDetailed.filter((election) => election.auditWindow?.status === "OPEN").length;
+  const globalZkVerified = electionsDetailed.filter(
+    (election) => election.zkProof?.verifiedOnchain && election.decryptionProof?.verifiedOnchain,
+  ).length;
+
   return (
     <main className="min-h-screen" style={{ background: "#f8fafc" }}>
       {/* ─── Top Bar ─── */}
@@ -599,17 +611,20 @@ export default async function Page() {
                 </p>
               </div>
             </div>
-            <div
-              style={{
-                fontSize: "0.6875rem",
-                color: "#94a3b8",
-                background: "#f8fafc",
-                padding: "0.25rem 0.625rem",
-                borderRadius: "6px",
-                border: "1px solid #e2e8f0",
-              }}
-            >
-              API: {apiBase.replace(/^https?:\/\//, "")}
+            <div className="flex items-center gap-2">
+              <LiveRefresh label="En vivo" intervalMs={15000} />
+              <div
+                style={{
+                  fontSize: "0.6875rem",
+                  color: "#94a3b8",
+                  background: "#f8fafc",
+                  padding: "0.25rem 0.625rem",
+                  borderRadius: "6px",
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                API: {apiBase.replace(/^https?:\/\//, "")}
+              </div>
             </div>
           </div>
         </div>
@@ -634,6 +649,47 @@ export default async function Page() {
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "2.5rem" }}>
+            <section className="card" style={{ padding: "1.25rem 1.5rem" }}>
+              <div className="flex items-start justify-between gap-4" style={{ flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: "0.75rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#6366f1" }}>
+                    Resumen ejecutivo
+                  </div>
+                  <h2 style={{ fontSize: "1.125rem", fontWeight: 700, color: "#0f172a", marginTop: "0.35rem" }}>
+                    Estado general del sistema observado
+                  </h2>
+                  <p style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.5rem", maxWidth: "44rem" }}>
+                    Esta vista prioriza cuatro preguntas: cuántas elecciones están activas, si existen incidentes, si hay auditoría abierta y cuántas elecciones ya cerraron con la compuerta ZK completa.
+                  </p>
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                  gap: "0.875rem",
+                  marginTop: "1rem",
+                }}
+              >
+                <div className="stat-card">
+                  <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Elecciones</span>
+                  <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "#0f172a" }}>{globalElectionCount}</span>
+                </div>
+                <div className="stat-card">
+                  <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Incidentes activos</span>
+                  <span style={{ fontSize: "1.5rem", fontWeight: 800, color: globalActiveIncidents > 0 ? "#b91c1c" : "#0f172a" }}>{globalActiveIncidents}</span>
+                </div>
+                <div className="stat-card">
+                  <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Auditorías abiertas</span>
+                  <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "#0f172a" }}>{globalAuditOpen}</span>
+                </div>
+                <div className="stat-card">
+                  <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Cierre ZK completo</span>
+                  <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "#0f172a" }}>{globalZkVerified}</span>
+                </div>
+              </div>
+            </section>
+
             {electionsDetailed.map((e) => {
               const activeIncidents = (e.incidents ?? []).filter((i) => i.active !== false);
               const resolvedIncidents = (e.incidents ?? []).filter((i) => i.active === false);
@@ -711,9 +767,13 @@ export default async function Page() {
               });
 
               return (
-                <article key={e.electionId}>
+                <article
+                  key={e.electionId}
+                  className="card"
+                  style={{ padding: "1.5rem", borderColor: globalConsistency === "CRITICAL" ? "#fecaca" : "#e2e8f0" }}
+                >
                   {/* ─── Election Header ─── */}
-                  <div style={{ marginBottom: "1.5rem" }}>
+                  <div id={`election-${e.electionId}-summary`} style={{ marginBottom: "1.5rem" }}>
                     <div className="flex items-center gap-3" style={{ marginBottom: "0.5rem" }}>
                       <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>
                         Elección #{e.electionId}
@@ -744,6 +804,64 @@ export default async function Page() {
                         El observatorio no está interpretando estas ausencias como valores válidos.
                       </div>
                     )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: "0.875rem",
+                      marginBottom: "1.25rem",
+                    }}
+                  >
+                    <div
+                      style={{
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "14px",
+                        background: "#f8fafc",
+                        padding: "0.875rem 1rem",
+                      }}
+                    >
+                      <div style={{ fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#94a3b8" }}>
+                        Diagnóstico rápido
+                      </div>
+                      <div style={{ fontSize: "0.875rem", fontWeight: 700, color: "#0f172a", marginTop: "0.35rem" }}>
+                        {globalConsistency === "OK"
+                          ? "Sin alertas críticas visibles"
+                          : globalConsistency === "CRITICAL"
+                            ? "Hay incidentes críticos que revisar"
+                            : "Hay alertas operativas activas"}
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.4rem" }}>
+                        Fase {phaseLabelEs(e.phaseLabel, e.phase)} · {e.counts.signups} registros · {e.counts.ballots} boletas
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "14px",
+                        background: "#f8fafc",
+                        padding: "0.875rem 1rem",
+                      }}
+                    >
+                      <div style={{ fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#94a3b8" }}>
+                        Navegación rápida
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.55rem" }}>
+                        {[
+                          ["Resumen", `#election-${e.electionId}-summary`],
+                          ["Catálogo", `#election-${e.electionId}-catalog`],
+                          ["Enrolamiento", `#election-${e.electionId}-enrollment`],
+                          ["Resultados", `#election-${e.electionId}-results`],
+                          ["ZK", `#election-${e.electionId}-zk`],
+                          ["Actas", `#election-${e.electionId}-acts`],
+                        ].map(([label, href]) => (
+                          <a key={label} href={href} className="btn-subtle">
+                            {label}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   {/* ─── Stat Cards ─── */}
@@ -821,7 +939,7 @@ export default async function Page() {
                           Auditoría
                         </span>
                         <span className={`badge ${e.auditWindow.status === "OPEN" ? "badge-valid" : "badge-neutral"}`} style={{ alignSelf: "flex-start", marginTop: "0.25rem" }}>
-                          {e.auditWindow.status === "OPEN" ? "Ventana abierta" : e.auditWindow.status}
+                          {e.auditWindow.status === "OPEN" ? "Ventana abierta" : etiquetaEstado(e.auditWindow.status)}
                         </span>
                         {e.auditWindow.openedAt && (
                           <span style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>
@@ -833,7 +951,7 @@ export default async function Page() {
                   </div>
 
                   {/* ─── Candidate Catalog ─── */}
-                  <section style={{ marginBottom: "2rem" }}>
+                  <section id={`election-${e.electionId}-catalog`} style={{ marginBottom: "2rem" }}>
                     <h3 className="section-title">Catálogo de candidaturas</h3>
                     <div className="card" style={{ padding: "1rem 1.25rem" }}>
                       <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
@@ -893,7 +1011,7 @@ export default async function Page() {
                                 </div>
                               </div>
                               <span className={`badge ${String(candidate.status).toUpperCase() === "ACTIVE" ? "badge-valid" : "badge-neutral"}`}>
-                                {candidate.status}
+                                {etiquetaEstado(candidate.status)}
                               </span>
                             </div>
                           ))}
@@ -903,7 +1021,7 @@ export default async function Page() {
                   </section>
 
                   {/* ─── Enrollment & Authorization ─── */}
-                  <section style={{ marginBottom: "2rem" }}>
+                  <section id={`election-${e.electionId}-enrollment`} style={{ marginBottom: "2rem" }}>
                     <h3 className="section-title">Enrolamiento y autorización</h3>
                     <div className="card" style={{ padding: "1rem 1.25rem" }}>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
@@ -920,7 +1038,7 @@ export default async function Page() {
                           <span className="badge badge-valid" style={{ alignSelf: "flex-start" }}>{e.enrollment?.summary.activeAuthorizations ?? "N/D"}</span>
                         </div>
                         <div className="stat-card">
-                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Wallet activa</span>
+                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Billetera activa</span>
                           <span style={{ fontSize: "1.35rem", fontWeight: 800, color: "#0f172a" }}>{e.enrollment?.summary.activeWalletCoverage ?? "N/D"}</span>
                         </div>
                       </div>
@@ -946,11 +1064,11 @@ export default async function Page() {
                                       <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>{request.dni}</div>
                                     </div>
                                     <span className={severityBadgeClass(request.status === "REJECTED" ? "CRITICAL" : request.status === "PENDING_REVIEW" ? "WARNING" : "INFO")}>
-                                      {request.status}
+                                      {etiquetaEstado(request.status)}
                                     </span>
                                   </div>
                                   <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.35rem" }}>
-                                    {request.requestChannel} · {formatTimestamp(request.requestedAt)}
+                                    {etiquetaCanalSolicitud(request.requestChannel)} · {formatTimestamp(request.requestedAt)}
                                   </div>
                                 </div>
                               ))}
@@ -980,10 +1098,10 @@ export default async function Page() {
                                         </div>
                                         <div style={{ fontSize: "0.6875rem", color: "#94a3b8" }}>{authorization.dni}</div>
                                       </div>
-                                      <span className="badge badge-valid">{authorization.status}</span>
+                                      <span className="badge badge-valid">{etiquetaEstado(authorization.status)}</span>
                                     </div>
                                     <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.35rem" }}>
-                                      wallet {authorization.walletLinkStatus ?? "—"} · método {authorization.verificationMethod ?? "—"}
+                                      billetera {etiquetaEstado(authorization.walletLinkStatus)} · método {etiquetaMetodoBilletera(authorization.verificationMethod)}
                                     </div>
                                     <div style={{ fontSize: "0.6875rem", color: "#64748b", marginTop: "0.2rem" }}>
                                       {formatTimestamp(authorization.authorizedAt)}
@@ -1001,24 +1119,24 @@ export default async function Page() {
                   {e.results && e.results.length > 0 && (() => {
                     const r = latestResult!;
                     return (
-                      <div className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "2rem", borderLeft: "3px solid #6366f1" }}>
+                      <div id={`election-${e.electionId}-results`} className="card" style={{ padding: "1.25rem 1.5rem", marginBottom: "2rem", borderLeft: "3px solid #6366f1" }}>
                         <div className="flex items-center justify-between" style={{ marginBottom: "0.75rem" }}>
                           <h3 style={{ fontSize: "0.875rem", fontWeight: 600, color: "#0f172a" }}>
                             Resultados publicados
                           </h3>
-                          <span className="badge badge-info">{r.resultMode}</span>
+                          <span className="badge badge-info">{etiquetaEstado(r.resultMode)}</span>
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", fontSize: "0.75rem" }}>
                           <div>
-                            <span style={{ color: "#94a3b8" }}>Proceso de escrutinio (tally job):</span>{" "}
+                            <span style={{ color: "#94a3b8" }}>Proceso de escrutinio:</span>{" "}
                             <span className="hash-display" title={r.tallyJobId}>{fullHash(r.tallyJobId)}</span>
                           </div>
                           <div>
-                            <span style={{ color: "#94a3b8" }}>Estado de prueba (proof state):</span>{" "}
-                            <span style={{ color: "#475569", fontWeight: 500 }}>{r.proofState}</span>
+                            <span style={{ color: "#94a3b8" }}>Estado de la prueba:</span>{" "}
+                            <span style={{ color: "#475569", fontWeight: 500 }}>{etiquetaEstado(r.proofState)}</span>
                           </div>
                           <div style={{ gridColumn: "1 / -1" }}>
-                            <span style={{ color: "#94a3b8" }}>Huella del contenido (payload hash):</span>{" "}
+                            <span style={{ color: "#94a3b8" }}>Huella del contenido final:</span>{" "}
                             <span className="hash-display" title={r.payloadHash} style={{ maxWidth: "100%" }}>{fullHash(r.payloadHash)}</span>
                           </div>
                           {r.honestyNote && (
@@ -1149,7 +1267,7 @@ export default async function Page() {
                   </section>
 
                   {/* ─── Actas (Evidence Cards) ─── */}
-                  <section style={{ marginBottom: "2.5rem" }}>
+                  <section id={`election-${e.electionId}-acts`} style={{ marginBottom: "2.5rem" }}>
                     <h3 className="section-title">Actas electorales</h3>
                     {e.acts.length === 0 ? (
                       <p style={{ fontSize: "0.8125rem", color: "#94a3b8" }}>Sin actas publicadas.</p>
@@ -1285,7 +1403,7 @@ export default async function Page() {
                   </section>
 
                   {/* ─── ZK Proof Status ─── */}
-                  <section style={{ marginBottom: "2.5rem" }}>
+                  <section id={`election-${e.electionId}-zk`} style={{ marginBottom: "2.5rem" }}>
                     <h3 className="section-title">Prueba ZK</h3>
                     <div className="card" style={{ padding: "1.25rem 1.5rem" }}>
                       {e.zkProof ? (
@@ -1296,7 +1414,7 @@ export default async function Page() {
                                 {e.zkProof.circuitId}
                               </span>
                               <div style={{ fontSize: "0.6875rem", color: "#94a3b8", marginTop: "0.125rem" }}>
-                                {e.zkProof.proofSystem} · Proceso (job) {e.zkProof.jobId}
+                                {e.zkProof.proofSystem} · Proceso {e.zkProof.jobId}
                               </div>
                             </div>
                             <span className={`badge ${
@@ -1306,7 +1424,7 @@ export default async function Page() {
                               e.zkProof.status === "FAILED" ? "badge-critical" :
                               "badge-neutral"
                             }`}>
-                              {e.zkProof.status === "VERIFIED_OFFCHAIN" ? "✓ Verificada off-chain" :
+                              {e.zkProof.status === "VERIFIED_OFFCHAIN" ? "✓ Verificada fuera de cadena" :
                                e.zkProof.status === "VERIFIED_ONCHAIN" ? "✓ Verificada en cadena" :
                                e.zkProof.status === "BUILDING" ? "⏳ Generando..." :
                                e.zkProof.status === "FAILED" ? "✗ Fallida" :

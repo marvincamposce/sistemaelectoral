@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Manrope } from "next/font/google";
 import "./globals.css";
 
@@ -22,7 +23,22 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className={`${manrope.variable} min-h-screen`}>
-        <div className="mx-auto max-w-3xl p-6 sm:p-10 space-y-8">
+        <div className="app-shell">
+          <header className="app-topbar">
+            <div className="app-frame app-topbar-inner">
+              <div>
+                <div className="app-kicker">BlockUrna</div>
+                <div className="app-title">Portal ciudadano</div>
+              </div>
+              <nav className="app-nav" aria-label="Aplicaciones">
+                <Link href="http://localhost:3012/" className="app-navlink">Autoridad</Link>
+                <Link href="http://localhost:3004/" className="app-navlink app-navlink-active">Ciudadanía</Link>
+                <Link href="http://localhost:3005/" className="app-navlink">Escrutinio</Link>
+                <Link href="http://localhost:3011/" className="app-navlink">Observer</Link>
+              </nav>
+            </div>
+          </header>
+          <div className="app-frame mx-auto max-w-5xl p-6 sm:p-10 space-y-8">
           <header className="card p-5">
             <div className="flex items-center justify-between gap-3">
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">BlockUrna · Portal de Votación</h1>
@@ -33,6 +49,7 @@ export default function RootLayout({
             </p>
           </header>
           {children}
+        </div>
         </div>
       </body>
     </html>
