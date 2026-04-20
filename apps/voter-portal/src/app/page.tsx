@@ -174,19 +174,20 @@ export default function VoterPortal() {
   }
 
   return (
-    <main className="vp-container">
-      <div className="vp-glass-panel mb-8 p-8 flex flex-col items-center text-center animate-slide-up">
-        <h1 className="vp-title-display">Tu voto, asegurado.</h1>
-        <p className="vp-subtitle max-w-2xl">Bienvenido al Portal del Votante. Sigue el proceso guiado para verificar tu habilitación y acceder a la urna de forma segura.</p>
+    <main className="max-w-4xl mx-auto space-y-6">
+      <div className="card p-8 flex flex-col items-center text-center animate-slide-up">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-3">Tu voto, asegurado.</h1>
+        <p className="admin-page-subtitle max-w-2xl mx-auto text-center m-0">Bienvenido al Portal del Votante. Sigue el proceso guiado para verificar tu habilitación y acceder a la urna de forma segura.</p>
         
         {/* Wizard Progress */}
         <div className="w-full max-w-md mt-8">
-          <div className="vp-wizard-nav">
-            <div className={`vp-wizard-step ${step >= 1 ? 'active' : ''} ${step > 1 ? 'completed' : ''}`}>1</div>
-            <div className={`vp-wizard-step ${step >= 2 ? 'active' : ''} ${step > 2 ? 'completed' : ''}`}>2</div>
-            <div className={`vp-wizard-step ${step >= 3 ? 'active' : ''}`}>3</div>
+          <div className="flex items-center justify-between relative mb-3">
+            <div className="border-t-2 border-slate-200 absolute top-1/2 left-0 w-full -z-10"></div>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 bg-white ${step >= 1 ? 'border-indigo-600 text-indigo-600' : 'border-slate-200 text-slate-400'} ${step > 1 ? 'bg-indigo-600 text-white' : ''}`}>1</div>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 bg-white ${step >= 2 ? 'border-indigo-600 text-indigo-600' : 'border-slate-200 text-slate-400'} ${step > 2 ? 'bg-indigo-600 text-white' : ''}`}>2</div>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 bg-white ${step >= 3 ? 'border-indigo-600 text-indigo-600' : 'border-slate-200 text-slate-400'}`}>3</div>
           </div>
-          <div className="flex justify-between text-xs font-bold text-[var(--text-tertiary)] uppercase tracking-wider">
+          <div className="flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
             <span>Elección</span>
             <span>Identidad</span>
             <span>Acceso</span>
@@ -235,52 +236,52 @@ export default function VoterPortal() {
 
         {/* Step 3: Status & Action */}
         {step === 3 && (
-          <div className="vp-glass-panel p-8">
-            <div className="vp-flex-between mb-8">
-              <h2 className="vp-title-section m-0">Estado del Expediente</h2>
-              <button onClick={() => setStep(2)} className="vp-btn-secondary !p-2 !rounded-full"><ArrowLeft size={18} /></button>
+          <div className="card p-8">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="section-title m-0">Estado del Expediente</h2>
+              <button onClick={() => setStep(2)} className="btn-subtle !p-2 !rounded-full"><ArrowLeft size={18} /></button>
             </div>
 
             {(!lookup && !publicStatus) ? (
-              <div className="text-center py-10 text-[var(--text-tertiary)]">Cargando expediente...</div>
+              <div className="text-center py-10 text-slate-400">Cargando expediente...</div>
             ) : (
-              <div className="vp-grid-2">
+              <div className="grid gap-6 md:grid-cols-2">
                 {/* Profile Info */}
-                <div className="vp-card flex flex-col justify-center">
-                  <div className="text-xs text-[var(--text-tertiary)] uppercase font-bold tracking-wider mb-1">Ciudadano</div>
-                  <div className="text-xl font-bold text-[var(--text-primary)]">{lookup?.record?.fullName || publicStatus?.record?.fullName || selfRegistrationName || "Expediente en Proceso"}</div>
-                  <div className="font-mono text-sm text-[var(--text-secondary)] mt-1">DNI: {normalizedDni}</div>
+                <div className="card p-5 flex flex-col justify-center">
+                  <div className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Ciudadano</div>
+                  <div className="text-xl font-bold text-slate-900">{lookup?.record?.fullName || publicStatus?.record?.fullName || selfRegistrationName || "Expediente en Proceso"}</div>
+                  <div className="font-mono text-sm text-slate-500 mt-1">DNI: {normalizedDni}</div>
                   
-                  <div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
+                  <div className="mt-6 pt-6 border-t border-slate-100">
                     <div className="flex items-center gap-2 mb-2">
-                      <Wallet size={16} className="text-[var(--text-tertiary)]" />
+                      <Wallet size={16} className="text-slate-400" />
                       <span className="font-semibold text-sm">Estado de Billetera</span>
                     </div>
                     {lookup?.walletLink ? (
-                      <span className="vp-status-badge vp-status-success">Provisionada</span>
+                      <span className="badge badge-valid">Provisionada</span>
                     ) : publicStatus?.walletProvisioned ? (
-                      <span className="vp-status-badge vp-status-success">Provisionada</span>
+                      <span className="badge badge-valid">Provisionada</span>
                     ) : (
-                      <span className="vp-status-badge vp-status-warning">Pendiente de Emisión</span>
+                      <span className="badge badge-warning">Pendiente de Emisión</span>
                     )}
                   </div>
                 </div>
 
                 {/* Authorization Status */}
-                <div className="vp-card">
+                <div className="card p-5">
                   <div className="flex items-center gap-2 mb-4">
-                    <ShieldAlert size={18} className="text-[var(--color-brand-600)]" />
+                    <ShieldAlert size={18} className="text-indigo-600" />
                     <span className="font-bold">Autorización Electoral</span>
                   </div>
                   
-                  <div className="p-4 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] mb-6">
-                    <div className="vp-flex-between">
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 mb-6">
+                    <div className="flex items-center justify-between">
                       <span className="font-semibold">Elección #{electionId}</span>
-                      <span className={`vp-status-badge ${(lookup?.record?.habilitationStatus === "HABILITADO" || publicStatus?.record?.habilitationStatus === "HABILITADO") ? 'vp-status-success' : 'vp-status-warning'}`}>
+                      <span className={`badge ${(lookup?.record?.habilitationStatus === "HABILITADO" || publicStatus?.record?.habilitationStatus === "HABILITADO") ? 'badge-valid' : 'badge-warning'}`}>
                         {etiquetaEstado(lookup?.record?.habilitationStatus ?? publicStatus?.record?.habilitationStatus ?? publicStatus?.latestRequest?.status, "Revisando")}
                       </span>
                     </div>
-                    <div className="text-sm text-[var(--text-secondary)] mt-2">
+                    <div className="text-sm text-slate-500 mt-2">
                       {lookup?.record?.statusReason || publicStatus?.record?.statusReason || "El expediente está siendo procesado por la autoridad."}
                     </div>
                   </div>
@@ -288,13 +289,13 @@ export default function VoterPortal() {
                   <button 
                     onClick={goToVote} 
                     disabled={!selectedAuthorization || busy !== null} 
-                    className="vp-btn-primary w-full h-14"
+                    className="admin-btn-primary w-full h-14 text-base"
                   >
                     {busy === "GO" ? "Asegurando conexión..." : selectedAuthorization ? "Ingresar a la Urna" : "Esperando Autorización"}
                   </button>
                   
                   {!selectedAuthorization && (
-                    <p className="text-xs text-center text-[var(--text-tertiary)] mt-3">
+                    <p className="text-xs text-center text-slate-400 mt-3">
                       El botón se activará cuando tu expediente esté completamente habilitado y autorizado para esta elección.
                     </p>
                   )}

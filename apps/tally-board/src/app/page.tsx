@@ -47,24 +47,24 @@ export default async function TallyBoardHome() {
   const relevantElections = elections.filter((e) => e.phase >= 5 && e.phase <= 7);
 
   return (
-    <main className="tb-container space-y-8">
+    <div className="space-y-6">
       <div className="flex justify-end">
-        <LiveRefresh label="Conexión Segura" intervalMs={12000} />
+        <LiveRefresh label="En vivo" intervalMs={12000} />
       </div>
 
-      <section className="tb-panel">
-        <div className="tb-body">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <section className="card p-6">
+        <div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div>
-              <h1 className="tb-title text-2xl">
-                <Calculator className="w-8 h-8 text-[var(--color-neon-blue)]" />
+              <h1 className="admin-page-title flex items-center gap-2">
+                <Calculator className="w-6 h-6 text-indigo-600" />
                 Centro de Escrutinio Criptográfico
               </h1>
-              <p className="tb-subtitle mt-2">
+              <p className="admin-page-subtitle m-0 mt-1">
                 Ejecución de conteo ZK con evidencia trazable y verificación inmutable.
               </p>
             </div>
-            <span className="tb-badge tb-badge-active">
+            <span className="badge badge-valid">
               <Activity className="w-3 h-3 mr-1" />
               SISTEMA EN LÍNEA
             </span>
@@ -74,21 +74,21 @@ export default async function TallyBoardHome() {
         </div>
       </section>
 
-      <section className="tb-panel">
-        <div className="tb-header">
-          <h2 className="text-sm font-semibold flex items-center gap-2 font-mono tracking-widest uppercase">
-            <Database className="w-4 h-4 text-[var(--color-neon-blue)]" />
+      <section className="card">
+        <div className="admin-card-header">
+          <h2 className="section-title m-0">
+            <Database className="w-4 h-4 text-indigo-600" />
             Matriz de Escrutinio
           </h2>
-          <span className="tb-mono-hash bg-transparent border-none">
+          <span className="hash-display border-none bg-transparent">
             BLOCK_HGT: LATEST
           </span>
         </div>
 
-        <div className="tb-body p-6">
+        <div className="p-6">
           <ElectionGrid relevantElections={relevantElections} phaseLabelEs={phaseLabelEs} />
         </div>
       </section>
-    </main>
+    </div>
   );
 }

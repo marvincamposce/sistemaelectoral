@@ -1,50 +1,44 @@
 import type { Metadata } from "next";
-import { Inter, Outfit } from "next/font/google";
-import { Sidebar } from "./components/Sidebar";
+import Link from "next/link";
+import { Manrope } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const manrope = Manrope({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
   variable: "--font-sans",
-});
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  variable: "--font-display",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "BlockUrna · Consola AEA",
-  description: "Centro de Comando de Autoridad Electoral Abstracta",
+  title: "BlockUrna · Consola de Autoridad",
+  description: "Centro de Comando de Autoridad Electoral Abstracta — gestión de elecciones BU-PVP-1",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" className={`${inter.variable} ${outfit.variable}`}>
-      <body className="antialiased">
-        <div className="admin-layout">
-          <Sidebar />
-
-          {/* Main Content Area */}
-          <main className="admin-main">
-            <header className="admin-topbar">
-              <div className="text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                Consola de Operación (BU-PVP-1)
+    <html lang="es">
+      <body className={manrope.variable}>
+        <div className="app-shell">
+          <header className="app-topbar">
+            <div className="app-frame app-topbar-inner">
+              <div>
+                <div className="app-kicker">BlockUrna</div>
+                <div className="app-title">Consola de autoridad</div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="flex h-3 w-3 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                </span>
-                <span className="text-sm font-medium text-slate-600">Conexión Segura</span>
-              </div>
-            </header>
-            <div className="admin-content">
-              {children}
+              <nav className="app-nav" aria-label="Aplicaciones">
+                <Link href="http://localhost:3012/" className="app-navlink app-navlink-active">Autoridad</Link>
+                <Link href="http://localhost:3004/" className="app-navlink">Ciudadanía</Link>
+                <Link href="http://localhost:3005/" className="app-navlink">Escrutinio</Link>
+                <Link href="http://localhost:3011/" className="app-navlink">Observer</Link>
+              </nav>
             </div>
-          </main>
+          </header>
+          <div className="app-frame app-content">
+            {children}
+          </div>
         </div>
       </body>
     </html>

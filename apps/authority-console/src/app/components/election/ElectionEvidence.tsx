@@ -24,286 +24,267 @@ function formatTimestamp(ts: string | null | undefined): string {
   if (!ts) return "—";
   try {
     return new Date(ts).toLocaleString("es-MX", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
     });
-  } catch {
-    return ts;
-  }
+  } catch { return ts; }
 }
 
 function shortHash(hash: string | null | undefined): string {
   if (!hash) return "—";
   if (hash.length <= 18) return hash;
-  return `${hash.slice(0, 10)}...${hash.slice(-8)}`;
+  return `${hash.slice(0, 10)}…${hash.slice(-6)}`;
 }
 
-function severityBadgeClass(severity: string | undefined | null): string {
-  const value = String(severity ?? "INFO").toUpperCase();
-  if (value === "CRITICAL") return "admin-badge admin-badge-critical";
-  if (value === "WARNING") return "admin-badge admin-badge-warning";
-  if (value === "INFO") return "admin-badge admin-badge-info";
-  return "admin-badge admin-badge-info";
+const ACTA_LABELS: Record<string, string> = {
+  ACTA_APERTURA: "Acta de apertura",
+  ACTA_CIERRE: "Acta de cierre",
+  ACTA_ESCRUTINIO: "Acta de escrutinio",
+  ACTA_RESULTADOS: "Acta de resultados",
+};
+
+const SEVERITY_LABELS: Record<string, string> = {
+  CRITICAL: "Crítico", WARNING: "Advertencia", INFO: "Información",
+};
+
+const VERIFICATION_LABELS: Record<string, { label: string; cls: string }> = {
+  VALID: { label: "✓ Verificada", cls: "admin-badge admin-badge-valid" },
+  VERIFIED: { label: "✓ Verificada", cls: "admin-badge admin-badge-valid" },
+  PENDING: { label: "⏳ Pendiente", cls: "admin-badge admin-badge-info" },
+  UNKNOWN: { label: "⏳ Pendiente", cls: "admin-badge admin-badge-info" },
+  SIN_VERIFICAR: { label: "⏳ Sin verificar", cls: "admin-badge admin-badge-info" },
+  MISSING: { label: "⚠ Faltante", cls: "admin-badge admin-badge-warning" },
+};
+
+function verificationBadge(status: string | null | undefined) {
+  const key = String(status ?? "SIN_VERIFICAR").toUpperCase();
+  const entry = VERIFICATION_LABELS[key] ?? { label: key, cls: "admin-badge admin-badge-critical" };
+  return <span className={entry.cls}>{entry.label}</span>;
 }
 
-function verificationBadgeClass(status: string | undefined | null): string {
-  const value = String(status ?? "").toUpperCase();
-  if (value === "VERIFIED" || value === "VALID") return "admin-badge admin-badge-valid";
-  if (value === "PENDING" || value === "UNKNOWN") return "admin-badge admin-badge-info";
-  if (value === "MISSING") return "admin-badge admin-badge-warning";
-  if (value.length > 0) return "admin-badge admin-badge-critical";
-  return "admin-badge admin-badge-info";
-}
-
-function etiquetaTipoActa(kind: string): string {
-  const labels: Record<string, string> = {
-    ACTA_APERTURA: "Acta de apertura",
-    ACTA_CIERRE: "Acta de cierre",
-    ACTA_ESCRUTINIO: "Acta de escrutinio",
-    ACTA_RESULTADOS: "Acta de resultados",
-  };
-  return labels[kind] ?? kind;
-}
+const INCIDENT_TYPES = [
+  { value: "OPERATOR_NOTE", label: "Nota del operador" },
+  { value: "SYSTEM_ANOMALY", label: "Anomalía del sistema" },
+  { value: "VOTER_COMPLAINT", label: "Queja de votante" },
+  { value: "SECURITY_ALERT", label: "Alerta de seguridad" },
+  { value: "HARDWARE_FAILURE", label: "Falla de hardware" },
+  { value: "NETWORK_ISSUE", label: "Problema de red" },
+  { value: "PROCEDURE_DEVIATION", label: "Desviación de procedimiento" },
+  { value: "OTHER", label: "Otro" },
+];
 
 export function ElectionEvidence({
-  electionIdStr,
-  apiUrl,
-  consistencyRes,
-  incidentsRes,
-  anchorsRes,
-  actsRes,
-  activeIncidents,
-  criticalActive,
-  warningActive,
-  infoActive,
-  consistencyOk,
-  latestAct,
-  latestTransition,
-  phaseChangesRes,
-  publishActaAction,
-  registerOperationalIncidentAction,
+  electionIdStr, apiUrl,
+  consistencyRes, incidentsRes, anchorsRes, actsRes,
+  activeIncidents, criticalActive, warningActive, infoActive,
+  consistencyOk, latestAct, latestTransition, phaseChangesRes,
+  publishActaAction, registerOperationalIncidentAction,
 }: ElectionEvidenceProps) {
   return (
     <div className="space-y-6">
-      <section className="admin-card p-4 space-y-4">
-        <div className="admin-section-title m-0">Publicar acta digital</div>
-        <form action={publishActaAction} className="space-y-3">
+      {/* ── Publish Act ── */}
+      <section className="admin-card p-5 space-y-5">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">Publicar acta digital</h3>
+          <p className="text-xs text-slate-500 mt-1">Firma y ancla un acta electoral en la blockchain. El acta queda como evidencia inmutable.</p>
+        </div>
+        <form action={publishActaAction} className="space-y-4">
           <input type="hidden" name="electionId" value={electionIdStr} />
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-            Elige un tipo de acta entendible y coherente con la fase actual. Si la cadena acepta la transacción pero la evidencia tarda en verse, la pantalla se actualizará sola en unos segundos.
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700" htmlFor="kind">
-              Tipo
-            </label>
-            <select id="kind" name="kind" className="admin-input">
-              <option value="ACTA_APERTURA">{etiquetaTipoActa("ACTA_APERTURA")}</option>
-              <option value="ACTA_CIERRE">{etiquetaTipoActa("ACTA_CIERRE")}</option>
-              <option value="ACTA_ESCRUTINIO">{etiquetaTipoActa("ACTA_ESCRUTINIO")}</option>
-              <option value="ACTA_RESULTADOS">{etiquetaTipoActa("ACTA_RESULTADOS")}</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700" htmlFor="notes">
-              Notas (opcional)
-            </label>
-            <textarea
-              id="notes"
-              name="notes"
-              className="admin-input"
-              rows={3}
-              placeholder="Contexto de la publicación del acta"
-            />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700" htmlFor="kind">Tipo de acta</label>
+              <select id="kind" name="kind" className="admin-input">
+                {Object.entries(ACTA_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700" htmlFor="notes">Notas (opcional)</label>
+              <textarea id="notes" name="notes" className="admin-input" rows={2} placeholder="Contexto adicional sobre la publicación..." />
+            </div>
           </div>
           <PendingSubmitButton
-            idleLabel="Firmar acta y anclar en cadena"
-            pendingLabel="Firmando y enviando acta..."
+            idleLabel="Firmar y publicar acta"
+            pendingLabel="Firmando y enviando a la blockchain..."
             className="admin-btn-primary"
           />
         </form>
-        <div className="text-xs text-slate-500">
-          El JSON firmado se escribe en <span className="font-mono bg-slate-100 px-1 rounded text-slate-600">ACTA_OUTPUT_DIR</span> para que el evidence-indexer lo materialice en Postgres.
-        </div>
       </section>
 
-      <section className="admin-card p-4 space-y-4">
-        <div className="admin-section-title m-0">Consistencia e incidentes (lectura Evidence API)</div>
-        <div className="flex flex-wrap gap-2">
-          <span className="admin-badge admin-badge-critical">CRITICAL: {criticalActive}</span>
-          <span className="admin-badge admin-badge-warning">WARNING: {warningActive}</span>
-          <span className="admin-badge admin-badge-info">INFO: {infoActive}</span>
-          <span className={consistencyOk ? "admin-badge admin-badge-valid" : "admin-badge admin-badge-warning"}>
-            consistencia: {consistencyOk ? "ok" : "pendiente/revisión"}
-          </span>
+      {/* ── Consistency & Incidents Summary ── */}
+      <section className="admin-card p-5 space-y-5">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">Estado de integridad</h3>
+          <p className="text-xs text-slate-500 mt-1">Verificación automática de consistencia y registro de incidentes activos.</p>
         </div>
-        <div className="text-xs text-slate-600">
-          Última corrida: {formatTimestamp(consistencyRes?.consistency?.computedAt)}
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className={`rounded-xl p-4 border ${consistencyOk ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Consistencia</div>
+            <div className={`text-sm font-bold mt-1 ${consistencyOk ? "text-emerald-700" : "text-amber-700"}`}>
+              {consistencyOk ? "✓ Verificada" : "⏳ Pendiente de revisión"}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              {formatTimestamp(consistencyRes?.consistency?.computedAt)}
+            </div>
+          </div>
+          <div className={`rounded-xl p-4 border ${criticalActive > 0 ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-200"}`}>
+            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Críticos</div>
+            <div className={`text-2xl font-bold mt-1 ${criticalActive > 0 ? "text-red-700" : "text-slate-900"}`}>{criticalActive}</div>
+          </div>
+          <div className={`rounded-xl p-4 border ${warningActive > 0 ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-200"}`}>
+            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Advertencias</div>
+            <div className={`text-2xl font-bold mt-1 ${warningActive > 0 ? "text-amber-700" : "text-slate-900"}`}>{warningActive}</div>
+          </div>
+          <div className="rounded-xl p-4 border bg-slate-50 border-slate-200">
+            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Informativos</div>
+            <div className="text-2xl font-bold mt-1 text-slate-900">{infoActive}</div>
+          </div>
         </div>
-        <div className="text-[11px] text-slate-500 font-mono break-all bg-slate-50 p-2 rounded-md border border-slate-100">
-          <div>{apiUrl}/v1/elections/{electionIdStr}/consistency</div>
-          <div>{apiUrl}/v1/elections/{electionIdStr}/incidents</div>
-        </div>
-        
-        {activeIncidents.length > 0 ? (
+
+        {activeIncidents.length > 0 && (
           <div className="space-y-2">
+            <div className="text-xs font-semibold text-slate-700">Incidentes activos</div>
             {activeIncidents.slice(0, 5).map((incident) => (
-              <div key={incident.fingerprint} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-2">
+              <div key={incident.fingerprint} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-slate-900">{incident.code}</div>
-                  <span className={severityBadgeClass(incident.severity)}>{incident.severity}</span>
+                  <span className={`admin-badge ${
+                    String(incident.severity).toUpperCase() === "CRITICAL" ? "admin-badge-critical" :
+                    String(incident.severity).toUpperCase() === "WARNING" ? "admin-badge-warning" : "admin-badge-info"
+                  }`}>
+                    {SEVERITY_LABELS[String(incident.severity).toUpperCase()] ?? incident.severity}
+                  </span>
                 </div>
-                <div className="mt-2 text-xs text-slate-700 bg-white p-2 border border-slate-100 rounded-md">{incident.message}</div>
-                <div className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
-                  último evento: {formatTimestamp(incident.lastSeenAt)}
-                </div>
+                <div className="mt-2 text-xs text-slate-600">{incident.message}</div>
+                <div className="mt-2 text-xs text-slate-400">Último evento: {formatTimestamp(incident.lastSeenAt)}</div>
               </div>
             ))}
           </div>
-        ) : (
-          <div className="text-sm text-slate-500 text-center py-4 bg-slate-50 rounded-lg border border-slate-100">
+        )}
+
+        {activeIncidents.length === 0 && (
+          <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><polyline points="20 6 9 17 4 12" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             Sin incidentes activos
           </div>
         )}
       </section>
 
-      <section className="admin-card p-4 space-y-4">
-        <div className="admin-section-title m-0">Anchors y actas</div>
-        <div className="text-xs text-slate-600">
-          Anchors: {anchorsRes?.anchors.length ?? "N/D"} · Actas (referencias): {actsRes?.acts.length ?? "N/D"}
-        </div>
-        {latestAct ? (
-          <div className="text-xs text-slate-700 font-medium">
-            Última acta: {latestAct.actType} · {formatTimestamp(latestAct.blockTimestamp ?? latestAct.createdAt)}
+      {/* ── Published Acts ── */}
+      <section className="admin-card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Actas publicadas</h3>
+            <p className="text-xs text-slate-500 mt-1">{anchorsRes?.anchors?.length ?? 0} evidencias ancladas · {actsRes?.acts?.length ?? 0} actas registradas</p>
           </div>
-        ) : null}
-        
-        <div className="text-[11px] text-slate-500 font-mono break-all bg-slate-50 p-2 rounded-md border border-slate-100">
-          <div>{apiUrl}/v1/elections/{electionIdStr}/anchors</div>
-          <div>{apiUrl}/v1/elections/{electionIdStr}/acts</div>
+          {latestAct && (
+            <span className="text-xs text-slate-500">
+              Última: {ACTA_LABELS[latestAct.actType] ?? latestAct.actType} · {formatTimestamp(latestAct.blockTimestamp ?? latestAct.createdAt)}
+            </span>
+          )}
         </div>
-        
-        {(actsRes?.acts.length ?? 0) > 0 ? (
-          <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+
+        {(actsRes?.acts?.length ?? 0) > 0 ? (
+          <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
             {actsRes?.acts.slice(0, 10).map((a: any) => (
-              <div key={a.actId} className="rounded-lg border border-slate-200 p-3 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-900">{a.actType}</div>
-                  <span className={verificationBadgeClass(a.verificationStatus)}>
-                    {a.verificationStatus ?? "SIN_VERIFICAR"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-slate-600">
-                  <div><span className="font-medium">actId:</span> <span className="font-mono">{a.actId}</span></div>
-                  <div><span className="font-medium">createdAt:</span> {formatTimestamp(a.createdAt)}</div>
-                  <div className="hash-display" title={a.anchorTxHash}>
-                    <span className="font-medium">anchorTx:</span> {shortHash(a.anchorTxHash)}
+              <div key={a.actId} className="rounded-xl border border-slate-200 p-4 hover:bg-slate-50 transition-colors">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-slate-900">
+                    {ACTA_LABELS[a.actType] ?? a.actType}
                   </div>
-                  {a.contentHash ? (
-                    <div className="hash-display" title={a.contentHash}>
-                      <span className="font-medium">content:</span> {shortHash(a.contentHash)}
-                    </div>
-                  ) : <div></div>}
+                  {verificationBadge(a.verificationStatus)}
                 </div>
-                <div className="mt-3 pt-2 border-t border-slate-100 text-xs">
+                <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-slate-600">
+                  <div><span className="font-semibold">Identificador:</span> <span className="font-mono">{shortHash(a.actId)}</span></div>
+                  <div><span className="font-semibold">Fecha:</span> {formatTimestamp(a.createdAt)}</div>
+                  <div><span className="font-semibold">Transacción:</span> <span className="font-mono">{shortHash(a.anchorTxHash)}</span></div>
+                  {a.contentHash && <div><span className="font-semibold">Contenido:</span> <span className="font-mono">{shortHash(a.contentHash)}</span></div>}
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-100">
                   <a
-                    className="text-indigo-600 hover:text-indigo-800 hover:underline font-medium flex items-center gap-1"
+                    className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline font-medium flex items-center gap-1"
                     href={`${apiUrl}/v1/elections/${encodeURIComponent(electionIdStr)}/acts/${encodeURIComponent(a.actId)}/content`}
-                    target="_blank"
-                    rel="noreferrer"
+                    target="_blank" rel="noreferrer"
                   >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                    Descargar contenido firmado
+                    Descargar acta firmada ↗
                   </a>
                 </div>
               </div>
             ))}
           </div>
-        ) : null}
+        ) : (
+          <div className="text-sm text-slate-500 text-center py-8 bg-slate-50 rounded-xl border border-slate-100">
+            No se han publicado actas aún
+          </div>
+        )}
       </section>
-      
-      <section className="admin-card p-4 space-y-4">
-        <div className="admin-section-title m-0">Registrar incidente operativo (bitácora)</div>
-        <form action={registerOperationalIncidentAction} className="space-y-3">
+
+      {/* ── Register Incident ── */}
+      <section className="admin-card p-5 space-y-5">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">Registrar incidente</h3>
+          <p className="text-xs text-slate-500 mt-1">Documenta eventos operativos relevantes en la bitácora administrativa.</p>
+        </div>
+        <form action={registerOperationalIncidentAction} className="space-y-4">
           <input type="hidden" name="electionId" value={electionIdStr} />
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-700" htmlFor="severity">
-                Severidad
-              </label>
-              <select
-                id="severity"
-                name="severity"
-                className="admin-input"
-              >
-                <option value="INFO">INFO</option>
-                <option value="WARNING">WARNING</option>
-                <option value="CRITICAL">CRITICAL</option>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700" htmlFor="severity">Nivel de severidad</label>
+              <select id="severity" name="severity" className="admin-input">
+                <option value="INFO">📋 Información</option>
+                <option value="WARNING">⚠️ Advertencia</option>
+                <option value="CRITICAL">🚨 Crítico</option>
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-700" htmlFor="code">
-                Código
-              </label>
-              <input
-                id="code"
-                name="code"
-                className="admin-input"
-                placeholder="ej: OPERATOR_NOTE"
-                required
-              />
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700" htmlFor="code">Tipo de incidente</label>
+              <select id="code" name="code" className="admin-input" required>
+                <option value="">Selecciona un tipo...</option>
+                {INCIDENT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
             </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700" htmlFor="message">
-              Mensaje
-            </label>
-            <input
-              id="message"
-              name="message"
-              className="admin-input"
-              placeholder="Descripción del incidente operativo"
-              required
-            />
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700" htmlFor="message">Descripción del incidente</label>
+            <textarea id="message" name="message" className="admin-input" rows={2} placeholder="Describe lo ocurrido con detalle suficiente para la auditoría..." required />
           </div>
           <PendingSubmitButton
-            idleLabel="Registrar en bitácora"
-            pendingLabel="Registrando incidente..."
+            idleLabel="Registrar incidente"
+            pendingLabel="Registrando..."
             className="admin-btn-primary"
           />
         </form>
-        <div className="text-[11px] text-slate-500 uppercase tracking-wide">
-          Registro off-chain en Postgres. No se interpreta como evidencia on-chain.
-        </div>
       </section>
 
-      <section className="admin-card p-4 space-y-4">
-        <div className="admin-section-title m-0">Timeline de transiciones</div>
-        {latestTransition ? (
-          <div className="text-xs font-medium text-slate-700 bg-slate-50 p-2 rounded-md border border-slate-100">
-            Última transición: <span className="text-indigo-600">{latestTransition.previousPhaseLabel} → {latestTransition.newPhaseLabel}</span> · {formatTimestamp(latestTransition.blockTimestamp)}
-          </div>
-        ) : null}
-        
-        {(phaseChangesRes?.phaseChanges.length ?? 0) === 0 ? (
-          <div className="text-sm text-slate-500 text-center py-4 bg-slate-50 rounded-lg border border-slate-100">
-            Sin phase-changes indexados
+      {/* ── Phase Transitions Timeline ── */}
+      <section className="admin-card p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">Historial de cambios de fase</h3>
+          {latestTransition && (
+            <p className="text-xs text-slate-500 mt-1">
+              Última transición: <span className="font-semibold text-indigo-600">{latestTransition.previousPhaseLabel} → {latestTransition.newPhaseLabel}</span> · {formatTimestamp(latestTransition.blockTimestamp)}
+            </p>
+          )}
+        </div>
+
+        {(phaseChangesRes?.phaseChanges?.length ?? 0) === 0 ? (
+          <div className="text-sm text-slate-500 text-center py-8 bg-slate-50 rounded-xl border border-slate-100">
+            No se han registrado cambios de fase
           </div>
         ) : (
           <div className="space-y-2">
             {phaseChangesRes?.phaseChanges.map((p: any) => (
-              <div key={`${p.txHash}:${p.logIndex}`} className="rounded-lg border border-slate-200 p-3 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold text-slate-900">
+              <div key={`${p.txHash}:${p.logIndex}`} className="rounded-xl border border-slate-200 p-4 hover:bg-slate-50 transition-colors">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-slate-900">
                     {p.previousPhaseLabel} <span className="text-slate-400">→</span> {p.newPhaseLabel}
                   </div>
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500">{formatTimestamp(p.blockTimestamp)}</div>
+                  <div className="text-xs text-slate-500">{formatTimestamp(p.blockTimestamp)}</div>
                 </div>
-                <div className="hash-display mt-2 pt-2 border-t border-slate-100 text-[11px]" title={p.txHash}>
-                  <span className="font-medium">txHash:</span> {shortHash(p.txHash)}
-                </div>
+                <div className="mt-2 text-xs text-slate-400 font-mono">Tx: {shortHash(p.txHash)}</div>
               </div>
             ))}
           </div>

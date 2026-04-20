@@ -11,8 +11,8 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "BlockUrna · Portal de Votación",
-  description: "Portal de votación asistida BU-PVP-1 para entorno local reproducible",
+  title: "BlockUrna · Portal Ciudadano",
+  description: "Portal de votación asistida BU-PVP-1 — inscripción, verificación y emisión de boleta cifrada",
 };
 
 export default function RootLayout({
@@ -38,18 +38,9 @@ export default function RootLayout({
               </nav>
             </div>
           </header>
-          <div className="app-frame mx-auto max-w-5xl p-6 sm:p-10 space-y-8">
-          <header className="card p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900">BlockUrna · Portal de Votación</h1>
-              <span className="badge badge-info">Sistema BU-PVP-1</span>
-            </div>
-            <p className="text-sm text-slate-500 mt-2">
-              Flujo de inscripción y emisión de boleta cifrada para entorno local reproducible.
-            </p>
-          </header>
-          {children}
-        </div>
+          <div className="app-content app-frame">
+            {children}
+          </div>
         </div>
       </body>
     </html>

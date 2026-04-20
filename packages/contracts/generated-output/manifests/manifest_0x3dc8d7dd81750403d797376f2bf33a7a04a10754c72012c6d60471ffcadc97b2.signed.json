@@ -1,0 +1,49 @@
+{
+  "manifest": {
+    "manifestVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "generatedAt": "2026-04-20T02:33:46.126Z",
+    "chainId": "31337",
+    "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "title": "Elección Local Reproducible 2026",
+    "authority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "registryAuthority": {
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "coordinatorPubKey": "0xd1bf72b633b977b38647bf80dccaaf533ddd5a0a154ed51652fe77261a4c979a",
+    "notes": "Configuración local reproducible para pruebas de inscripción, votación y auditoría.",
+    "catalogSource": "DB_PROJECTED",
+    "candidates": [
+      {
+        "id": "cand-1",
+        "candidateCode": "CAND_1",
+        "displayName": "Mariano",
+        "shortName": "M.",
+        "partyName": "Alianza buena",
+        "ballotOrder": 1,
+        "status": "ACTIVE",
+        "colorHex": "#1D4ED8",
+        "metadata": {}
+      },
+      {
+        "id": "cand-2",
+        "candidateCode": "CAND_2",
+        "displayName": "Joseespinoza",
+        "shortName": "J.",
+        "partyName": "aliena",
+        "ballotOrder": 2,
+        "status": "ACTIVE",
+        "colorHex": "#0F766E",
+        "metadata": {}
+      }
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0xa0f6027462a273e9c696316870074c3fe547c57b1749f7ebf733cfb8e43591ea333a769ace34c69e34b2cc3f208500474624d551d35d478681193bf6c0debd09",
+    "manifestHashHex": "0x3dc8d7dd81750403d797376f2bf33a7a04a10754c72012c6d60471ffcadc97b2"
+  }
+}

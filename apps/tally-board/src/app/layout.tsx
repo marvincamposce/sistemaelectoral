@@ -38,7 +38,7 @@ export default function RootLayout({
               </nav>
             </div>
           </header>
-          <div className="app-frame mx-auto max-w-6xl p-6 sm:p-10 space-y-8">
+          <div className="app-content app-frame space-y-8">
           <header className="card p-5">
             <div className="flex items-center justify-between gap-3">
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">Panel de Escrutinio (JED)</h1>

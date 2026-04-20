@@ -1,0 +1,28 @@
+{
+  "snapshot": {
+    "snapshotVersion": "1",
+    "protocolVersion": "BU-PVP-1",
+    "electionId": "1",
+    "kind": "ACTA_APERTURA",
+    "generatedAt": "2026-04-20T02:34:25.530Z",
+    "chainId": "31337",
+    "blockRange": {
+      "fromBlock": 15,
+      "toBlock": 16
+    },
+    "commitments": {
+      "manifestHash": "0x3dc8d7dd81750403d797376f2bf33a7a04a10754c72012c6d60471ffcadc97b2"
+    },
+    "counts": {
+      "signups": 0,
+      "ballots": 0
+    },
+    "notes": "Esta es una importante desicion"
+  },
+  "signature": {
+    "algorithm": "ed25519-sha256-jcs",
+    "publicKeyHex": "0x03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "signatureHex": "0x7d0b7929a75f623ee80e6774e141ccc92bd278fb88fa973529c701598aab2a27c42cd8db8fdb9239a5cbc8fd650f84d13c9296c84b59e599601cfc23100e9d04",
+    "snapshotHashHex": "0xd08de956de85d63f9d4705bb0673249d249938c09a9eadfbc73044cb6e52b7b9"
+  }
+}
