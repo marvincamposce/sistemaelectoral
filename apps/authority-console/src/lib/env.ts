@@ -116,14 +116,14 @@ function formatEnvErrorMessage(params: {
 
 export function getEnvResult(): AuthorityEnvResult {
   const parsed = EnvSchema.safeParse({
-    EVIDENCE_API_URL: process.env.EVIDENCE_API_URL,
+    EVIDENCE_API_URL: process.env.EVIDENCE_API_URL || "http://20.106.239.100:3020",
     DATABASE_URL: process.env.DATABASE_URL,
-    RPC_URL: process.env.RPC_URL,
-    CHAIN_ID: process.env.CHAIN_ID,
-    ELECTION_REGISTRY_ADDRESS: process.env.ELECTION_REGISTRY_ADDRESS,
+    RPC_URL: process.env.RPC_URL || "https://rpc.ankr.com/eth_sepolia/b8ec123d573ff7290be5cc863464f8cec25cb3c06e5b4eded7b84db75b67d60f",
+    CHAIN_ID: process.env.CHAIN_ID || "11155111",
+    ELECTION_REGISTRY_ADDRESS: process.env.ELECTION_REGISTRY_ADDRESS || "0x173402879dAbeff1B9970be891bD7CA5E2338641",
     AEA_PRIVATE_KEY: process.env.AEA_PRIVATE_KEY,
     AEA_ED25519_PRIVATE_KEY_HEX: process.env.AEA_ED25519_PRIVATE_KEY_HEX,
-    ACTA_OUTPUT_DIR: process.env.ACTA_OUTPUT_DIR,
+    ACTA_OUTPUT_DIR: process.env.ACTA_OUTPUT_DIR || "/tmp",
   });
 
   if (!parsed.success) {
