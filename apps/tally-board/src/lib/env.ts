@@ -28,7 +28,7 @@ export function getEnv() {
     ENFORCE_REMOTE_TRUSTEE_API_KEY:
       String(process.env.ENFORCE_REMOTE_TRUSTEE_API_KEY || "false").toLowerCase() === "true",
     REMOTE_TRUSTEE_ALLOWLIST: trusteeAllowlist,
-    NEXT_PUBLIC_EVIDENCE_API_URL: process.env.NEXT_PUBLIC_EVIDENCE_API_URL || "http://localhost:8000",
+    NEXT_PUBLIC_EVIDENCE_API_URL: process.env.NODE_ENV === "production" ? "" : (process.env.NEXT_PUBLIC_EVIDENCE_API_URL || "http://localhost:8000"),
     DATABASE_URL: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/blockurna"
   };
 }

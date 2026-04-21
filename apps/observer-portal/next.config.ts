@@ -6,6 +6,15 @@ const nextConfig: NextConfig = {
   // Avoid dev-only cross-origin blocks for Next.js resources when alternating
   // between localhost and 127.0.0.1.
   allowedDevOrigins: ["localhost", "127.0.0.1"],
+
+  async rewrites() {
+    return [
+      {
+        source: '/v1/:path*',
+        destination: `${process.env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/:path*`,
+      },
+    ]
+  },
 };
 
 export default nextConfig;
