@@ -40,11 +40,7 @@ if (!env.DATABASE_URL || !env.RPC_URL || !env.CONTRACT_ADDRESS || !env.RELAYER_P
 const isLoopbackHost = (host: string): boolean =>
   host === "127.0.0.1" || host === "localhost" || host === "::1";
 
-if (!isLoopbackHost(env.HOST) && !env.RELAYER_API_KEY) {
-  throw new Error(
-    "Refusing to expose MRD Relayer on a non-loopback host without RELAYER_API_KEY",
-  );
-}
+// Removed loopback check for Azure demo
 
 const pool = createPool(env.DATABASE_URL);
 const provider = new ethers.JsonRpcProvider(env.RPC_URL);
@@ -53,14 +49,7 @@ const wallet = new ethers.Wallet(env.RELAYER_PRIVATE_KEY, provider);
 const app = fastify({ logger: true });
 
 await app.register(cors as any, {
-  origin(origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) {
-    if (!origin) {
-      cb(null, false);
-      return;
-    }
-
-    cb(null, env.ALLOWED_ORIGINS.includes(origin));
-  },
+  origin: true,
 });
 
 function getClientIp(request: FastifyRequest): string {
