@@ -30,6 +30,7 @@ for file in "${FILES[@]}"; do
     sed -i "s|AEA_PRIVATE_KEY=.*|AEA_PRIVATE_KEY=$PRIVATE_KEY|g" "$file"
     sed -i "s|RELAYER_PRIVATE_KEY=.*|RELAYER_PRIVATE_KEY=$PRIVATE_KEY|g" "$file"
     sed -i "s|COORDINATOR_PRIVATE_KEY=.*|COORDINATOR_PRIVATE_KEY=$PRIVATE_KEY|g" "$file"
+    sed -i "s|INDEXER_START_BLOCK=.*|INDEXER_START_BLOCK=10700000|g" "$file"
   else
     echo "Skipping $file (not found)"
   fi
