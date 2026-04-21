@@ -881,13 +881,17 @@ export async function loadElectionData(electionIdStr: string) {
   let currentPhaseLabel = phasesRes?.ok ? phasesRes.election.phaseLabel : "UNKNOWN";
   
   if (currentPhaseLabel === "UNKNOWN") {
+    console.log(`[DEBUG] Evidence API returned UNKNOWN for election ${electionId}. Trying direct blockchain fallback...`);
+    console.log(`[DEBUG] RPC_URL: ${env.RPC_URL}`);
+    console.log(`[DEBUG] CONTRACT: ${env.CONTRACT_ADDRESS}`);
     try {
       const provider = new ethers.JsonRpcProvider(env.RPC_URL);
       const contract = getRegistry(env.CONTRACT_ADDRESS, provider);
       const election = await (contract as any).getElection(electionId);
       currentPhaseLabel = phaseLabelFromNumber(Number(election.phase));
-    } catch (e) {
-      console.error("Direct blockchain fallback failed:", e);
+      console.log(`[DEBUG] Fallback success! Phase: ${currentPhaseLabel}`);
+    } catch (e: any) {
+      console.error("[DEBUG] Direct blockchain fallback failed:", e.message || e);
     }
   }
 
