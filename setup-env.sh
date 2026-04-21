@@ -12,7 +12,7 @@ COORDINATOR_PK="0x0312ff2054471efe7bc08b7a7abcaaf141cb4a64d41a5e46586450ad24b366
 # Dirección esperada para el primer contrato desplegado en un nodo hardhat limpio.
 CONTRACT_ADDR="0x5FbDB2315678afecb367f032d93F642f64180aa3"
 TALLY_VERIFIER_ADDR="0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-DB_URL="postgresql://blockurna:blockurna@127.0.0.1:5432/blockurna"
+DB_URL="postgresql://postgres.ikdfifwcgzfrwpmtxhje:THd6on9%3Fsd37D%40nt@aws-1-us-east-2.pooler.supabase.com:6543/postgres"
 
 echo "1. Configurando variables compartidas..."
 

@@ -339,6 +339,9 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         sessionStorage.setItem(CITIZEN_SESSION_STORAGE_KEY, JSON.stringify(activeSession));
       }
 
+      const wallet = ethers.Wallet.createRandom();
+      const votingPubKey = ethers.SigningKey.computePublicKey(wallet.privateKey, false);
+
       const bootstrapRes = await fetch(
         `${env.NEXT_PUBLIC_EVIDENCE_API_URL}/v1/hn/elections/${electionId}/prepare-signup`,
         {
@@ -349,6 +352,7 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
           },
           body: JSON.stringify({
             dni: normalizedDni,
+            votingPubKey,
           }),
         },
       );
@@ -368,8 +372,6 @@ export default function VotePage({ params }: { params: Promise<{ electionId: str
         throw new Error("La API de evidencias no devolvió un permiso válido para el signup.");
       }
 
-      const wallet = ethers.Wallet.createRandom();
-      const votingPubKey = ethers.SigningKey.computePublicKey(wallet.privateKey, false);
       setVotingKeys({ pub: votingPubKey, priv: wallet.privateKey });
       setVoterIdentity({
         dni: normalizedDni,

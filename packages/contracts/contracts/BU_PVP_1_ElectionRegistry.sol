@@ -309,13 +309,14 @@ contract BU_PVP_1_ElectionRegistry is Ownable {
             revert RegistryNullifierAlreadyUsed(electionId, registryNullifier);
         }
 
-        bytes32 digest = keccak256(abi.encodePacked("BU-PVP-1:signup", electionId, registryNullifier));
+        address votingAddress = _deriveVotingAddress(votingPubKey);
+
+        bytes32 digest = keccak256(abi.encodePacked("BU-PVP-1:signup", electionId, registryNullifier, votingAddress));
         address signer = digest.toEthSignedMessageHash().recover(permitSig);
         if (signer != _elections[electionId].registryAuthority) {
             revert InvalidRegistryPermit(electionId, registryNullifier);
         }
 
-        address votingAddress = _deriveVotingAddress(votingPubKey);
         if (votingAddressRegistered[electionId][votingAddress]) {
             revert VotingAddressAlreadyRegistered(electionId, votingAddress);
         }

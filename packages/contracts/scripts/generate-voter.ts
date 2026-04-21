@@ -26,10 +26,11 @@ async function main() {
   ).toLowerCase();
 
   // 3. Compute Digest
+  const dummyVotingAddress = ethers.Wallet.createRandom().address;
   const digest = ethers.keccak256(
     ethers.solidityPacked(
-      ["string", "uint256", "bytes32"],
-      ["BU-PVP-1:signup", electionIdBig, registryNullifier],
+      ["string", "uint256", "bytes32", "address"],
+      ["BU-PVP-1:signup", electionIdBig, registryNullifier, dummyVotingAddress],
     ),
   ).toLowerCase();
 

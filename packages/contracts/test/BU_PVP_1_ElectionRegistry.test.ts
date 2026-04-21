@@ -118,7 +118,7 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     const votingPubKey = uncompressedPublicKey(signupWallet.privateKey);
 
     const digest = ethers.keccak256(
-      ethers.solidityPacked(["string", "uint256", "bytes32"], ["BU-PVP-1:signup", 0, nullifier]),
+      ethers.solidityPacked(["string", "uint256", "bytes32", "address"], ["BU-PVP-1:signup", 0, nullifier, signupWallet.address]),
     );
     const sig = await rea.signMessage(ethers.getBytes(digest));
 
@@ -150,7 +150,7 @@ describe("BU_PVP_1_ElectionRegistry", function () {
     const votingPubKey = uncompressedPublicKey(votingWallet.privateKey);
     const nullifier = "0x" + "33".repeat(32);
     const digest = ethers.keccak256(
-      ethers.solidityPacked(["string", "uint256", "bytes32"], ["BU-PVP-1:signup", 0, nullifier]),
+      ethers.solidityPacked(["string", "uint256", "bytes32", "address"], ["BU-PVP-1:signup", 0, nullifier, votingWallet.address]),
     );
     const permitSig = await rea.signMessage(ethers.getBytes(digest));
 
