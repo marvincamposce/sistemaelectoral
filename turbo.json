@@ -8,6 +8,18 @@
     },
     "build": {
       "dependsOn": ["^build"],
+      "env": [
+        "NODE_ENV",
+        "DATABASE_URL",
+        "NEXT_PUBLIC_EVIDENCE_API_URL",
+        "NEXT_PUBLIC_MRD_API_URL",
+        "NEXT_PUBLIC_OBSERVER_PORTAL_URL",
+        "RPC_URL",
+        "CHAIN_ID",
+        "ELECTION_REGISTRY_ADDRESS",
+        "TALLY_VERIFIER_ADDRESS",
+        "DECRYPTION_VERIFIER_ADDRESS"
+      ],
       "outputs": [
         "dist/**",
         ".next/**",
