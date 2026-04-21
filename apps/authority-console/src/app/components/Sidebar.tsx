@@ -14,10 +14,11 @@ const NAV_SECTIONS = [
   },
   {
     label: "Ecosistema",
+
     items: [
-      { href: "http://localhost:3004/", icon: Vote, label: "Portal de votante", external: true },
-      { href: "http://localhost:3005/", icon: BarChart3, label: "Escrutinio público", external: true },
-      { href: "http://localhost:3011/", icon: Eye, label: "Observatorio", external: true },
+      { href: "https://sistemaelectoral-voter-portal.vercel.app/", icon: Vote, label: "Portal de votante", external: true },
+      { href: "https://sistemaelectoral-tally-board.vercel.app/", icon: BarChart3, label: "Escrutinio público", external: true },
+      { href: "https://sistemaelectoral-observer-portal.vercel.app/", icon: Eye, label: "Observatorio", external: true },
     ],
   },
 ];
@@ -65,7 +66,7 @@ export function Sidebar() {
                     <span className="flex-1 text-[13px]">{item.label}</span>
                     {item.external && (
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-40">
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                       </svg>
                     )}
                   </Link>

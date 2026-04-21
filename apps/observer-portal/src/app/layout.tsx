@@ -29,10 +29,10 @@ export default function RootLayout({
                 <div className="app-title">Observatorio electoral</div>
               </div>
               <nav className="app-nav" aria-label="Aplicaciones">
-                <Link href="http://localhost:3012/" className="app-navlink">Autoridad</Link>
-                <Link href="http://localhost:3004/" className="app-navlink">Ciudadanía</Link>
-                <Link href="http://localhost:3005/" className="app-navlink">Escrutinio</Link>
-                <Link href="http://localhost:3011/" className="app-navlink app-navlink-active">Observer</Link>
+                <Link href="https://sistemaelectoral-authority-console.vercel.app/" className="app-navlink">Autoridad</Link>
+                <Link href="https://sistemaelectoral-voter-portal.vercel.app/" className="app-navlink">Ciudadanía</Link>
+                <Link href="https://sistemaelectoral-tally-board.vercel.app/" className="app-navlink">Escrutinio</Link>
+                <Link href="https://sistemaelectoral-observer-portal.vercel.app/" className="app-navlink app-navlink-active">Observer</Link>
               </nav>
             </div>
           </header>
