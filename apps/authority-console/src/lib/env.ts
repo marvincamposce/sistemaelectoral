@@ -115,15 +115,24 @@ function formatEnvErrorMessage(params: {
 }
 
 export function getEnvResult(): AuthorityEnvResult {
+  const rawEvidenceUrl = (process.env.EVIDENCE_API_URL || "").trim();
+  const rawDbUrl = (process.env.DATABASE_URL || "").trim();
+  const rawRpcUrl = (process.env.RPC_URL || "").trim();
+  const rawChainId = (process.env.CHAIN_ID || "").trim();
+  const rawRegistry = (process.env.ELECTION_REGISTRY_ADDRESS || "").trim();
+  const rawAeaKey = (process.env.AEA_PRIVATE_KEY || "").trim();
+  const rawEdKey = (process.env.AEA_ED25519_PRIVATE_KEY_HEX || "").trim();
+  const rawActaDir = (process.env.ACTA_OUTPUT_DIR || "").trim();
+
   const parsed = EnvSchema.safeParse({
-    EVIDENCE_API_URL: process.env.EVIDENCE_API_URL || "http://20.106.239.100:3020",
-    DATABASE_URL: process.env.DATABASE_URL,
-    RPC_URL: process.env.RPC_URL || "https://rpc.ankr.com/eth_sepolia/b8ec123d573ff7290be5cc863464f8cec25cb3c06e5b4eded7b84db75b67d60f",
-    CHAIN_ID: process.env.CHAIN_ID || "11155111",
-    ELECTION_REGISTRY_ADDRESS: process.env.ELECTION_REGISTRY_ADDRESS || "0x173402879dAbeff1B9970be891bD7CA5E2338641",
-    AEA_PRIVATE_KEY: process.env.AEA_PRIVATE_KEY,
-    AEA_ED25519_PRIVATE_KEY_HEX: process.env.AEA_ED25519_PRIVATE_KEY_HEX,
-    ACTA_OUTPUT_DIR: process.env.ACTA_OUTPUT_DIR || "/tmp",
+    EVIDENCE_API_URL: rawEvidenceUrl || "http://20.106.239.100:3020",
+    DATABASE_URL: rawDbUrl,
+    RPC_URL: rawRpcUrl || "https://rpc.ankr.com/eth_sepolia/b8ec123d573ff7290be5cc863464f8cec25cb3c06e5b4eded7b84db75b67d60f",
+    CHAIN_ID: rawChainId || "11155111",
+    ELECTION_REGISTRY_ADDRESS: rawRegistry || "0x173402879dAbeff1B9970be891bD7CA5E2338641",
+    AEA_PRIVATE_KEY: rawAeaKey,
+    AEA_ED25519_PRIVATE_KEY_HEX: rawEdKey || "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    ACTA_OUTPUT_DIR: rawActaDir || "/tmp",
   });
 
   if (!parsed.success) {
@@ -145,15 +154,11 @@ export function getEnvResult(): AuthorityEnvResult {
   try {
     contractAddress = ethers.getAddress(parsed.data.ELECTION_REGISTRY_ADDRESS).toLowerCase();
   } catch {
-    const missingKeys = getMissingKeysFromProcessEnv();
-    const problems: AuthorityEnvProblem[] = [
-      { key: "ELECTION_REGISTRY_ADDRESS", message: "Invalid address" },
-    ];
     return {
       ok: false,
-      missingKeys,
-      problems,
-      message: formatEnvErrorMessage({ missingKeys, problems }),
+      missingKeys: [],
+      problems: [{ key: "ELECTION_REGISTRY_ADDRESS", message: "Invalid address" }],
+      message: "ELECTION_REGISTRY_ADDRESS is not a valid Ethereum address.",
     };
   }
 
