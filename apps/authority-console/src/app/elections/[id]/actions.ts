@@ -877,7 +877,20 @@ export async function loadElectionData(electionIdStr: string) {
   const candidates = await listCandidates({ pool, chainId: env.CHAIN_ID, contractAddress: env.CONTRACT_ADDRESS, electionId });
   const currentManifest = await getCurrentElectionManifest({ pool, chainId: env.CHAIN_ID, contractAddress: env.CONTRACT_ADDRESS, electionId });
 
-  const currentPhaseLabel = phasesRes?.ok ? phasesRes.election.phaseLabel : "UNKNOWN";
+  // FALLBACK: If Evidence API is slow/unavailable, fetch phase directly from blockchain
+  let currentPhaseLabel = phasesRes?.ok ? phasesRes.election.phaseLabel : "UNKNOWN";
+  
+  if (currentPhaseLabel === "UNKNOWN") {
+    try {
+      const provider = new ethers.JsonRpcProvider(env.RPC_URL);
+      const contract = getRegistry(env.CONTRACT_ADDRESS, provider);
+      const election = await (contract as any).getElection(electionId);
+      currentPhaseLabel = phaseLabelFromNumber(Number(election.phase));
+    } catch (e) {
+      console.error("Direct blockchain fallback failed:", e);
+    }
+  }
+
   const catalogMutable = isCatalogMutablePhase(currentPhaseLabel);
 
   const ballotOrderCollisionMap = candidates.reduce<Record<number, number>>((acc, c) => {
