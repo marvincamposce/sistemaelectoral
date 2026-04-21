@@ -20,7 +20,8 @@ export default defineConfig({
   },
   networks: {
     sepolia: {
-      url: process.env.SEPOLIA_RPC_URL || "",
+      type: "http",
+      url: process.env.SEPOLIA_RPC_URL || "https://rpc.ankr.com/eth_sepolia/b8ec123d573ff7290be5cc863464f8cec25cb3c06e5b4eded7b84db75b67d60f",
       accounts: process.env.SEPOLIA_PRIVATE_KEY ? [process.env.SEPOLIA_PRIVATE_KEY] : [],
     },
   },
