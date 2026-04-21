@@ -13,11 +13,15 @@ export function getPublicEnv(): PublicEnv {
     NEXT_PUBLIC_EVIDENCE_API_URL: process.env.NEXT_PUBLIC_EVIDENCE_API_URL,
   });
 
+  const isBrowser = typeof window !== "undefined";
+
   if (!parsed.success && process.env.NODE_ENV !== "production") {
     throw new Error(parsed.error.message);
   }
 
+  // Use absolute URL on server (to bypass proxy issues) and relative URL on client (to avoid Mixed Content)
+  const rawUrl = parsed.data?.NEXT_PUBLIC_EVIDENCE_API_URL || "";
   return { 
-    NEXT_PUBLIC_EVIDENCE_API_URL: process.env.NODE_ENV === "production" ? "" : (parsed.data?.NEXT_PUBLIC_EVIDENCE_API_URL || "") 
+    NEXT_PUBLIC_EVIDENCE_API_URL: (isBrowser && process.env.NODE_ENV === "production") ? "" : rawUrl 
   };
 }
