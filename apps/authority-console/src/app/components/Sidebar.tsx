@@ -8,8 +8,8 @@ const NAV_SECTIONS = [
   {
     label: "Administración",
     items: [
-      { href: "/", icon: LayoutDashboard, label: "Panel principal" },
-      { href: "/honduras", icon: Shield, label: "Expedientes" },
+      { href: "/", icon: LayoutDashboard, label: "Panel principal", external: false },
+      { href: "/honduras", icon: Shield, label: "Expedientes", external: false },
     ],
   },
   {
