@@ -258,7 +258,6 @@ type EnrollmentRequestBody = {
   electionId?: string;
   requestedWalletAddress?: string;
   requestNotes?: string;
-  votingPubKey?: string;
 };
 
 type PublicEnrollmentRequestBody = {
@@ -556,13 +555,12 @@ function deriveRegistryNullifier(params: {
 function computeSignupDigestForPermit(params: {
   electionId: string | number | bigint;
   registryNullifier: string;
-  votingAddress: string;
 }): string {
   return ethers
     .keccak256(
       ethers.solidityPacked(
-        ["string", "uint256", "bytes32", "address"],
-        ["BU-PVP-1:signup", BigInt(String(params.electionId)), params.registryNullifier, params.votingAddress],
+        ["string", "uint256", "bytes32"],
+        ["BU-PVP-1:signup", BigInt(String(params.electionId)), params.registryNullifier],
       ),
     )
     .toLowerCase();
@@ -574,7 +572,6 @@ async function issueSignupPermitLocally(params: {
   electionId: string;
   credential: EnrollmentRegistryCredential;
   reaPrivateKey: string;
-  votingAddress: string;
 }) {
   const registryNullifier = deriveRegistryNullifier({
     credentialSecretHex: params.credential.secretHex,
@@ -583,7 +580,6 @@ async function issueSignupPermitLocally(params: {
   const digest = computeSignupDigestForPermit({
     electionId: params.electionId,
     registryNullifier,
-    votingAddress: params.votingAddress,
   });
   const wallet = new ethers.Wallet(params.reaPrivateKey);
   const permitSig = await wallet.signMessage(ethers.getBytes(digest));
@@ -1197,7 +1193,6 @@ async function main() {
     election: ElectionMetaRow;
     record: HondurasCensusRow;
     walletLink: HondurasWalletLinkRow;
-    votingAddress: string;
   }) {
     if (!env.REA_PRIVATE_KEY) {
       throw new Error("rea_private_key_not_configured");
@@ -1230,7 +1225,6 @@ async function main() {
       contractAddress,
       credential,
       reaPrivateKey: env.REA_PRIVATE_KEY,
-      votingAddress: params.votingAddress,
     });
 
     await pool.query(
@@ -1593,23 +1587,6 @@ async function main() {
       try {
         const electionId = requireElectionId(req.params.id);
         const dni = requireHondurasDni(String(req.body?.dni ?? ""));
-        const votingPubKey = req.body?.votingPubKey;
-        if (!votingPubKey || typeof votingPubKey !== "string" || !/^0x[0-9a-fA-F]+$/.test(votingPubKey)) {
-          throw new Error("missing_or_invalid_voting_pub_key");
-        }
-        
-        let votingAddress: string;
-        try {
-            const rawKey = ethers.getBytes(votingPubKey);
-            if (rawKey.length !== 65 || rawKey[0] !== 0x04) {
-               throw new Error("Invalid uncompressed public key");
-            }
-            const keyWithoutPrefix = rawKey.slice(1);
-            votingAddress = ethers.getAddress(ethers.keccak256(keyWithoutPrefix).slice(26));
-        } catch (err) {
-            throw new Error("invalid_voting_pub_key_format");
-        }
-
         const session = await requireCitizenSession(req, dni);
         const election = await getElectionMeta(electionId);
         if (!election) {
@@ -1663,7 +1640,6 @@ async function main() {
           walletLink: hardenedWalletLink.walletAddress.toLowerCase() === walletLink.walletAddress.toLowerCase()
             ? hardenedWalletLink
             : walletLink,
-          votingAddress,
         });
 
         return {

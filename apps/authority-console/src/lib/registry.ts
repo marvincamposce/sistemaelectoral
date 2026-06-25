@@ -59,8 +59,8 @@ export function validateTransitionOrThrow(params: {
   assertValidTransition(params.currentPhase, params.event);
 }
 
-export function getRegistry(address: string, signer: ethers.Signer): ethers.Contract {
-  return new ethers.Contract(address, REGISTRY_ABI, signer);
+export function getRegistry(address: string, runner: ethers.ContractRunner): ethers.Contract {
+  return new ethers.Contract(address, REGISTRY_ABI, runner);
 }
 
 export function parseElectionCreatedFromReceipt(params: {

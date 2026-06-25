@@ -7,16 +7,16 @@ const nextConfig: NextConfig = {
     
     return [
       {
-        source: '/v1/elections:path*',
-        destination: `${evidenceApiUrl}/v1/elections:path*`,
+        source: '/v1/elections/:path*',
+        destination: `${evidenceApiUrl}/v1/elections/:path*`,
       },
       {
-        source: '/v1/hn:path*',
-        destination: `${evidenceApiUrl}/v1/hn:path*`,
+        source: '/v1/hn/:path*',
+        destination: `${evidenceApiUrl}/v1/hn/:path*`,
       },
       {
-        source: '/v1/mrd:path*',
-        destination: `${mrdApiUrl}/v1/mrd:path*`,
+        source: '/v1/mrd/:path*',
+        destination: `${mrdApiUrl}/v1/mrd/:path*`,
       },
     ]
   },
